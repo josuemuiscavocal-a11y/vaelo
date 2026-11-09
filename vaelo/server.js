@@ -98,12 +98,13 @@ function getAjustes() {
 // Un envío se puede mandar al piloto cuando el pago por transferencia ya se confirmó y, si es de un envío de empresa
 // a la sede, cuando los paquetes ya llegaron a la sede
 function listoParaPiloto(e) {
-  if (e.flete) return true;
+  if (e.flete && !e.flete_configurado_en) return false;
   if (e.metodo_pago === 'transferencia' && e.pago_estado !== 'verificado') return false;
   if (e.lote_sede_id && db.prepare('SELECT estado FROM lotes_sede WHERE id = ?').get(e.lote_sede_id)?.estado !== 'recibido') return false;
   return true;
 }
-const motivoNoListo = (e) => e.metodo_pago === 'transferencia' && e.pago_estado !== 'verificado'
+const motivoNoListo = (e) => e.flete && !e.flete_configurado_en ? 'El cliente todavía no completa los datos del flete con su enlace.'
+  : e.metodo_pago === 'transferencia' && e.pago_estado !== 'verificado'
   ? 'Falta confirmar la transferencia: el cliente manda el comprobante al WhatsApp de Vaelo y la oficina lo marca recibido.'
   : 'Los paquetes de este envío todavía no llegan a la sede de Vaelo.';
 const zonasFijas = () => db.prepare('SELECT id, nombre FROM zonas_fijas WHERE activa = 1 ORDER BY id').all();
@@ -756,6 +757,19 @@ function revisarPiloto(u) {
   return { faltan, vencidos, porVencer, avisos };
 }
 const enLineaReal = (u) => !!u.en_linea && !!u.ubic_fecha && Date.now() - fechaMs(u.ubic_fecha) < MIN_UBIC_VIVA * 60_000;
+// ---------- Renovaciones de licencia y antecedentes por revisar ----------
+const CAMPOS_RENOVACION = ['licencia_numero', 'licencia_tipo', 'licencia_vence', 'penales_fecha', 'policiacos_fecha'];
+function renovacionDe(u) {
+  try { const r = JSON.parse(u.renovacion_pendiente || 'null'); if (r) return { campos: r.campos || {}, docs: r.docs || [], desde: r.desde }; } catch { /* vacío */ }
+  return { campos: {}, docs: [] };
+}
+function guardarRenovacion(u, r) {
+  const hay = Object.keys(r.campos).length || r.docs.length;
+  const nuevo = hay ? JSON.stringify({ ...r, desde: r.desde || new Date().toISOString().slice(0, 19).replace('T', ' ') }) : null;
+  if (nuevo === (u.renovacion_pendiente || null)) return;
+  db.prepare('UPDATE usuarios SET renovacion_pendiente = ? WHERE id = ?').run(nuevo, u.id);
+  if (hay && !u.renovacion_pendiente) avisarStaff({ titulo: 'Renovación de documentos', cuerpo: `${u.nombre} renovó su licencia o antecedentes. Revisa que coincidan con la foto.`, url: RUTA_ADMIN, etiqueta: 'renov-' + u.id });
+}
 const politicaAlDia = (u) => (u.politica_piloto_version || 0) >= POLITICA_PILOTO_VERSION;
 // Efectivo que el piloto no ha entregado en la sede después del plazo (Tarifas y ajustes > días para liquidar)
 function deudaVencida(pilotoId) {
@@ -781,7 +795,7 @@ function pilotoSalida(u) {
   try { equipo = JSON.parse(u.equipo || '{}') || {}; } catch { /* vacío */ }
   const r = revisarPiloto(u);
   return { ...out, equipo, docs: docsDe(u), revision: r, puede_trabajar: puedeTrabajar(u, r), en_linea_real: enLineaReal(u),
-    politica_al_dia: politicaAlDia(u), deuda: deudaVencida(u.id) };
+    politica_al_dia: politicaAlDia(u), deuda: deudaVencida(u.id), renovacion: u.renovacion_pendiente ? renovacionDe(u) : null };
 }
 
 // Datos del piloto que ve el cliente (solo cuando ya aceptó su envío)
@@ -951,6 +965,16 @@ ruta('PUT', '/api/piloto/perfil', ({ req, body }) => {
   const p = requierePiloto(req);
   const libre = p.estado_piloto === 'en_revision';
   const datos = leerDatosPiloto(body, p.id, libre ? null : CAMPOS_PILOTO_APROBADO);
+  // Piloto ya aprobado que renueva licencia o antecedentes: las fechas nuevas quedan por revisar hasta que la oficina
+  // confirme que coinciden con la foto. Mientras tanto sigue valiendo lo anterior.
+  if (!libre) {
+    const pend = renovacionDe(p);
+    for (const k of CAMPOS_RENOVACION) if (datos[k] !== undefined) {
+      if (String(datos[k] ?? '') !== String(p[k] ?? '')) pend.campos[k] = datos[k]; else delete pend.campos[k];
+      delete datos[k];
+    }
+    guardarRenovacion(p, pend);
+  }
   if (body.acepto_reglas === true && !p.reglas_aceptadas) datos.reglas_aceptadas = new Date().toISOString().slice(0, 19).replace('T', ' ');
   if (body.acepto_politica === true) { datos.politica_piloto = new Date().toISOString().slice(0, 19).replace('T', ' '); datos.politica_piloto_version = POLITICA_PILOTO_VERSION; }
   guardarCampos(p.id, datos);
@@ -963,6 +987,7 @@ ruta('POST', '/api/piloto/documento', ({ req, body }) => {
   if (!d) falla(400, 'Tipo de documento no válido.');
   if (p.estado_piloto !== 'en_revision' && !d.renovable) falla(403, 'Este documento solo lo puede cambiar la administración de Vaelo.');
   guardarDocumento(p.id, body.tipo, body.archivo);
+  if (p.estado_piloto !== 'en_revision') { const pend = renovacionDe(p); if (!pend.docs.includes(body.tipo)) pend.docs.push(body.tipo); guardarRenovacion(p, pend); }
   return { ok: true };
 }, { limite: 1_000_000 });
 
@@ -1002,6 +1027,7 @@ ruta('GET', '/api/piloto/envios', ({ req }) => {
     if (e.estado === 'a_sede') { const sede = sedeUbicacion(); out.sede = { lat: sede?.lat ?? null, lng: sede?.lng ?? null, direccion: getAjustes().sede_direccion || '' }; }
     out.ya_califique_cliente = !!e.calif_cliente;
     out.tiene_foto_paquete = !!e.foto_paquete;
+    out.flete_pendiente = !!e.flete && !e.flete_configurado_en;
     for (const k of ['codigo_entrega', 'intentos_codigo', 'foto_entrega', 'firma_entrega', 'precio_base', 'descuento', 'promocion_id', 'liquidado_id', 'pago_piloto_id', 'excluidos', ...CAMPOS_INTERNOS]) delete out[k];
     out.ganancia_piloto = e.ganancia_piloto;
     out.grupo_total = e.grupo ? db.prepare('SELECT COUNT(*) AS n FROM envios WHERE grupo = ? AND mensajero_id = ?').get(e.grupo, p.id).n : 1;
@@ -1309,6 +1335,26 @@ ruta('POST', '/api/admin/mensajeros/:id/estado', ({ req, params, body }) => {
   return { ok: true };
 });
 
+ruta('POST', '/api/admin/mensajeros/:id/renovacion', ({ req, params, body }) => {
+  requiereRol(req, 'admin');
+  const p = pilotoPorId(Number(params.id));
+  if (!p) falla(404, 'No encontramos ese piloto.');
+  const r = renovacionDe(p);
+  if (!Object.keys(r.campos).length && !r.docs.length) falla(400, 'Este piloto no tiene renovaciones por revisar.');
+  if (body.accion === 'aprobar') {
+    const datos = leerDatosPiloto(r.campos, p.id, CAMPOS_RENOVACION);
+    guardarCampos(p.id, datos);
+    db.prepare('UPDATE usuarios SET renovacion_pendiente = NULL WHERE id = ?').run(p.id);
+    avisar(p.id, { titulo: 'Renovación aprobada', cuerpo: 'Tus documentos nuevos ya quedaron confirmados.', url: RUTA_PILOTO });
+  } else if (body.accion === 'rechazar') {
+    const nota = texto(body.nota, 300);
+    if (nota.length < 4) falla(400, 'Escribe qué tiene que corregir el piloto.');
+    db.prepare('UPDATE usuarios SET renovacion_pendiente = NULL WHERE id = ?').run(p.id);
+    db.prepare("UPDATE usuarios SET nota_admin = TRIM(COALESCE(nota_admin, '') || char(10) || ?) WHERE id = ?").run(`${hoyGT()}: renovación rechazada. ${nota}`, p.id);
+    avisar(p.id, { titulo: 'Revisa tu renovación', cuerpo: nota, url: RUTA_PILOTO });
+  } else falla(400, 'Acción no válida.');
+  return { ok: true };
+});
 ruta('POST', '/api/admin/mensajeros/:id/borrar-documentos', ({ req, params }) => {
   requiereRol(req, 'admin');
   const p = pilotoPorId(Number(params.id));
@@ -1702,7 +1748,7 @@ function datosOrigen(e, historial = false) {
     segundos: verPunto ? segundos : null, en_vivo: activo && segundos != null && segundos < 120,
   };
 }
-const CAMPOS_RECEPTOR = ['receptor_token', 'receptor_foto', 'receptor_lat', 'receptor_lng', 'receptor_precision', 'receptor_ubic_fecha', 'receptor_nombre', 'receptor_confirmado_en', 'receptor_omitido',
+const CAMPOS_RECEPTOR = ['flete_token', 'receptor_token', 'receptor_foto', 'receptor_lat', 'receptor_lng', 'receptor_precision', 'receptor_ubic_fecha', 'receptor_nombre', 'receptor_confirmado_en', 'receptor_omitido',
   'origen_token', 'origen_foto', 'origen_precision', 'origen_ubic_fecha', 'origen_confirmado_en'];
 const sinCamposReceptor = (out) => { for (const k of CAMPOS_RECEPTOR) delete out[k]; return out; };
 
@@ -1731,7 +1777,8 @@ function guardarPosicionOrigen(id, c, precision) {
 // cubiertas; si no, por km). Si después la recogida o la entrega se mueven más de 1 km, se vuelve a calcular.
 async function revisarPrecio(id) {
   const e = db.prepare('SELECT * FROM envios WHERE id = ?').get(id);
-  if (!e || !['pendiente', 'recogido', 'en_camino'].includes(e.estado) || e.origen_lat == null || e.destino_lat == null) return;
+  // Los fletes tienen el precio que acordó la oficina: no se recalcula
+  if (!e || e.flete || !['pendiente', 'recogido', 'en_camino'].includes(e.estado) || e.origen_lat == null || e.destino_lat == null) return;
   const o = { lat: e.origen_lat, lng: e.origen_lng }, d = { lat: e.destino_lat, lng: e.destino_lng };
   const movido = (lat, lng, p) => lat == null || distanciaRecta({ lat, lng }, p) > 1;
   if (!e.precio_por_confirmar && !movido(e.precio_o_lat, e.precio_o_lng, o) && !movido(e.precio_d_lat, e.precio_d_lng, d)) return;
@@ -1772,7 +1819,7 @@ ruta('GET', '/api/recibe/:token', ({ params }) => {
   const confirmado = entrega ? !!e.origen_confirmado_en : !!e.receptor_confirmado_en;
   return {
     rol: e._rol, guia: e.guia, estado: e.estado, activo, vehiculo: e.vehiculo, fragil: !!e.fragil, descripcion: e.descripcion,
-    remitente: e.tipo_cuenta === 'empresa' && e.empresa_nombre ? e.empresa_nombre : (e.remitente || '').split(/\s+/)[0],
+    remitente: e.flete ? (e.flete_cliente || 'Vaelo').split(/\s+/)[0] : e.tipo_cuenta === 'empresa' && e.empresa_nombre ? e.empresa_nombre : (e.remitente || '').split(/\s+/)[0],
     destinatario: e.destino_nombre, destino_zona: e.destino_zona, referencias: entrega ? e.origen_direccion : e.destino_direccion,
     nombre_sugerido: entrega ? e.origen_nombre : e.destino_nombre, origen_zona: e.origen_zona,
     cobro: entrega ? 0 : Number(e.cobro_destinatario) || 0, programado_para: e.programado_para,
@@ -2169,7 +2216,7 @@ function correoVaelo(titulo, parrafos, boton) {
 }
 function correoA(usuarioId, asunto, titulo, parrafos, boton) {
   const u = db.prepare('SELECT email, nombre FROM usuarios WHERE id = ?').get(usuarioId);
-  if (!u) return;
+  if (!u || u.email.endsWith('.interno')) return;
   enviarCorreo(u.email, asunto, correoVaelo(titulo, parrafos, boton), [titulo, ...parrafos, boton ? URL_SITIO + boton.url : ''].join('\n')).catch(() => {});
 }
 // Qué se avisa en cada momento del envío (al cliente, al piloto y a la oficina) y a la tienda conectada
@@ -2209,7 +2256,6 @@ function avisarEnvio(envioId, tipo, extra = {}) {
       case 'precio': cli('Precio de tu envío actualizado', `${guia}: ${extra.razon}. Total Q${Number(extra.precio).toFixed(2)}.`, true); break;
       case 'comprobante': avisarStaff({ titulo: 'Comprobante de transferencia', cuerpo: `${guia} · ${e.cliente_nombre} · Q${(e.precio + e.cargos_extra).toFixed(2)}`, url: RUTA_ADMIN, etiqueta: 'pago-' + e.id }); break;
     }
-    if (ESTADOS.includes(tipo) || tipo === 'precio' || tipo === 'aceptado') avisarTienda(e, tipo);
   } catch (err) { console.error('Aviso de envío:', err.message); }
 }
 
@@ -2475,86 +2521,6 @@ ruta('POST', '/api/clave/nueva', ({ req, body }) => {
   return { ok: true, destino: u.rol === 'mensajero' ? RUTA_PILOTO : '/entrar' };
 });
 
-// ---------- Tiendas en línea: clave de la API y avisos (webhook) ----------
-const huella = (t) => crypto.createHash('sha256').update(t).digest('hex');
-ruta('GET', '/api/yo/tienda', ({ req }) => {
-  const u = requiereRol(req, 'cliente');
-  const f = db.prepare('SELECT tipo_cuenta, api_clave_pista, webhook_url FROM usuarios WHERE id = ?').get(u.id);
-  return { empresa: f.tipo_cuenta === 'empresa', clave_pista: f.api_clave_pista, webhook_url: f.webhook_url,
-    recogida: db.prepare('SELECT id, nombre, direccion, zona FROM direcciones WHERE usuario_id = ? AND lat IS NOT NULL ORDER BY nombre').all(u.id) };
-});
-ruta('POST', '/api/yo/tienda', ({ req, body }) => {
-  const u = requiereRol(req, 'cliente');
-  const f = db.prepare('SELECT * FROM usuarios WHERE id = ?').get(u.id);
-  if (f.tipo_cuenta !== 'empresa') falla(403, 'La conexión con tiendas es para cuentas de empresa. Escríbenos para activarla.');
-  const out = { ok: true };
-  if (body.nueva_clave) {
-    const clave = 'vaelo_' + crypto.randomBytes(24).toString('hex');
-    const secreto = f.webhook_secreto || crypto.randomBytes(24).toString('hex');
-    db.prepare('UPDATE usuarios SET api_clave_hash = ?, api_clave_pista = ?, webhook_secreto = ? WHERE id = ?').run(huella(clave), clave.slice(0, 10) + '…' + clave.slice(-4), secreto, u.id);
-    out.clave = clave; out.secreto = secreto;   // se muestran una sola vez
-  }
-  if (body.quitar_clave) db.prepare('UPDATE usuarios SET api_clave_hash = NULL, api_clave_pista = NULL WHERE id = ?').run(u.id);
-  if (body.webhook_url !== undefined) {
-    const w = texto(body.webhook_url, 300);
-    if (w && !/^https:\/\/[^\s/]+\.[^\s]+$/.test(w)) falla(400, 'La dirección para avisos debe empezar con https://');
-    db.prepare('UPDATE usuarios SET webhook_url = ?, webhook_secreto = COALESCE(webhook_secreto, ?) WHERE id = ?').run(w || null, crypto.randomBytes(24).toString('hex'), u.id);
-    if (w) out.secreto = db.prepare('SELECT webhook_secreto FROM usuarios WHERE id = ?').get(u.id).webhook_secreto;
-  }
-  return out;
-});
-function usuarioApi(req) {
-  const m = /^Bearer\s+(vaelo_[a-f0-9]{48})$/.exec(req.headers.authorization || '');
-  if (!m) falla(401, 'Falta la clave de la API (Authorization: Bearer vaelo_...).');
-  if (limitar(m[1].slice(-12), 'api', 120, 60_000)) falla(429, 'Demasiadas peticiones. Máximo 120 por minuto.');
-  const u = db.prepare("SELECT * FROM usuarios WHERE api_clave_hash = ? AND activo = 1 AND rol = 'cliente' AND tipo_cuenta = 'empresa'").get(huella(m[1]));
-  if (!u) falla(401, 'La clave de la API no es válida.');
-  return u;
-}
-function envioParaTienda(e) {
-  return { guia: e.guia, estado: e.estado, precio: e.precio, cargos_extra: e.cargos_extra, destino_nombre: e.destino_nombre, destino_zona: e.destino_zona,
-    enlace_receptor: e.receptor_token && ESTADOS_ACTIVOS.includes(e.estado) ? URL_SITIO + '/recibe/' + e.receptor_token : null,
-    rastreo: `${URL_SITIO}/rastreo?guia=${e.guia}`, recibio: e.recibio, entregado_en: e.entregado_en, creado: e.creado, actualizado: e.actualizado };
-}
-// Crear un envío desde la tienda. La recogida sale de una dirección guardada con ubicación (direccion_id) o de origen_lat/origen_lng.
-ruta('POST', '/api/v1/envios', async ({ req, body }) => {
-  const u = usuarioApi(req);
-  const b = { ...body, origen_quien: 'cliente' };
-  if (body.direccion_id) {
-    const dir = db.prepare('SELECT * FROM direcciones WHERE id = ? AND usuario_id = ? AND lat IS NOT NULL').get(numero(body.direccion_id), u.id);
-    if (!dir) falla(400, 'direccion_id no existe o no tiene ubicación en el mapa.');
-    Object.assign(b, { origen_lat: dir.lat, origen_lng: dir.lng, origen_direccion: dir.direccion, origen_zona: dir.zona, origen_telefono: dir.telefono || u.telefono });
-  }
-  if (!b.origen_zona) b.origen_zona = (coordenada(b.origen_lat, b.origen_lng) && zonaDePunto(coordenada(b.origen_lat, b.origen_lng))) || OTRA_ZONA;
-  if (!b.destino_zona) b.destino_zona = OTRA_ZONA;
-  if (!b.vehiculo_id) b.vehiculo_id = db.prepare('SELECT id FROM vehiculos WHERE activo = 1 ORDER BY orden, id LIMIT 1').get()?.id;
-  const d = validarPedido(u, b);
-  const c = await cotizar(b);
-  const desc = mejorDescuento(c.precio, u.id, b.cupon);
-  db.exec('BEGIN');
-  let out;
-  try { out = insertarEnvio(u, b, d, c, desc, programadoUtc(b.programado_para)); db.exec('COMMIT'); } catch (err) { db.exec('ROLLBACK'); throw err; }
-  avisarEnvio(out.id, 'nuevo');
-  const e = db.prepare('SELECT * FROM envios WHERE id = ?').get(out.id);
-  return { _status: 201, ...envioParaTienda(e), codigo_entrega: out.codigo_entrega, precio_por_confirmar: out.precio_por_confirmar };
-});
-ruta('GET', '/api/v1/envios/:guia', ({ req, params }) => {
-  const u = usuarioApi(req);
-  const e = db.prepare('SELECT * FROM envios WHERE guia = ? AND usuario_id = ?').get(decodeURIComponent(params.guia).toUpperCase(), u.id);
-  if (!e) falla(404, 'No encontramos esa guía en tu cuenta.');
-  return { ...envioParaTienda(e), eventos: eventosDe(e.id).map(({ estado, nota, creado }) => ({ estado, nota, creado })) };
-});
-// Aviso a la tienda en cada cambio, firmado con su secreto (cabecera X-Vaelo-Firma: sha256=...)
-function avisarTienda(e, tipo) {
-  const u = db.prepare('SELECT webhook_url, webhook_secreto FROM usuarios WHERE id = ?').get(e.usuario_id);
-  if (!u || !u.webhook_url || !u.webhook_secreto) return;
-  const fila = db.prepare('SELECT * FROM envios WHERE id = ?').get(e.id);
-  const cuerpo = JSON.stringify({ evento: tipo, envio: envioParaTienda(fila), enviado: new Date().toISOString() });
-  const firma = crypto.createHmac('sha256', u.webhook_secreto).update(cuerpo).digest('hex');
-  fetch(u.webhook_url, { method: 'POST', signal: AbortSignal.timeout(8000), headers: { 'Content-Type': 'application/json', 'X-Vaelo-Firma': 'sha256=' + firma, 'User-Agent': 'Vaelo-Webhook/1.0' }, body: cuerpo })
-    .catch((err) => console.error('Aviso a tienda falló:', err.message));
-}
-
 // ---------- Zona de un punto (para elegirla sola en el formulario) ----------
 ruta('GET', '/api/zona', ({ query }) => {
   const c = coordenada(query.get('lat'), query.get('lng'));
@@ -2592,6 +2558,8 @@ function usuarioWhatsapp() {
   }
   return u;
 }
+// La oficina pone el precio acordado, el vehículo y el piloto. Se genera un enlace (/flete/<clave>) para que el cliente
+// complete los datos de quien entrega y quien recibe; después se comparten las ubicaciones en vivo como en un envío normal.
 ruta('POST', '/api/admin/fletes', ({ req, body }) => {
   const quien = requiereStaff(req);
   const precio = numero(body.precio);
@@ -2600,40 +2568,71 @@ ruta('POST', '/api/admin/fletes', ({ req, body }) => {
   if (!v) falla(400, 'Elige el vehículo.');
   const m = pilotoPorId(numero(body.mensajero_id));
   if (!m || !puedeTrabajar(m)) falla(400, 'Elige un piloto aprobado y con sus documentos vigentes.');
-  const cliente = body.cliente_id ? db.prepare("SELECT * FROM usuarios WHERE id = ? AND rol = 'cliente'").get(numero(body.cliente_id)) : usuarioWhatsapp();
-  if (!cliente) falla(400, 'No encontramos ese cliente.');
-  const nombre = texto(body.cliente_nombre, 100) || cliente.nombre, tel = texto(body.cliente_telefono, 30) || cliente.telefono;
-  if (!body.cliente_id && (nombre.length < 2 || tel.replace(/\D/g, '').length < 8)) falla(400, 'Escribe el nombre y teléfono del cliente.');
-  const d = { origen_direccion: texto(body.origen_direccion, 300), origen_zona: texto(body.origen_zona, 60) || OTRA_ZONA,
-    destino_nombre: texto(body.destino_nombre, 100), destino_telefono: texto(body.destino_telefono, 30), destino_direccion: texto(body.destino_direccion, 300), destino_zona: texto(body.destino_zona, 60) || OTRA_ZONA };
-  if (d.origen_direccion.length < 3) falla(400, 'Escribe de dónde sale el flete.');
-  if (d.destino_nombre.length < 2 || d.destino_telefono.replace(/\D/g, '').length < 8 || d.destino_direccion.length < 3) falla(400, 'Escribe a quién se entrega, su teléfono y la dirección.');
-  const metodo = ['efectivo', 'transferencia', 'credito'].includes(body.metodo_pago) ? body.metodo_pago : 'efectivo';
-  const o = coordenada(body.origen_lat, body.origen_lng), de = coordenada(body.destino_lat, body.destino_lng);
-  const estado = body.estado === 'pendiente' ? 'pendiente' : 'recogido';
-  const guia = nuevaGuia();
+  const tel = texto(body.cliente_telefono, 30);
+  const cliente = usuarioWhatsapp();
+  const guia = nuevaGuia(), token = nuevoTokenReceptor();
+  const r = db.prepare(`INSERT INTO envios (guia, usuario_id, vehiculo_id, peso, descripcion, origen_direccion, origen_zona, origen_telefono,
+      destino_nombre, destino_telefono, destino_direccion, destino_zona, tipo_tarifa, precio, precio_base, metodo_pago, notas,
+      estado, mensajero_id, asignacion, asignado_en, flete, flete_token, flete_telefono, origen_quien, ganancia_piloto)
+    VALUES (?, ?, ?, 0, ?, '', ?, ?, '', '', '', ?, 'zona', ?, ?, 'efectivo', ?, 'pendiente', ?, 'aceptado', datetime('now'), 1, ?, ?, 'tercero', ?)`).run(
+    guia, cliente.id, v.id, texto(body.descripcion, 200), OTRA_ZONA, tel, OTRA_ZONA, redondear(precio), redondear(precio), texto(body.notas, 300), m.id, token, tel || null, gananciaPiloto(precio));
+  const id = Number(r.lastInsertRowid);
+  db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(id, 'pendiente',
+    `Flete en ${v.nombre.toLowerCase()} acordado por WhatsApp: Q${precio.toFixed(2)}, con ${m.nombre.split(' ')[0]} (${quien.nombre.split(' ')[0]}). Esperando que el cliente complete los datos`);
+  avisar(m.id, { titulo: 'Flete asignado', cuerpo: `${guia}: Q${precio.toFixed(2)}. Te avisamos cuando el cliente complete los datos.`, url: RUTA_PILOTO, etiqueta: 'piloto-' + id });
+  return { _status: 201, ok: true, id, guia, enlace: '/flete/' + token };
+});
+function fletePorToken(token) {
+  if (!/^[a-f0-9]{32}$/.test(String(token || ''))) falla(404, 'Este enlace no es válido. Pide uno nuevo por WhatsApp.');
+  const e = db.prepare(`${SQL_ENVIO} WHERE e.flete_token = ?`).get(token);
+  if (!e) falla(404, 'Este enlace no es válido. Pide uno nuevo por WhatsApp.');
+  return e;
+}
+ruta('GET', '/api/flete/:token', ({ params }) => {
+  const e = fletePorToken(params.token);
+  const aj = getAjustes();
+  return { guia: e.guia, precio: e.precio, vehiculo: e.vehiculo, estado: e.estado, configurado: !!e.flete_configurado_en, piloto: (e.mensajero_nombre || '').split(' ')[0],
+    descripcion: e.descripcion, metodo_pago: e.metodo_pago, pago_estado: e.pago_estado, whatsapp_pagos: aj.whatsapp_pagos || '50237731793', datos_transferencia: aj.datos_transferencia || '',
+    origen: e.flete_configurado_en ? { nombre: e.origen_nombre, telefono: e.origen_telefono, direccion: e.origen_direccion, zona: e.origen_zona, confirmado: !!e.origen_confirmado_en } : null,
+    destino: e.flete_configurado_en ? { nombre: e.destino_nombre, telefono: e.destino_telefono, direccion: e.destino_direccion, zona: e.destino_zona, confirmado: !!e.receptor_confirmado_en } : null,
+    enlace_entrega: e.flete_configurado_en && e.estado === 'pendiente' && e.origen_token ? '/entrega/' + e.origen_token : null,
+    enlace_recibe: e.flete_configurado_en && ESTADOS_ACTIVOS.includes(e.estado) && e.receptor_token ? '/recibe/' + e.receptor_token : null,
+    codigo_entrega: e.flete_configurado_en && ESTADOS_ACTIVOS.includes(e.estado) ? e.codigo_entrega : null,
+    zonas: [...zonasFijas().map((z) => z.nombre), OTRA_ZONA] };
+});
+ruta('POST', '/api/flete/:token', ({ req, params, body }) => {
+  if (limitar(ipDe(req), 'flete-config', 20, 3600_000)) falla(429, 'Demasiados intentos. Espera un momento.');
+  const e = fletePorToken(params.token);
+  if (e.flete_configurado_en) falla(400, 'Este flete ya tiene sus datos. Si necesitas cambiar algo, escríbenos por WhatsApp.');
+  if (e.estado !== 'pendiente') falla(400, 'Este flete ya no se puede configurar.');
+  const d = {
+    origen_nombre: texto(body.origen_nombre, 100), origen_telefono: texto(body.origen_telefono, 30), origen_direccion: texto(body.origen_direccion, 300), origen_zona: texto(body.origen_zona, 60) || OTRA_ZONA,
+    destino_nombre: texto(body.destino_nombre, 100), destino_telefono: texto(body.destino_telefono, 30), destino_direccion: texto(body.destino_direccion, 300), destino_zona: texto(body.destino_zona, 60) || OTRA_ZONA,
+    descripcion: texto(body.descripcion, 200) || e.descripcion, notas: texto(body.notas, 300),
+  };
+  if (d.origen_nombre.length < 2 || d.origen_telefono.replace(/\D/g, '').length < 8) falla(400, 'Escribe el nombre y teléfono de quien entrega la carga.');
+  if (d.destino_nombre.length < 2 || d.destino_telefono.replace(/\D/g, '').length < 8) falla(400, 'Escribe el nombre y teléfono de quien recibe.');
+  if (d.descripcion.length < 3) falla(400, 'Escribe qué se va a llevar.');
+  if (!body.foto) falla(400, 'Toma una foto de lo que se va a llevar.');
+  const metodo = body.metodo_pago === 'transferencia' ? 'transferencia' : 'efectivo';
+  const cobro = body.cobro_destinatario === '' || body.cobro_destinatario == null ? 0 : numero(body.cobro_destinatario);
+  if (!Number.isFinite(cobro) || cobro < 0 || cobro > 50000) falla(400, 'Revisa el monto a cobrar a quien recibe.');
   db.exec('BEGIN');
   try {
-    const r = db.prepare(`INSERT INTO envios (guia, usuario_id, vehiculo_id, peso, descripcion, origen_direccion, origen_zona, origen_telefono, origen_lat, origen_lng,
-        destino_nombre, destino_telefono, destino_direccion, destino_zona, destino_lat, destino_lng, tipo_tarifa, precio, precio_base, metodo_pago, cobro_destinatario, notas,
-        estado, mensajero_id, asignacion, asignado_en, receptor_omitido, flete, flete_cliente, flete_telefono, origen_nombre, origen_quien, pago_estado, ganancia_piloto)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'zona', ?, ?, ?, ?, ?, ?, ?, 'aceptado', datetime('now'), ?, 1, ?, ?, ?, 'tercero', ?, ?)`).run(
-      guia, cliente.id, v.id, numero(body.peso) > 0 ? numero(body.peso) : 0, texto(body.descripcion, 200), d.origen_direccion, d.origen_zona, tel, o?.lat ?? null, o?.lng ?? null,
-      d.destino_nombre, d.destino_telefono, d.destino_direccion, d.destino_zona, de?.lat ?? null, de?.lng ?? null, redondear(precio), redondear(precio), metodo,
-      Math.max(0, numero(body.cobro_destinatario) || 0), texto(body.notas, 300), estado, m.id, `Flete coordinado por la oficina (${quien.nombre.split(' ')[0]})`,
-      nombre, tel, nombre, metodo === 'transferencia' ? 'verificado' : null, gananciaPiloto(precio));
-    const id = Number(r.lastInsertRowid);
-    db.prepare("UPDATE envios SET origen_confirmado_en = datetime('now') WHERE id = ?").run(id);
-    db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(id, estado,
-      `Flete en ${v.nombre.toLowerCase()} acordado por WhatsApp: Q${precio.toFixed(2)}. ${estado === 'recogido' ? `${m.nombre.split(' ')[0]} ya salió con la carga` : `Asignado a ${m.nombre.split(' ')[0]}`}`);
+    guardarArchivoEnvio(e.id, 'paquete', body.foto);
+    db.prepare(`UPDATE envios SET origen_nombre = ?, origen_telefono = ?, origen_direccion = ?, origen_zona = ?, destino_nombre = ?, destino_telefono = ?, destino_direccion = ?, destino_zona = ?,
+        descripcion = ?, notas = TRIM(COALESCE(notas, '') || ' ' || ?), metodo_pago = ?, pago_estado = ?, cobro_destinatario = ?, flete_cliente = ?, flete_telefono = COALESCE(flete_telefono, ?),
+        origen_token = ?, receptor_token = ?, codigo_entrega = ?, flete_configurado_en = datetime('now'), actualizado = datetime('now') WHERE id = ?`).run(
+      d.origen_nombre, d.origen_telefono, d.origen_direccion, d.origen_zona, d.destino_nombre, d.destino_telefono, d.destino_direccion, d.destino_zona,
+      d.descripcion, d.notas, metodo, metodo === 'transferencia' ? 'sin_comprobante' : null, redondear(cobro), d.origen_nombre, d.origen_telefono,
+      nuevoTokenReceptor(), nuevoTokenReceptor(), String(crypto.randomInt(1000, 10000)), e.id);
+    db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(e.id, 'pendiente', 'El cliente completó los datos del flete. Esperando las ubicaciones en vivo');
     db.exec('COMMIT');
-    avisoFlete(id, m.id, guia, d);
-    return { _status: 201, ok: true, id, guia };
   } catch (err) { db.exec('ROLLBACK'); throw err; }
-});
-function avisoFlete(id, pilotoId, guia, d) {
-  avisar(pilotoId, { titulo: 'Flete asignado', cuerpo: `${guia}: entregar a ${d.destino_nombre} en ${d.destino_zona}`, url: RUTA_PILOTO, etiqueta: 'piloto-' + id, urgente: true });
-}
+  if (e.mensajero_id) avisar(e.mensajero_id, { titulo: 'Flete con datos completos', cuerpo: `${e.guia}: recoger con ${d.origen_nombre}, entregar a ${d.destino_nombre}.`, url: RUTA_PILOTO, etiqueta: 'piloto-' + e.id, urgente: true });
+  avisarStaff({ titulo: 'Flete configurado', cuerpo: `${e.guia}: ${d.descripcion}`, url: RUTA_ADMIN, etiqueta: 'flete-' + e.id });
+  return { ok: true };
+}, { limite: 1_200_000 });
 
 // ---------- Reclamos: paquete perdido, dañado o incompleto ----------
 // El cliente lo reporta; la oficina evalúa según lo que llevaba (foto y valor declarado), decide cuánto se le devuelve
@@ -3090,6 +3089,7 @@ ruta('GET', '/api/admin/envios/:id', ({ req, params }) => {
   out.cargos = db.prepare('SELECT * FROM cargos WHERE envio_id = ? OR cobrado_envio_id = ? ORDER BY id').all(e.id, e.id);
   out.reclamos = reclamosDe(e.id);
   out.listo_para_piloto = listoParaPiloto(e); out.motivo_no_listo = out.listo_para_piloto ? null : motivoNoListo(e);
+  out.flete_enlace = e.flete && !e.flete_configurado_en && e.flete_token ? '/flete/' + e.flete_token : null;
   out.receptor = { ...datosReceptor(e, true), enlace: ESTADOS_ACTIVOS.includes(e.estado) ? '/recibe/' + tokenReceptor(e) : null };
   out.origen = { ...datosOrigen(e, true), enlace: e.origen_quien === 'tercero' && e.estado === 'pendiente' && e.origen_token ? '/entrega/' + e.origen_token : null };
   sinCamposReceptor(out);
@@ -3257,7 +3257,7 @@ const TIPOS = {
 };
 const PAGINAS = { '/': 'index.html', '/entrar': 'entrar.html', '/registro': 'registro.html', '/mi-cuenta': 'cliente.html',
   '/enviar': 'cliente.html', '/rastreo': 'rastreo.html', '/recuperar': 'recuperar.html', '/terminos': 'terminos.html', '/privacidad': 'privacidad.html',
-  '/tiendas': 'tiendas.html', '/politica-pilotos': 'politica-pilotos.html', '/politicas-empresas': 'politicas-empresas.html' };
+  '/empresas': 'empresas.html', '/politica-pilotos': 'politica-pilotos.html', '/politicas-empresas': 'politicas-empresas.html' };
 // Páginas que piden cuenta: si no has iniciado sesión, el servidor te manda a entrar antes de mostrar nada
 const PIDEN_CUENTA = { '/enviar': ['cliente', 'admin'], '/mi-cuenta': ['cliente', 'admin'] };
 
@@ -3359,6 +3359,7 @@ const servidor = http.createServer(async (req, res) => {
     }
     // Página para quien recibe: /recibe/<clave>
     if (/^\/(recibe|entrega)\/[a-f0-9]{32}$/.test(limpia)) return servirEstatico(req, res, '/recibe.html');
+    if (/^\/flete\/[a-f0-9]{32}$/.test(limpia)) return servirEstatico(req, res, '/flete.html');
     if (PIDEN_CUENTA[limpia] && usuarioActual(req)?.rol === 'mensajero') return redirigir(res, RUTA_PILOTO);
     if (PIDEN_CUENTA[limpia]) {
       const u = usuarioActual(req);

@@ -216,7 +216,8 @@
       const guardar = el('button', { class: 'boton', type: 'submit', text: 'Guardar mis datos' });
       const form = el('form', { novalidate: true },
         avance, nav,
-        aprobado ? el('p', { class: 'mensaje aviso', text: 'Ya estás aprobado: puedes actualizar tu contacto y renovar licencia y antecedentes. Para cambiar otros datos (nombre, DPI, vehículo), comunícate con la administración.' }) : null,
+        aprobado ? el('p', { class: 'mensaje aviso', text: 'Ya estás aprobado: puedes actualizar tu contacto y renovar licencia y antecedentes. Cuando renuevas, la oficina revisa que la fecha coincida con la foto; mientras tanto sigue valiendo la anterior. Para cambiar otros datos (nombre, DPI, vehículo), comunícate con la administración.' }) : null,
+        aprobado && yo.renovacion ? el('div', { class: 'mensaje aviso' }, el('strong', { text: 'Renovación en revisión. ' }), 'La oficina está confirmando tus documentos nuevos.') : null,
         seccion('datos',
           fila(entrada('nombre', 'Nombre completo', { maxlength: 100, autocomplete: 'name' }), entrada('telefono', 'Teléfono', { type: 'tel', maxlength: 30 })),
           fila(entrada('fecha_nacimiento', 'Fecha de nacimiento', { type: 'date', max: hoy }), entrada('dpi', 'Número de DPI', { inputmode: 'numeric', maxlength: 17, placeholder: '0000 00000 0000' })),
@@ -598,6 +599,11 @@
             } })));
       }
 
+      // Flete: el cliente todavía está llenando los datos con su enlace
+      if (e.flete_pendiente) return el('article', { class: 'entrega-tarjeta' },
+        el('div', { class: 'cab' }, el('strong', { class: 'guia' }, e.guia, el('span', { class: 'etiqueta-flete', style: 'margin-left:.4rem', text: 'Flete' })), el('span', { class: 'estado pendiente', text: 'Esperando datos' })),
+        el('p', { text: `Flete de ${dinero(e.precio)} asignado a ti. El cliente está llenando los datos de quién entrega y quién recibe; te avisamos cuando esté listo.` }),
+        e.descripcion ? el('p', { class: 'pista', text: 'Se lleva: ' + e.descripcion }) : null);
       // Entrega fallida: esperando decisión, devolución o sede
       if (['fallido', 'devolviendo', 'a_sede'].includes(e.estado)) return tarjetaFallida(e, fragil, resumen);
       if (['devuelto', 'en_sede', 'cancelado'].includes(e.estado)) return tarjetaTerminada(e);

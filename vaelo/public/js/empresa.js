@@ -206,14 +206,11 @@ async function panelEmpresa(caja, op) {
       } catch (e) { mostrarMensaje(msg, e.message); ev.target.disabled = false; }
     } }), resultado);
 
-  const tienda = document.getElementById('bloque-tienda');
   caja.replaceChildren(
     el('div', { class: 'empresa-cabecera' }, el('div', {}, el('span', { class: 'etiqueta-completa', text: 'Contrato firmado' }), el('h2', { text: yo.empresa_nombre || yo.nombre }),
       el('p', { class: 'pista', text: 'Los envíos que hagas en "Enviar paquete" salen con los pilotos de Vaelo. Vaelo toma Q5 de cada envío y el resto es para el piloto.' })),
       el('a', { class: 'boton borde chico', href: '/politicas-empresas', target: '_blank', text: 'Políticas para empresas' })),
     chips, zonaCifras, zonaGraficas, formLote,
-    el('section', { class: 'bloque' }, el('h2', { text: 'Tus envíos a la sede' }), zonaLotes),
-    tienda || '');
-  if (tienda) tienda.hidden = false;
+    el('section', { class: 'bloque' }, el('h2', { text: 'Tus envíos a la sede' }), zonaLotes));
   pintarChips(); cargar();
 }

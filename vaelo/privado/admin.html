@@ -541,46 +541,51 @@
       return caja;
     }
 
-    // ---------- Nuevo flete en pickup (se coordina por WhatsApp; el precio lo pone la oficina) ----------
+    // ---------- Nuevo flete en pickup: precio y piloto; el cliente completa el resto con su enlace ----------
+    function enlaceFlete(guia, enlace, telefono) {
+      const url = location.origin + enlace;
+      let tel = String(telefono || '').replace(/\D/g, ''); if (tel.length === 8) tel = '502' + tel;
+      const texto = `Hola, este es el enlace de tu flete con Vaelo (guía ${guia}). Ahí llenas los datos de quien entrega y quien recibe, y luego cada uno comparte su ubicación: ${url}`;
+      return el('div', { class: 'cargos-aviso' }, el('span', {}, el('strong', { style: 'font-size:1rem', text: 'Enlace para el cliente' }), el('br'), el('small', { style: 'word-break:break-all', text: url })),
+        el('div', { class: 'navegar', style: 'margin:0' },
+          tel ? el('a', { class: 'boton cinta chico', href: `https://wa.me/${tel}?text=${encodeURIComponent(texto)}`, target: '_blank', rel: 'noopener', text: 'Mandar por WhatsApp' }) : null,
+          el('button', { class: 'boton borde chico', type: 'button', text: 'Copiar mensaje', onclick: async (ev) => { try { await navigator.clipboard.writeText(texto); ev.target.textContent = 'Copiado'; } catch { prompt('Copia el mensaje:', texto); } } })));
+    }
     async function nuevoFlete() {
-      const [t, c, m] = await Promise.all([api('/api/admin/tarifas').catch(() => null), api('/api/admin/clientes').catch(() => ({ clientes: [] })), api('/api/admin/mensajeros')]);
+      const [t, m] = await Promise.all([api('/api/admin/tarifas').catch(() => null), api('/api/admin/mensajeros')]);
       const vehs = t ? t.vehiculos.filter(v => v.activo) : vehiculos;
       const msg = el('div', { class: 'mensaje', role: 'alert' });
-      const f = {};
-      const campo = (k, titulo, input, ayuda) => { f[k] = input; return el('div', { class: 'campo' }, el('label', {}, titulo, ayuda ? el('span', { class: 'ayuda', text: ' ' + ayuda }) : null), input); };
-      const selVeh = el('select', {}, vehs.map(v => el('option', { value: v.id, text: v.nombre + (v.solo_oficina ? ' (flete)' : ''), selected: !!v.solo_oficina })));
-      const pilotosDe = () => m.mensajeros.filter(p => p.puede_trabajar).sort((a, b) => (b.vehiculo_id === Number(selVeh.value)) - (a.vehiculo_id === Number(selVeh.value)) || b.en_linea_real - a.en_linea_real);
-      const selPil = el('select', {});
-      const pintarPilotos = () => selPil.replaceChildren(...pilotosDe().map(p => el('option', { value: p.id, text: `${p.nombre} · ${p.vehiculo || 'sin vehículo'}${p.en_linea_real ? ' · en línea' : ''}` })));
+      const selVeh = el('select', { id: 'fl-veh' }, vehs.map(v => el('option', { value: v.id, text: v.nombre + (v.solo_oficina ? ' (flete)' : ''), selected: !!v.solo_oficina })));
+      const selPil = el('select', { id: 'fl-pil' });
+      const pintarPilotos = () => {
+        const lista = m.mensajeros.filter(p => p.puede_trabajar).sort((a, b) => (b.vehiculo_id === Number(selVeh.value)) - (a.vehiculo_id === Number(selVeh.value)) || b.en_linea_real - a.en_linea_real);
+        selPil.replaceChildren(...(lista.length ? lista.map(p => el('option', { value: p.id, text: `${p.nombre} · ${p.vehiculo || 'sin vehículo'}${p.en_linea_real ? ' · en línea' : ''}` })) : [el('option', { value: '', text: 'No hay pilotos disponibles' })]));
+      };
       selVeh.addEventListener('change', pintarPilotos); pintarPilotos();
-      const selCli = el('select', {}, el('option', { value: '', text: 'Cliente por WhatsApp (sin cuenta)' }), c.clientes.map(x => el('option', { value: x.id, text: `${x.empresa_nombre || x.nombre} · ${x.telefono}` })));
-      const caja = el('div', { class: 'mapa' });
+      const precio = el('input', { id: 'fl-precio', type: 'number', min: 1, step: '0.01', class: 'entrada-grande', placeholder: '0.00' });
+      const tel = el('input', { id: 'fl-tel', type: 'tel', maxlength: 30, placeholder: 'Para mandarle el enlace por WhatsApp' });
+      const desc = el('input', { id: 'fl-desc', maxlength: 200, placeholder: 'Opcional: lo que acordaron, ej. refrigeradora y 2 cajas' });
+      const resultado = el('div');
+      const boton = el('button', { class: 'boton', type: 'button', text: 'Crear flete y generar enlace', onclick: async () => {
+        boton.disabled = true;
+        try {
+          const r = await api('/api/admin/fletes', { body: { precio: precio.value, vehiculo_id: selVeh.value, mensajero_id: selPil.value, cliente_telefono: tel.value, descripcion: desc.value } });
+          resultado.replaceChildren(el('div', { class: 'mensaje exito', text: `Flete ${r.guia} creado. El piloto ya tiene el aviso; sale cuando el cliente complete los datos y compartan las ubicaciones.` }),
+            enlaceFlete(r.guia, r.enlace, tel.value),
+            el('button', { class: 'boton borde chico', type: 'button', text: 'Ver el flete', onclick: () => abrirEnvio(r.id) }));
+          boton.hidden = true; cargarEnvios(); cargarResumen();
+        } catch (e) { mostrarMensaje(msg, e.message); boton.disabled = false; }
+      } });
       $('dlg-cuerpo').replaceChildren(
         el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: () => $('dlg').close() }),
         el('h2', { text: 'Nuevo flete' }),
-        el('p', { class: 'pista', text: 'Para fletes que ya se coordinaron con el cliente por WhatsApp: qué se lleva, de dónde, a dónde y el precio. El piloto recibe el aviso y el flete queda en el sistema.' }),
-        el('div', { class: 'fila' }, campo('cliente_id', 'Cliente', selCli), campo('cliente_nombre', 'Nombre del cliente', el('input', { maxlength: 100 }), 'Si no tiene cuenta'), campo('cliente_telefono', 'Teléfono del cliente', el('input', { type: 'tel', maxlength: 30 }))),
-        el('div', { class: 'fila' }, campo('descripcion', '¿Qué se lleva?', el('input', { maxlength: 200, placeholder: 'Refrigeradora, 10 cajas de mercadería…' })), campo('peso', 'Peso aprox. (lb)', el('input', { type: 'number', min: 0 }))),
-        el('div', { class: 'fila' }, campo('origen_direccion', 'Sale de', el('input', { maxlength: 300 })), campo('origen_zona', 'Zona de salida', el('input', { maxlength: 60 }))),
-        el('div', { class: 'fila' }, campo('destino_nombre', 'Se entrega a', el('input', { maxlength: 100 })), campo('destino_telefono', 'Teléfono', el('input', { type: 'tel', maxlength: 30 }))),
-        el('div', { class: 'fila' }, campo('destino_direccion', 'Dirección de entrega', el('input', { maxlength: 300 })), campo('destino_zona', 'Zona de entrega', el('input', { maxlength: 60 }))),
-        el('label', { class: 'etiqueta-campo', text: 'Punto de entrega en el mapa (opcional, ayuda al piloto a navegar)' }), caja,
-        el('div', { class: 'fila', style: 'margin-top:1rem' }, campo('precio', 'Precio acordado (Q)', el('input', { type: 'number', min: 1, step: '0.01' })),
-          campo('metodo_pago', 'Pago', el('select', {}, el('option', { value: 'efectivo', text: 'Efectivo al piloto' }), el('option', { value: 'transferencia', text: 'Transferencia (ya recibida)' }), el('option', { value: 'credito', text: 'Crédito de empresa' }))),
-          campo('cobro_destinatario', 'Cobrar al recibir (Q)', el('input', { type: 'number', min: 0, step: '0.01' }), 'Opcional')),
-        el('div', { class: 'fila' }, campo('vehiculo_id', 'Vehículo', selVeh), campo('mensajero_id', 'Piloto', selPil),
-          campo('estado', '¿Ya salió?', el('select', {}, el('option', { value: 'recogido', text: 'Sí, ya salió con la carga' }), el('option', { value: 'pendiente', text: 'Todavía va a recoger' })))),
-        campo('notas', 'Indicaciones', el('input', { maxlength: 300 })),
-        msg,
-        el('button', { class: 'boton', type: 'button', text: 'Crear flete y avisar al piloto', onclick: async (ev) => {
-          const body = Object.fromEntries(Object.entries(f).map(([k, i]) => [k, i.value]));
-          const p = sel && sel.obtener(); if (p) { body.destino_lat = p.lat; body.destino_lng = p.lng; }
-          ev.target.disabled = true;
-          try { const r = await api('/api/admin/fletes', { body }); $('dlg').close(); cargarEnvios(); cargarResumen(); abrirEnvio(r.id); }
-          catch (e) { mostrarMensaje(msg, e.message); ev.target.disabled = false; }
-        } }));
+        el('p', { class: 'pista', text: 'Cuando ya acordaste con el cliente por WhatsApp qué se lleva y cuánto cuesta. Pones el precio y el piloto, y le mandas el enlace: él completa los datos de quien entrega y quien recibe, y cada uno comparte su ubicación como en un envío normal.' }),
+        el('div', { class: 'campo' }, el('label', { for: 'fl-precio', text: 'Precio acordado (Q)' }), precio),
+        el('div', { class: 'fila' }, el('div', { class: 'campo' }, el('label', { for: 'fl-veh', text: 'Vehículo' }), selVeh), el('div', { class: 'campo' }, el('label', { for: 'fl-pil', text: 'Piloto' }), selPil)),
+        el('div', { class: 'fila' }, el('div', { class: 'campo' }, el('label', { for: 'fl-tel', text: 'WhatsApp del cliente' }), tel), el('div', { class: 'campo' }, el('label', { for: 'fl-desc', text: 'Qué se lleva' }), desc)),
+        msg, boton, resultado);
       $('dlg').showModal();
-      const sel = selectorPunto(caja, { letra: 'B', clase: 'entrega', alDireccion: (t, usar) => { if (usar || !f.destino_direccion.value) f.destino_direccion.value = t; } });
+      precio.focus();
     }
     $('nuevo-flete').addEventListener('click', () => nuevoFlete().catch(e => alert(e.message)));
 
@@ -677,7 +682,7 @@
           el('h2', { style: 'font-size:1.4rem;margin-bottom:.3rem' }, e.guia, e.flete ? el('span', { class: 'etiqueta-flete', style: 'margin-left:.5rem;vertical-align:middle', text: 'Flete' }) : null, e.fragil ? el('span', { class: 'etiqueta-pendiente', style: 'margin-left:.5rem;vertical-align:middle', text: 'Frágil' }) : null), chipEstado(e.estado),
           el('div', { style: 'margin-top:1rem' }, cajaMapa),
           el('div', { class: 'datos' },
-            dato('Cliente', e.flete ? `${e.flete_cliente} (por WhatsApp) ` : `${e.cliente_nombre} `, telLink(e.flete ? e.flete_telefono : e.cliente_telefono)),
+            dato('Cliente', e.flete ? `${e.flete_cliente || 'Por completar'} (por WhatsApp) ` : `${e.cliente_nombre} `, telLink(e.flete ? e.flete_telefono : e.cliente_telefono)),
             e.paquetes > 1 ? dato('Paquetes', `${e.paquetes} para la misma dirección`) : null,
             dato('Precio', `${e.precio_por_confirmar ? 'Desde ' : ''}${dinero(e.precio)}, ${PAGOS[e.metodo_pago] || e.metodo_pago}${e.km ? `. ${e.km} km` : ''}${e.fragil ? `. Incluye ${dinero(e.recargo_fragil)} por frágil` : ''}`),
             dato('Recoger', [e.origen_quien === 'tercero' ? (e.origen && e.origen.nombre) : 'El cliente', e.origen_zona, e.origen_direccion].filter(Boolean).join('. ')),
@@ -698,6 +703,7 @@
           e.tiene_foto_paquete ? el('div', { class: 'foto-lleva' }, el('a', { href: `/api/admin/envios/${e.id}/entrega/paquete`, target: '_blank', rel: 'noopener' },
             el('img', { src: `/api/admin/envios/${e.id}/entrega/paquete`, alt: 'Foto del paquete' })), el('div', {}, el('strong', { text: 'Foto del paquete' }), el('br'), sub('La tomó el cliente al pedir: muestra qué lleva.'))) : null,
           enCurso && !e.listo_para_piloto ? el('div', { class: 'mensaje aviso', text: e.motivo_no_listo }) : null,
+          e.flete_enlace ? enlaceFlete(e.guia, e.flete_enlace, e.flete_telefono) : null,
           msg,
           bloqueReclamosPanel(e, guardar),
           bloqueFallidoPanel(e, guardar),
@@ -789,7 +795,8 @@
       else cuerpo.replaceChildren(...mensajeros.map(p => {
         const rv = p.revision;
         const extras = [p.deuda ? el('span', { class: 'etiqueta-pendiente', text: `Debe liquidar ${dinero(p.deuda.monto)}` }) : null,
-          p.estado_piloto === 'aprobado' && !p.politica_al_dia ? el('span', { class: 'etiqueta-azul', text: 'Falta aceptar la política' }) : null].filter(Boolean);
+          p.estado_piloto === 'aprobado' && !p.politica_al_dia ? el('span', { class: 'etiqueta-azul', text: 'Falta aceptar la política' }) : null,
+          p.renovacion ? el('span', { class: 'etiqueta-pendiente', text: 'Renovación por revisar' }) : null].filter(Boolean);
         const docs = rv.vencidos.length ? el('span', { class: 'etiqueta-pendiente', text: `${rv.vencidos.length} vencido${rv.vencidos.length > 1 ? 's' : ''}` })
           : rv.faltan.length ? el('span', { class: 'etiqueta-pendiente', text: `Faltan ${rv.faltan.length}` })
           : rv.porVencer.length ? el('span', { class: 'etiqueta-azul', text: 'Por vencer' }) : el('span', { class: 'etiqueta-completa', text: 'Completos' });
@@ -918,6 +925,7 @@
             el('span', { class: etiqueta, text: r.estados[p.estado_piloto] }), ' ',
             el('span', { class: 'pista' }, `${p.email}${p.fecha_nacimiento ? ` · ${edad(p.fecha_nacimiento)} años` : ''} · ${p.en_linea_real ? 'En línea' : 'Fuera de línea'}`))),
         el('div', { style: 'margin:1rem 0 .5rem' }, botonesEstado), alertas, msg,
+        p.renovacion ? bloqueRenovacion(p, r, msg) : null,
         seccion('Datos personales',
           fila(entrada('nombre', 'Nombre completo', { maxlength: 100 }), entrada('telefono', 'Teléfono', { type: 'tel', maxlength: 30 })),
           fila(entrada('fecha_nacimiento', 'Fecha de nacimiento', { type: 'date' }), entrada('dpi', 'DPI', { inputmode: 'numeric', maxlength: 17 })),
@@ -962,6 +970,24 @@
         r.envios.length ? seccion('Últimos envíos', el('ul', { style: 'padding-left:1.1rem' }, r.envios.map(x =>
           el('li', {}, `${x.guia} · ${ESTADOS[x.estado] || x.estado} · ${fecha(x.creado)}`, x.calificacion ? ` · ${x.calificacion} de 5${x.calificacion_comentario ? ': ' + x.calificacion_comentario : ''}` : '')))) : '');
       if (!$('dlg').open) $('dlg').showModal();
+    }
+
+    // Renovación de licencia o antecedentes: confirmar que la fecha escrita coincide con la foto
+    function bloqueRenovacion(p, r, msg) {
+      const ren = p.renovacion, NOMBRES = { licencia_numero: 'Número de licencia', licencia_tipo: 'Tipo de licencia', licencia_vence: 'Licencia vence', penales_fecha: 'Emisión de antecedentes penales', policiacos_fecha: 'Emisión de antecedentes policiacos' };
+      const accion = (body) => async (ev) => {
+        ev.target.disabled = true;
+        try { await api(`/api/admin/mensajeros/${p.id}/renovacion`, { body }); abrirFicha(p.id); cargarMensajeros(); }
+        catch (e) { mostrarMensaje(msg, e.message); ev.target.disabled = false; }
+      };
+      return el('div', { class: 'bloque bloque-fallido' }, el('h3', {}, icono('alerta'), ' Renovación por revisar'),
+        el('p', { class: 'pista', text: `Desde ${fecha(ren.desde)}. Revisa que lo escrito coincida con la foto. Mientras no lo confirmes, sigue valiendo lo anterior.` }),
+        Object.keys(ren.campos).length ? el('div', { class: 'tabla-envoltura' }, el('table', {}, el('thead', {}, el('tr', {}, ['Dato', 'Antes', 'Nuevo'].map(t => el('th', { text: t })))),
+          el('tbody', {}, Object.entries(ren.campos).map(([k, v]) => el('tr', {}, el('td', { text: NOMBRES[k] || k }), el('td', { text: p[k] || '—' }), el('td', {}, el('strong', { text: v || '—' }))))))) : null,
+        ren.docs.length ? el('div', { class: 'docs' }, ren.docs.map(tipo => campoDocumento({ titulo: r.documentos[tipo] + ' (nueva)', tiene: true, ver: `/api/admin/usuarios/${p.id}/documento/${tipo}`, soloVer: true }))) : null,
+        el('div', { class: 'navegar' },
+          el('button', { class: 'boton chico', type: 'button', text: 'Coincide: confirmar renovación', onclick: accion({ accion: 'aprobar' }) }),
+          el('button', { class: 'boton peligro chico', type: 'button', text: 'No coincide', onclick: (ev) => { const nota = prompt('¿Qué tiene que corregir el piloto?'); if (nota) accion({ accion: 'rechazar', nota })(ev); } })));
     }
 
     // ---------- Clientes: revisión de identidad ----------

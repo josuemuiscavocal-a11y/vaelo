@@ -30,6 +30,7 @@ Página web y app (instalable en el celular) de Vaelo, mensajería en moto y pic
 - El piloto se registra, sube DPI, foto, antecedentes penales y policiacos, licencia, datos y fotos del vehículo, y contacto de emergencia.
   Queda "En revisión" hasta que la administración lo aprueba desde la ficha del piloto.
 - Ya aprobado solo puede cambiar su contacto y renovar licencia y antecedentes; lo demás lo cambia la administración.
+- Las renovaciones quedan **por revisar**: la oficina compara la fecha escrita con la foto en la ficha del piloto y la confirma o la rechaza con una nota. Mientras tanto vale la licencia o los antecedentes anteriores.
 - Con la licencia o los antecedentes vencidos (vigencia configurable, 6 meses al inicio) no puede conectarse ni recibir envíos.
 - Para estar "en línea" y para aceptar un envío necesita la ubicación encendida. Con una entrega en curso no puede desconectarse.
 - El estado del envío cambia solo con el GPS: llegó a recoger, en camino (al salir del punto de recogida) y llegando.
@@ -70,12 +71,14 @@ Página web y app (instalable en el celular) de Vaelo, mensajería en moto y pic
 ## Fletes en pickup
 
 - El pickup ya no aparece para los clientes: se pide por WhatsApp y servicio al cliente acuerda qué se lleva y el precio.
-- En el panel, **Envíos > Nuevo flete en pickup**: cliente (con o sin cuenta), qué se lleva, de dónde a dónde, precio acordado y piloto. Se puede marcar que el piloto ya salió con la carga. El piloto recibe el aviso y entrega con foto y nombre de quien recibe.
+- En el panel, **Envíos > Nuevo flete**: solo precio acordado, vehículo, piloto y (opcional) el WhatsApp del cliente. Se genera un enlace `/flete/...` que se manda por WhatsApp.
+- Con ese enlace el cliente llena quién entrega y quién recibe, qué se lleva (con foto), y la forma de pago. Luego cada uno comparte su ubicación en tiempo real, igual que en un envío normal. El precio no cambia.
+- El piloto ve el flete «esperando datos» y puede salir cuando el cliente termina.
 - Cualquier vehículo se puede marcar «Solo flete» en Tarifas y ajustes.
 
 ## Empresas
 
-1. El cliente entra a **Mis envíos > Empresa** y llena la solicitud: datos de la empresa, representante, fotos de la sede, DPI del representante y patente de comercio.
+1. La empresa entra a **vaelomensajeria.com/empresas** (en el menú principal), crea su cuenta y llena la solicitud: datos de la empresa, representante, fotos de la sede, DPI del representante y patente de comercio.
 2. La oficina la revisa en el panel (**Empresas**), pone la **cita para firmar** (la empresa recibe aviso y correo) y, ya firmado, **activa la empresa**.
 3. La empresa tiene su panel con estadísticas (envíos, éxito de entrega, zonas, motivos de fallo, cobros contra entrega, cargos), puede elegir **«Paga quien recibe»** y mandar **varios paquetes a la misma dirección por un solo precio**.
 4. **Envío a la sede:** sube una lista de 10 paquetes o más y los lleva a la sede. La oficina marca «Llegaron a la sede» y desde ahí se reparten. Si salen el mismo día no pagan bodega; si se quedan, cuesta Q10 por paquete por día.
@@ -115,7 +118,6 @@ Página web y app (instalable en el celular) de Vaelo, mensajería en moto y pic
 - **Valor declarado:** opcional; sirve para evaluar un reclamo.
 - **Calificación del cliente:** el piloto califica al cliente al terminar; la oficina ve el promedio.
 - **Varias entregas en un viaje:** los envíos por archivo se ofrecen juntos al mismo piloto.
-- **Tiendas en línea:** las cuentas de empresa crean una clave y crean envíos por API, con avisos de estado firmados. Instrucciones en `/tiendas`.
 - **Términos** (`/terminos`) y **privacidad** (`/privacidad`). Al registrarse se aceptan. Conviene que un abogado los revise.
 
 ## Seguridad y servidor

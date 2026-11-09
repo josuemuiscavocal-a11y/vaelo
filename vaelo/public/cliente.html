@@ -34,7 +34,7 @@
       <div class="pestanas" role="tablist">
         <button role="tab" id="tab-nuevo" aria-selected="true" aria-controls="panel-nuevo">Enviar paquete</button>
         <button role="tab" id="tab-lista" aria-selected="false" aria-controls="panel-lista">Mis envíos <span id="conteo"></span></button>
-        <button role="tab" id="tab-empresa" aria-selected="false" aria-controls="panel-empresa">Empresa</button>
+        <button role="tab" id="tab-empresa" aria-selected="false" aria-controls="panel-empresa" hidden>Mi empresa</button>
         <button role="tab" id="tab-cuenta" aria-selected="false" aria-controls="panel-cuenta">Mis datos</button>
       </div>
       <section id="panel-empresa" role="tabpanel" aria-labelledby="tab-empresa" hidden><div id="zona-empresa"></div></section>
@@ -177,16 +177,6 @@
           <h2>Cargos</h2>
           <p class="bloque-nota">Cargos por cancelar con el piloto en camino, devoluciones, días en la sede o nuevas entregas. Los pendientes se cobran junto con tu siguiente envío.</p>
           <div id="lista-cargos"></div>
-        </section>
-        <section class="bloque" id="bloque-tienda" hidden>
-          <h2>Conectar tu tienda en línea</h2>
-          <p class="bloque-nota">Crea envíos desde tu tienda (Shopify, WooCommerce u otra) con una clave privada, y recibe un aviso en tu sistema cada vez que cambia el estado. <a href="/tiendas" target="_blank">Ver instrucciones para tu programador</a>.</p>
-          <div id="msg-tienda" class="mensaje" role="alert"></div>
-          <div id="tienda-clave"></div>
-          <div class="fila" style="align-items:end;margin-top:.75rem">
-            <div class="campo"><label for="webhook">Dirección para avisos de estado <span class="ayuda">Opcional, empieza con https://</span></label><input id="webhook" type="url" maxlength="300" placeholder="https://mitienda.com/vaelo/avisos"></div>
-            <div class="campo"><button class="boton borde" type="button" id="guardar-webhook">Guardar dirección</button></div>
-          </div>
         </section>
         <form class="bloque" id="form-pass" novalidate>
           <h2>Cambiar contraseña</h2>
@@ -610,35 +600,6 @@
         el('span', { style: 'text-align:right' }, el('span', { class: 'monto', text: dinero(c.monto) }), el('br'), el('span', { class: estado(c)[1], text: estado(c)[0] })))))
         : el('p', { class: 'pista', text: 'No tienes cargos.' }));
     }
-    // Tiendas en línea (cuentas de empresa)
-    async function cargarTienda() {
-      let t;
-      try { t = await api('/api/yo/tienda'); } catch { return; }
-      $('bloque-tienda').hidden = !t.empresa;
-      if (!t.empresa) return;
-      $('webhook').value = t.webhook_url || '';
-      const pintarClave = (nueva, secreto) => $('tienda-clave').replaceChildren(
-        nueva ? el('div', { class: 'mensaje aviso' }, el('strong', { text: 'Copia tu clave ahora: no la volveremos a mostrar.' }), el('br'),
-          el('code', { class: 'clave-api', text: nueva }), secreto ? [el('br'), 'Secreto para verificar los avisos: ', el('code', { class: 'clave-api', text: secreto })] : '') : '',
-        el('p', {}, t.clave_pista && !nueva ? ['Clave activa: ', el('code', { text: t.clave_pista })] : nueva ? '' : 'Todavía no tienes una clave.'),
-        t.recogida.length ? el('p', { class: 'pista', text: 'Puntos de recogida guardados con ubicación (usa su número como direccion_id): ' + t.recogida.map(d => `${d.id} = ${d.nombre}`).join(', ') }) : '',
-        el('div', { class: 'navegar' },
-          el('button', { class: 'boton chico', type: 'button', text: t.clave_pista ? 'Crear una clave nueva' : 'Crear clave', onclick: async () => {
-            if (t.clave_pista && !confirm('La clave anterior dejará de funcionar. ¿Crear una nueva?')) return;
-            try { const r = await api('/api/yo/tienda', { body: { nueva_clave: true } }); t.clave_pista = 'nueva'; pintarClave(r.clave, r.secreto); } catch (e) { mostrarMensaje($('msg-tienda'), e.message); }
-          } }),
-          t.clave_pista ? el('button', { class: 'boton peligro chico', type: 'button', text: 'Desactivar clave', onclick: async () => {
-            if (!confirm('Tu tienda ya no podrá crear envíos. ¿Desactivar?')) return;
-            await api('/api/yo/tienda', { body: { quitar_clave: true } }); cargarTienda();
-          } }) : null));
-      pintarClave();
-    }
-    $('guardar-webhook').addEventListener('click', async () => {
-      try { const r = await api('/api/yo/tienda', { body: { webhook_url: $('webhook').value } });
-        mostrarMensaje($('msg-tienda'), r.secreto ? `Guardado. Cada aviso llega firmado en la cabecera X-Vaelo-Firma con tu secreto: ${r.secreto}` : 'Guardado.', 'exito'); }
-      catch (e) { mostrarMensaje($('msg-tienda'), e.message); }
-    });
-
     // Avisos de la cuenta: correo sin confirmar y verificación de identidad
     let yoCliente = null, correoActivo = false;
     async function cargarCuenta() {
@@ -651,6 +612,7 @@
         $('opcion-credito').hidden = !yoCliente.credito_permitido;
         $('opcion-recibe').hidden = yoCliente.tipo_cuenta !== 'empresa';
         $('campo-paquetes').hidden = yoCliente.tipo_cuenta !== 'empresa';
+        $('tab-empresa').hidden = yoCliente.tipo_cuenta !== 'empresa';
         $('modo-envio').hidden = yoCliente.tipo_cuenta !== 'empresa';
         if (yoCliente.tipo_cuenta === 'empresa') avisos.push(el('div', { class: 'mensaje exito' }, `Cuenta de empresa${yoCliente.empresa_nombre ? ': ' + yoCliente.empresa_nombre : ''}.`,
           yoCliente.descuento_empresa > 0 ? ` Tienes ${yoCliente.descuento_empresa}% de descuento en tus envíos.` : ''));
@@ -816,7 +778,7 @@
       if (!usuario) { location.href = '/entrar?volver=' + encodeURIComponent(location.pathname); return; }
       $('zona-instalar').replaceChildren(bloqueInstalar('Vaelo'));
       $('zona-avisos-push').replaceChildren(bloqueAvisos('Te avisamos al celular cuando el piloto acepte, recoja y entregue tu paquete, aunque Vaelo esté cerrado.'));
-      cargarCargos(); cargarTienda();
+      cargarCargos();
       cargarCuenta();
       $('saludo').textContent = `Hola, ${usuario.nombre.split(' ')[0]}`;
       $('origen_telefono').value = usuario.telefono || '';
@@ -899,7 +861,7 @@
       // Desde un aviso del celular: abre ese envío
       const abrir = new URLSearchParams(location.search).get('envio');
       if (abrir) verDetalle(Number(abrir));
-      if (new URLSearchParams(location.search).get('empresa')) abrirTab('empresa');
+      if (new URLSearchParams(location.search).get('empresa')) { if (usuario.tipo_cuenta === 'empresa') abrirTab('empresa'); else location.href = '/empresas'; }
     })();
   </script>
 </body>

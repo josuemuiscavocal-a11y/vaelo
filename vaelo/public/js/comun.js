@@ -156,6 +156,7 @@ async function pintarBarra() {
   try { usuario = (await api('/api/yo')).usuario; } catch { /* sin sesión */ }
   const nav = el('nav', { class: 'nav', 'aria-label': 'Principal' });
   if (!usuario || usuario.rol !== 'mensajero') nav.append(el('a', { href: '/rastreo', text: 'Rastrear' }));
+  if (!usuario || (usuario.rol === 'cliente' && usuario.tipo_cuenta !== 'empresa')) nav.append(el('a', { href: '/empresas', text: 'Empresas' }));
   if (usuario) {
     if (usuario.rol === 'admin') nav.append(el('a', { href: '/familiatecun', text: 'Panel' }));
     if (usuario.rol === 'mensajero') nav.append(el('a', { href: '/modomensajero', text: 'Mis entregas' }));

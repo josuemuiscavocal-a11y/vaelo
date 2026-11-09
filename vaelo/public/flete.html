@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Tu flete · Vaelo</title>
+  <meta name="theme-color" content="#0e2463">
+  <link rel="icon" href="/img/favicon.png" type="image/png">
+  <link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/styles.css?v=20261109b">
+</head>
+<body>
+  <header class="barra"><div class="contenedor"><a href="/" class="marca"><img src="/img/logo-blanco.png" alt="Vaelo" width="139" height="40"></a></div></header>
+  <main class="area"><div class="contenedor" id="app" style="max-width:720px"><p class="pista">Cargando…</p></div></main>
+  <script src="/js/comun.js?v=20261109c"></script>
+  <script>
+    const app = document.getElementById('app');
+    const token = location.pathname.split('/').pop();
+    const wa = (tel) => { let t = String(tel || '').replace(/\D/g, ''); if (t.length === 8) t = '502' + t; return t; };
+    async function cargar() {
+      let f;
+      try { f = await api('/api/flete/' + token); } catch (e) { app.replaceChildren(el('div', { class: 'mensaje error', text: e.message })); return; }
+      const cab = el('div', { class: 'flete-cabecera' },
+        el('div', {}, el('span', { class: 'etiqueta-flete', text: 'Flete en ' + (f.vehiculo || 'pickup').toLowerCase() }), el('h1', { text: f.configurado ? 'Tu flete' : 'Completa los datos de tu flete' }),
+          el('p', { class: 'pista', text: `Guía ${f.guia}${f.piloto ? ' · piloto ' + f.piloto : ''}` })),
+        el('div', { class: 'flete-precio' }, el('span', { text: 'Precio acordado' }), el('strong', { text: dinero(f.precio) })));
+      if (!f.configurado) return pintarFormulario(f, cab);
+      const enlaceTxt = (rol, nombre, url) => rol === 'entrega'
+        ? `Hola ${nombre.split(' ')[0]}, Vaelo pasará a recoger un flete (guía ${f.guia}). Abre este enlace y comparte tu ubicación para que el piloto llegue a donde estás: ${location.origin}${url}`
+        : `Hola ${nombre.split(' ')[0]}, te llevan un flete con Vaelo (guía ${f.guia}). Abre este enlace y comparte tu ubicación para que el piloto llegue a donde estés: ${location.origin}${url}`;
+      const persona = (titulo, d, url, rol) => el('div', { class: 'bloque' },
+        el('h3', {}, titulo, ' ', el('span', { class: d.confirmado ? 'receptor-estado si' : 'receptor-estado no', text: d.confirmado ? 'Ubicación compartida' : 'Falta su ubicación' })),
+        el('p', {}, el('strong', { text: d.nombre }), ` · ${d.telefono}`, el('br'), [d.direccion, d.zona].filter(Boolean).join(', ')),
+        url && !d.confirmado ? el('div', { class: 'navegar' },
+          rol === 'entrega' ? el('a', { class: 'boton chico', href: url, text: 'Soy yo: compartir mi ubicación' }) : null,
+          el('a', { class: 'boton cinta chico', href: `https://wa.me/${wa(d.telefono)}?text=${encodeURIComponent(enlaceTxt(rol, d.nombre, url))}`, target: '_blank', rel: 'noopener', text: 'Mandarle su enlace por WhatsApp' })) : null);
+      app.replaceChildren(cab,
+        el('div', { class: 'mensaje aviso', text: f.estado === 'pendiente' ? 'Para que el piloto salga, quien entrega y quien recibe tienen que compartir su ubicación en vivo con su enlace. El piloto llega a donde estén.' : 'El flete va en camino. Puedes seguirlo con la guía.' }),
+        f.metodo_pago === 'transferencia' && f.pago_estado !== 'verificado' ? el('div', { class: 'cargos-aviso' },
+          el('span', {}, el('strong', { style: 'font-size:1rem', text: `Transferencia de ${dinero(f.precio)}` }), el('br'), el('small', { text: (f.datos_transferencia ? f.datos_transferencia + '. ' : '') + 'Manda el comprobante por WhatsApp: el flete sale cuando confirmemos el pago.' })),
+          el('a', { class: 'boton cinta chico', href: `https://wa.me/${f.whatsapp_pagos}?text=${encodeURIComponent('Hola Vaelo, adjunto el comprobante del flete ' + f.guia + ' por ' + dinero(f.precio) + '.')}`, target: '_blank', rel: 'noopener', text: 'Mandar comprobante' })) : null,
+        persona('Quien entrega la carga', f.origen, f.enlace_entrega, 'entrega'),
+        persona('Quien recibe', f.destino, f.enlace_recibe, 'recibe'),
+        f.codigo_entrega ? el('div', { class: 'codigo-entrega' }, el('div', {}, el('span', { text: 'Código de entrega' }), el('strong', { text: f.codigo_entrega })),
+          el('p', { text: 'Quien recibe lo ve en su enlace. El piloto lo pide para entregar.' })) : null,
+        el('a', { class: 'boton borde', href: '/rastreo?guia=' + f.guia, text: 'Seguir el flete' }));
+    }
+    function pintarFormulario(f, cab) {
+      const msg = el('div', { class: 'mensaje', role: 'alert' });
+      const campos = {};
+      const c = (k, t, attrs = {}, ayuda) => { const { tag, opciones, ...resto } = attrs; const i = el(tag === 'select' ? 'select' : 'input', { id: k, ...resto }, opciones || []); campos[k] = i;
+        return el('div', { class: 'campo' }, el('label', { for: k }, t, ayuda ? el('span', { class: 'ayuda', text: ' ' + ayuda }) : null), i); };
+      const zonas = () => ({ tag: 'select', opciones: f.zonas.map(z => el('option', { value: z, text: z })) });
+      const foto = el('input', { id: 'foto', type: 'file', accept: 'image/*', capture: 'environment' });
+      const vista = el('img', { alt: '', hidden: true });
+      const vacio = el('span', { class: 'foto-paquete-vacio' }, el('strong', { text: 'Toma una foto de lo que se va a llevar' }), el('small', { text: 'Obligatoria. Así queda registrado cómo estaba antes de cargarlo.' }));
+      foto.addEventListener('change', () => { if (foto.files[0]) { vista.src = URL.createObjectURL(foto.files[0]); vista.hidden = false; vacio.hidden = true; } });
+      const sec = (n, t, ...h) => el('section', { class: 'bloque seccion-paso' }, el('div', { class: 'seccion-cab' }, el('span', { class: 'num', text: n }), el('div', {}, el('h2', { text: t }))), ...h);
+      const form = el('form', { novalidate: true },
+        sec('1', 'La carga', c('descripcion', '¿Qué se va a llevar?', { maxlength: 200, value: f.descripcion || '', placeholder: 'Refrigeradora, 10 cajas, muebles…' }),
+          el('div', { class: 'foto-paquete' }, el('label', { class: 'foto-paquete-boton', for: 'foto' }, vista, vacio, foto))),
+        sec('2', '¿Dónde se recoge?', el('div', { class: 'fila' }, c('origen_nombre', 'Quien entrega la carga', { maxlength: 100 }), c('origen_telefono', 'Su teléfono', { type: 'tel', maxlength: 30 })),
+          el('div', { class: 'fila' }, c('origen_zona', 'Zona o municipio', zonas()), c('origen_direccion', 'Referencias', { maxlength: 300, placeholder: 'Bodega, casa, color de puerta' }))),
+        sec('3', '¿Quién la recibe?', el('div', { class: 'fila' }, c('destino_nombre', 'Nombre', { maxlength: 100 }), c('destino_telefono', 'Teléfono', { type: 'tel', maxlength: 30 })),
+          el('div', { class: 'fila' }, c('destino_zona', 'Zona o municipio', zonas()), c('destino_direccion', 'Referencias', { maxlength: 300 }))),
+        sec('4', 'Pago', el('div', { class: 'fila' },
+          c('metodo_pago', '¿Cómo pagas?', { tag: 'select', opciones: [el('option', { value: 'efectivo', text: 'Efectivo al piloto' }), el('option', { value: 'transferencia', text: 'Transferencia (comprobante por WhatsApp)' })] }),
+          c('cobro_destinatario', 'Cobrar a quien recibe (Q)', { type: 'number', min: 0, step: '0.01', placeholder: '0.00' }, 'Opcional')),
+          c('notas', 'Indicaciones para el piloto', { maxlength: 300 }, 'Opcional')),
+        msg, el('button', { class: 'boton accion-principal', type: 'submit', text: 'Guardar datos del flete' }));
+      form.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const b = form.querySelector('button[type=submit]'); b.disabled = true;
+        try {
+          if (!foto.files[0]) throw new Error('Toma una foto de lo que se va a llevar.');
+          const body = Object.fromEntries(Object.entries(campos).map(([k, i]) => [k, i.value]));
+          body.foto = await prepararArchivo(foto.files[0], false);
+          await api('/api/flete/' + token, { body });
+          cargar();
+        } catch (e) { mostrarMensaje(msg, e.message); b.disabled = false; }
+      });
+      app.replaceChildren(cab, el('p', { class: 'pista', text: 'Llena los datos y después cada persona comparte su ubicación con su enlace, igual que un envío normal. El precio ya está acordado.' }), form);
+    }
+    cargar();
+  </script>
+</body>
+</html>

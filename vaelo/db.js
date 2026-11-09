@@ -435,6 +435,9 @@ if (!db.prepare("SELECT 1 FROM ajustes WHERE clave = 'v4_migrado'").get()) {
   db.exec("UPDATE ajustes SET valor = '50237731793' WHERE clave = 'whatsapp' AND valor = ''");
   db.exec("INSERT INTO ajustes (clave, valor) VALUES ('v4_migrado', datetime('now'))");
 }
+agregarColumnas('envios', [['flete_token', 'TEXT'], ['flete_configurado_en', 'TEXT']]);
+agregarColumnas('usuarios', [['renovacion_pendiente', 'TEXT']]);   // licencia o antecedentes renovados que la oficina todavía no confirma
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_envios_flete_token ON envios(flete_token)');
 insAj.run('whatsapp_pagos', '50237731793');   // WhatsApp oficial donde se mandan los comprobantes de transferencia
 insAj.run('dias_liquidar', '3');              // días que puede pasar un piloto sin entregar el efectivo en la sede
 insAj.run('cargo_bodega_empresa', '10');      // Q por paquete por día en la sede (envíos de empresa)

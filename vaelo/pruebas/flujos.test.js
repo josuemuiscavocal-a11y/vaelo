@@ -227,18 +227,8 @@ test('contraseña nueva con el enlace del correo', async () => {
   await ana('POST', '/api/login', { email: 'ana@prueba.com', password: 'otra-clave-123' });
 });
 
-test('tienda en línea: crear un envío con la clave de la API', async () => {
-  assert.equal((await ana('POST', '/api/yo/tienda', { nueva_clave: true })).status, 403, 'solo empresas');
+test('cuenta de empresa activada desde el panel', async () => {
   await admin('PUT', `/api/admin/clientes/${anaId}/empresa`, { tipo_cuenta: 'empresa', empresa_nombre: 'Tienda Ana' });
-  const k = await ana('POST', '/api/yo/tienda', { nueva_clave: true });
-  assert.ok(k.j.clave.startsWith('vaelo_'));
-  const api = cliente();
-  const r = await api('POST', '/api/v1/envios', { origen_lat: ZONA1.lat, origen_lng: ZONA1.lng, origen_direccion: 'Bodega', destino_nombre: 'Comprador', destino_telefono: '55559999',
-    destino_direccion: 'Casa', peso: 1, metodo_pago: 'efectivo' }, { Authorization: 'Bearer ' + k.j.clave });
-  assert.equal(r.status, 201, JSON.stringify(r.j));
-  assert.ok(r.j.enlace_receptor.includes('/recibe/'));
-  assert.equal((await api('GET', `/api/v1/envios/${r.j.guia}`, null, { Authorization: 'Bearer ' + k.j.clave })).j.estado, 'pendiente');
-  assert.equal((await api('GET', `/api/v1/envios/${r.j.guia}`, null, { Authorization: 'Bearer vaelo_' + 'a'.repeat(48) })).status, 401);
 });
 
 test('el cifrado de los avisos push se puede descifrar con las claves del celular', () => {
@@ -269,17 +259,40 @@ test('el pedido sin foto del paquete no se acepta y el pickup solo es flete', as
   assert.ok(!(await cliente()('GET', '/api/config')).j.vehiculos.some((v) => v.id === pickup.id));
 });
 
-test('flete creado por la oficina con precio a mano', async () => {
+test('flete: la oficina pone precio y piloto; el cliente completa los datos con su enlace', async () => {
   db.prepare('UPDATE usuarios SET vehiculo_id = ? WHERE id = ?').run(db.prepare("SELECT id FROM vehiculos WHERE solo_oficina = 1").get().id, pilotoId);
-  const r = await admin('POST', '/api/admin/fletes', { vehiculo_id: 2, mensajero_id: pilotoId, precio: 250, cliente_nombre: 'Don Pedro', cliente_telefono: '55557777',
-    origen_direccion: 'Bodega zona 12', destino_nombre: 'María', destino_telefono: '55558888', destino_direccion: 'Casa zona 18', descripcion: 'Refrigeradora' });
+  const r = await admin('POST', '/api/admin/fletes', { vehiculo_id: 2, mensajero_id: pilotoId, precio: 250, cliente_telefono: '55557777' });
   assert.equal(r.status, 201, JSON.stringify(r.j));
-  const f = fila(r.j.id);
-  assert.equal(f.estado, 'recogido'); assert.equal(f.precio, 250); assert.equal(f.flete, 1); assert.equal(f.asignacion, 'aceptado');
-  const ent = await piloto('POST', `/api/piloto/envios/${r.j.id}/estado`, { estado: 'entregado', recibio: 'María', foto: FOTO, lat: 14.6, lng: -90.5 });
+  assert.match(r.j.enlace, /^\/flete\/[a-f0-9]{32}$/);
+  const token = r.j.enlace.split('/').pop();
+  assert.equal((await admin('POST', `/api/admin/envios/${r.j.id}/asignar`, { mensajero_id: pilotoId })).status, 400, 'no sale hasta que el cliente complete los datos');
+  const c = cliente();
+  assert.equal((await c('GET', `/api/flete/${token}`)).j.configurado, false);
+  const sinFoto = await c('POST', `/api/flete/${token}`, { origen_nombre: 'Don Pedro', origen_telefono: '55557777', origen_direccion: 'Bodega z12', destino_nombre: 'María', destino_telefono: '55558888', destino_direccion: 'Casa z18', descripcion: 'Refrigeradora' });
+  assert.equal(sinFoto.status, 400);
+  assert.equal((await c('POST', `/api/flete/${token}`, { origen_nombre: 'Don Pedro', origen_telefono: '55557777', origen_direccion: 'Bodega z12', destino_nombre: 'María', destino_telefono: '55558888', destino_direccion: 'Casa z18', descripcion: 'Refrigeradora', foto: FOTO })).status, 200);
+  const info = (await c('GET', `/api/flete/${token}`)).j;
+  assert.equal(info.configurado, true);
+  assert.ok(info.enlace_entrega && info.enlace_recibe && info.codigo_entrega);
+  // Quien entrega y quien recibe comparten su ubicación con sus enlaces, como en un envío normal
+  await cliente()('POST', `/api/recibe/${info.enlace_entrega.split('/').pop()}/confirmar`, { nombre: 'Don Pedro', lat: 14.60, lng: -90.52 });
+  await cliente()('POST', `/api/recibe/${info.enlace_recibe.split('/').pop()}/confirmar`, { nombre: 'María', lat: 14.58, lng: -90.48 });
+  assert.equal((await piloto('POST', `/api/piloto/envios/${r.j.id}/estado`, { estado: 'recogido', lat: 14.60, lng: -90.52 })).status, 200);
+  const ent = await piloto('POST', `/api/piloto/envios/${r.j.id}/estado`, { estado: 'entregado', codigo: info.codigo_entrega, recibio: 'María', foto: FOTO, lat: 14.58, lng: -90.48 });
   assert.equal(ent.status, 200, JSON.stringify(ent.j));
   assert.equal(fila(r.j.id).ganancia_piloto, 245);
+  assert.equal(fila(r.j.id).precio, 250, 'el precio del flete no cambia con las ubicaciones');
   db.prepare('UPDATE usuarios SET vehiculo_id = 1 WHERE id = ?').run(pilotoId);
+});
+
+test('renovación de licencia: la fecha nueva vale hasta que la oficina la confirma', async () => {
+  const antes = db.prepare('SELECT licencia_vence FROM usuarios WHERE id = ?').get(pilotoId).licencia_vence;
+  assert.equal((await piloto('PUT', '/api/piloto/perfil', { licencia_vence: '2031-01-01', telefono: '55552222' })).status, 200);
+  assert.equal(db.prepare('SELECT licencia_vence FROM usuarios WHERE id = ?').get(pilotoId).licencia_vence, antes, 'todavía no cambia');
+  const ficha = (await admin('GET', `/api/admin/mensajeros/${pilotoId}`)).j.piloto;
+  assert.equal(ficha.renovacion.campos.licencia_vence, '2031-01-01');
+  assert.equal((await admin('POST', `/api/admin/mensajeros/${pilotoId}/renovacion`, { accion: 'aprobar' })).status, 200);
+  assert.equal(db.prepare('SELECT licencia_vence, renovacion_pendiente FROM usuarios WHERE id = ?').get(pilotoId).licencia_vence, '2031-01-01');
 });
 
 test('reclamo: se evalúa, se devuelve al cliente y se descuenta al piloto', async () => {

@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vaelo para empresas · Vaelo</title>
+  <meta name="theme-color" content="#0e2463">
+  <link rel="icon" href="/img/favicon.png" type="image/png">
+  <link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/styles.css?v=20261109b">
+</head>
+<body>
+  <header id="barra" class="barra"><div class="contenedor"><a href="/" class="marca"><img src="/img/logo-blanco.png" alt="Vaelo" width="139" height="40"></a></div></header>
+  <section class="empresas-hero">
+    <div class="contenedor">
+      <div>
+        <h1>Tus entregas con los pilotos de Vaelo</h1>
+        <p>Para negocios que envían muchos pedidos: usa nuestra flotilla de motos sin contratar la tuya. Tu cliente puede pagar el envío al recibir.</p>
+      </div>
+      <ol class="empresas-pasos">
+        <li><strong>Envía tu solicitud</strong><span>Datos de la empresa, fotos de la sede y del representante.</span></li>
+        <li><strong>Firmamos el contrato</strong><span>Te damos una cita en la sede.</span></li>
+        <li><strong>Empieza a enviar</strong><span>Con tu panel de empresa y tus estadísticas.</span></li>
+      </ol>
+    </div>
+  </section>
+  <main class="area"><div class="contenedor" id="zona-empresa" style="max-width:980px"><p class="pista">Cargando…</p></div></main>
+  <footer class="pie-sitio"><div class="contenedor"><div>Vaelo Mensajería · Guatemala</div><div><a href="/politicas-empresas">Políticas para empresas</a> · <a href="/terminos">Términos</a> · <a href="/privacidad">Privacidad</a></div></div></footer>
+  <script src="/js/comun.js?v=20261109c"></script>
+  <script src="/js/empresa.js?v=2"></script>
+  <script>
+    const zona = document.getElementById('zona-empresa');
+    // Sin sesión: crear la cuenta de la empresa o entrar para seguir con la solicitud
+    function pintarAcceso() {
+      const msg = el('div', { class: 'mensaje', role: 'alert' }), msg2 = el('div', { class: 'mensaje', role: 'alert' });
+      const c = (id, t, attrs) => el('div', { class: 'campo' }, el('label', { for: id, text: t }), el('input', { id, ...attrs }));
+      const crear = el('form', { class: 'bloque', novalidate: true },
+        el('h2', { text: 'Empieza tu solicitud' }), el('p', { class: 'pista', text: 'Crea el acceso de tu empresa. Con este correo y contraseña entras a tu panel cuando se active el contrato.' }), msg,
+        el('div', { class: 'fila' }, c('n', 'Tu nombre (contacto)', { autocomplete: 'name', maxlength: 100 }), c('t', 'Teléfono', { type: 'tel', maxlength: 30 })),
+        el('div', { class: 'fila' }, c('e', 'Correo de la empresa', { type: 'email', autocomplete: 'email', maxlength: 150 }), c('p', 'Contraseña (mínimo 8)', { type: 'password', autocomplete: 'new-password' })),
+        el('label', { class: 'casilla' }, el('input', { type: 'checkbox', id: 'ok', style: 'width:auto' }), el('span', {}, 'Acepto los ', el('a', { href: '/terminos', target: '_blank', text: 'términos' }), ' y el ', el('a', { href: '/privacidad', target: '_blank', text: 'aviso de privacidad' }))),
+        el('button', { class: 'boton', type: 'submit', text: 'Crear acceso y seguir' }));
+      crear.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        try {
+          await api('/api/registro', { body: { nombre: crear.n.value, telefono: crear.t.value, email: crear.e.value, password: crear.p.value, acepto_terminos: crear.ok.checked } });
+          await api('/api/empresa/solicitud', { method: 'PUT', body: { correo: crear.e.value, telefono: crear.t.value, rep_nombre: crear.n.value } });
+          iniciar();
+        } catch (e) { mostrarMensaje(msg, e.message); }
+      });
+      const entrar = el('form', { class: 'bloque', novalidate: true },
+        el('h2', { text: '¿Ya empezaste?' }), el('p', { class: 'pista', text: 'Entra para seguir con tu solicitud o ir a tu panel de empresa.' }), msg2,
+        c('le', 'Correo', { type: 'email', autocomplete: 'email' }), c('lp', 'Contraseña', { type: 'password', autocomplete: 'current-password' }),
+        el('button', { class: 'boton borde', type: 'submit', text: 'Entrar' }), el('p', { class: 'pista' }, el('a', { href: '/recuperar', text: '¿Olvidaste tu contraseña?' })));
+      entrar.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        try { await api('/api/login', { body: { email: entrar.le.value, password: entrar.lp.value } }); iniciar(); } catch (e) { mostrarMensaje(msg2, e.message); }
+      });
+      zona.replaceChildren(el('div', { class: 'empresas-acceso' }, crear, entrar));
+    }
+    async function iniciar() {
+      const u = await pintarBarra();
+      if (!u) return pintarAcceso();
+      if (u.rol !== 'cliente') { zona.replaceChildren(el('div', { class: 'mensaje aviso', text: 'Esta sección es para empresas. Sal de tu sesión actual para crear el acceso de tu empresa.' })); return; }
+      if (u.tipo_cuenta === 'empresa') { location.href = '/mi-cuenta?empresa=1'; return; }
+      pintarEmpresa(zona);
+    }
+    iniciar();
+  </script>
+</body>
+</html>

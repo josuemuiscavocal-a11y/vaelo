@@ -902,3 +902,19 @@ body.app-piloto main { padding-bottom: 7rem; }
 /* Líneas parejas aunque las casillas ocupen varias filas */
 .celda-cifra { border-right: 0 !important; border-bottom: 0 !important; box-shadow: 2px 0 0 var(--tinta), 0 2px 0 var(--tinta); }
 .celda-cifra.activa { box-shadow: 2px 0 0 var(--tinta), 0 2px 0 var(--tinta), inset 0 -4px 0 var(--azul); }
+/* Página de empresas y enlace de flete */
+.empresas-hero { background: var(--azul-hondo); color: #fff; padding: 2.5rem 0 3rem; }
+.empresas-hero .contenedor { display: grid; grid-template-columns: 1.1fr 1fr; gap: 2rem; align-items: center; }
+.empresas-hero h1 { color: #fff; font-stretch: 125%; font-size: clamp(2rem, 4.5vw, 3rem); max-width: 16ch; }
+.empresas-hero p { color: #c9d3f5; font-size: 1.1rem; max-width: 46ch; }
+.empresas-pasos { list-style: none; counter-reset: p; margin: 0; padding: 0; display: grid; gap: .6rem; }
+.empresas-pasos li { counter-increment: p; display: grid; grid-template-columns: 2.4rem 1fr; column-gap: .8rem; background: rgba(255,255,255,.07); border-radius: var(--radio); padding: .8rem .9rem; }
+.empresas-pasos li::before { content: counter(p); grid-row: span 2; width: 2.4rem; height: 2.4rem; border-radius: 50%; background: var(--cinta); color: var(--azul-hondo); display: grid; place-items: center; font-weight: 800; }
+.empresas-pasos span { color: #c9d3f5; font-size: .9rem; }
+.empresas-acceso { display: grid; grid-template-columns: 1.4fr 1fr; gap: 1rem; align-items: start; }
+.empresas-acceso .bloque + .bloque { margin-top: 0; }
+@media (max-width: 760px) { .empresas-hero .contenedor, .empresas-acceso { grid-template-columns: 1fr; } }
+.flete-cabecera { display: flex; justify-content: space-between; align-items: flex-end; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
+.flete-cabecera h1 { font-size: clamp(1.6rem, 4vw, 2.2rem); font-stretch: 112%; margin: .4rem 0 .1rem; }
+.flete-precio { background: var(--azul-hondo); color: #fff; border-radius: var(--radio); padding: .7rem 1rem; text-align: right; }
+.flete-precio span { display: block; color: #c9d3f5; font-size: .8rem; } .flete-precio strong { font-size: 1.7rem; font-stretch: 75%; }
