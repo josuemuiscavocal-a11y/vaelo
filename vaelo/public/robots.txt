@@ -1,0 +1,7 @@
+User-agent: *
+Disallow: /api/
+Disallow: /recibe/
+Disallow: /mi-cuenta
+Disallow: /enviar
+
+Sitemap: https://vaelomensajeria.com/sitemap.xml
