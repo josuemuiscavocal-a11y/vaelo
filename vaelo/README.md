@@ -13,7 +13,7 @@ Página web y app (instalable en el celular) de Vaelo, mensajería en moto y pic
 | `/enviar`, `/mi-cuenta` | Clientes | Enviar paquetes (vehículo, peso, mapa), seguirlos en el mapa, imprimir la guía |
 | `/modomensajero` | Pilotos | Registrarse y subir documentos, conectarse con GPS, aceptar o rechazar envíos, navegar con Google Maps o Waze, marcar recogido/entregado |
 | `/rastreo` | Todos | Seguir un envío con el número de guía |
-| `/familiatecun` | Administración | Aviso de pedidos nuevos, asignar al piloto más cercano, GPS en vivo de la flota, aprobar pilotos y revisar sus documentos, verificar la identidad de los clientes, tarifas |
+| `/familiatecun` | Administración | Aviso de pedidos nuevos, entregas fallidas y sede, asignar al piloto más cercano, GPS en vivo de la flota, aprobar pilotos y revisar sus documentos, verificar la identidad de los clientes, tarifas |
 
 ## Acceso de administración
 
@@ -52,6 +52,55 @@ Página web y app (instalable en el celular) de Vaelo, mensajería en moto y pic
 - Precio: por la zona elegida en la lista. Fuera de las zonas fijas se muestra un precio "desde" y el total por kilómetro se calcula cuando las dos personas comparten su ubicación.
 - Hasta tener las dos ubicaciones no se busca piloto ni se puede recoger. En cada envío el panel puede autorizar una excepción con motivo; también se puede apagar en Tarifas y ajustes ("Pedir ubicaciones en vivo antes de recoger").
 - Quien envía no ve la ubicación de quien recibe, ni aparece en el rastreo público. Las ubicaciones se dejan de compartir al recoger y al entregar, y se borran 30 días después.
+
+## Entregas fallidas, sede y cargos
+
+- Si el piloto no puede entregar (no contestan, no hay nadie, dirección incorrecta, rechazo o no pagaron el cobro), toca **No pude entregar** estando en el lugar.
+- El cliente recibe un aviso y elige en su cuenta:
+  - **Devolvérselo** (Q35 al inicio): el piloto lo regresa al punto de recogida con foto y nombre de quien lo recibe.
+  - **Guardarlo en la sede** (Q20 por día o fracción): el piloto lo deja en la sede. Desde ahí lo retiran (lo marca la oficina) o se manda de nuevo con un piloto (Q35 más los días en la sede). El enlace y el código de quien recibe siguen sirviendo.
+- Si el cliente no elige en 2 horas, el paquete va a la sede solo. La oficina también puede decidir por él desde el envío.
+- Cancelar con el piloto ya en camino cuesta Q15; el piloto gana el 50 %.
+- Los cargos pendientes se suman al siguiente envío del cliente. En **Caja > Cargos a clientes** se marcan pagados o se anulan.
+- Todos los montos, el plazo y la ubicación de la sede se cambian en **Tarifas y ajustes**.
+
+## Precio con los puntos reales
+
+- Cada zona con tarifa fija se puede **dibujar en el mapa** (Tarifas y ajustes > Zonas > Dibujar).
+- Con zonas dibujadas, la tarifa fija solo vale si la recogida y la entrega reales caen dentro de alguna. Si no, se cobra por km.
+- Sin zonas dibujadas, la tarifa fija vale hasta 15 km (editable).
+- Si quien recibe (o quien entrega) se mueve más de 1 km, el precio se vuelve a calcular y se le avisa al cliente.
+- Con clave de Mapbox, los km se miden con el servicio de rutas de Mapbox (más confiable que el servidor público de OSRM).
+
+## Avisos al celular (push) y por correo
+
+- Clientes, pilotos y oficina activan los avisos con el botón **Activar avisos**. Llegan aunque Vaelo esté cerrado.
+- Cliente: piloto aceptó, recogido, llegando, entregado, no se pudo entregar, precio actualizado, devuelto, en la sede. Los importantes también por correo (con Resend configurado).
+- Piloto: envío nuevo asignado, envío cancelado, devolver o llevar a la sede.
+- Oficina: pedido nuevo, entrega fallida, envío sin piloto, comprobante de transferencia.
+- En iPhone los avisos funcionan solo con Vaelo instalado en la pantalla de inicio (iOS 16.4 o más nuevo).
+- **Límite que sigue igual:** el GPS del piloto solo funciona con la app abierta y la pantalla encendida.
+
+## Otras funciones
+
+- **Olvidé mi contraseña** para clientes y pilotos (`/recuperar`, necesita Resend). La administración cambia la suya con `actualizar.sh --clave-admin`.
+- **Transferencias:** el cliente sube el comprobante; se verifica en **Caja > Transferencias por revisar**. Los datos de la cuenta se escriben en Tarifas y ajustes.
+- **Mis ganancias** del piloto: por cobrar, hoy, semana, mes, efectivo que debe entregar y pagos anteriores.
+- **Valor declarado y seguro opcional** (2 % del valor, mínimo Q5). Sin seguro, Vaelo responde hasta Q300.
+- **Calificación del cliente:** el piloto califica al cliente al terminar; la oficina ve el promedio.
+- **Varias entregas en un viaje:** los envíos por archivo se ofrecen juntos al mismo piloto.
+- **Tiendas en línea:** las cuentas de empresa crean una clave y crean envíos por API, con avisos de estado firmados. Instrucciones en `/tiendas`.
+- **Términos** (`/terminos`) y **privacidad** (`/privacidad`). Al registrarse se aceptan. Conviene que un abogado los revise.
+
+## Seguridad y servidor
+
+- `actualizar.sh` configura Nginx para tomar la IP real **solo** de Cloudflare. Así los bloqueos por intentos fallidos no se pueden saltar.
+- Los intentos fallidos se cuentan por internet y por correo; los inicios de sesión correctos no cuentan.
+- Al cambiar la contraseña se cierran las demás sesiones.
+- Un envío cerrado o que ya está en la caja no se puede cambiar a mano, y todo cambio manual pide motivo.
+- **Respaldos:** cada noche (comprimidos, 14 días). Si escribes un correo en Tarifas y ajustes > Copias de seguridad, también llegan por correo. Botón para descargar una copia al momento.
+- **Vigilante:** cada 5 minutos revisa que Vaelo responda; si no, lo reinicia y avisa al correo de respaldos. Para enterarte si se apaga todo el servidor, agrega `https://vaelomensajeria.com/api/salud` a un monitor gratis como UptimeRobot.
+- Pruebas automáticas: `node --test pruebas/flujos.test.js`.
 
 ## App en el celular (se instala desde Chrome, sin .apk ni Play Store)
 

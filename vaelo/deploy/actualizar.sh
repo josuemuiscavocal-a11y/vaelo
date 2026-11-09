@@ -27,7 +27,9 @@ if [ "${1:-}" != "--clave-admin" ]; then
     sed -i 's#^\[Service\]#[Service]\nEnvironmentFile=-/etc/vaelo.env#' /etc/systemd/system/vaelo.service
     systemctl daemon-reload
   fi
-  # Subidas: fotos de entrega y la app de Android (el servidor limita cada ruta; aquí el máximo general es 40 MB)
+  # IP real detrás de Cloudflare, respaldo diario y vigilante
+  bash "$APP_DIR/deploy/configurar-servidor.sh"
+  # Subidas: fotos de entrega y comprobantes (el servidor limita cada ruta; aquí el máximo general es 40 MB)
   if grep -Eq 'client_max_body_size (1|2)m;' /etc/nginx/sites-available/vaelo 2>/dev/null; then
     sed -i -E 's/client_max_body_size (1|2)m;/client_max_body_size 40m;/' /etc/nginx/sites-available/vaelo && nginx -t && systemctl reload nginx
   fi

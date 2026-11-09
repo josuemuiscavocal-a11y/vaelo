@@ -100,11 +100,8 @@ if ! swapon --show | grep -q .; then
   echo "Swap de 2 GB activado"
 fi
 
-paso "7/8 Copia de seguridad diaria (3:30 a. m.)"
-cat > /etc/cron.d/vaelo-respaldo <<EOF
-30 9 * * * vaelo VAELO_DATA=$DATA_DIR $(command -v node) $NODE_FLAGS $APP_DIR/herramientas/respaldo.js >/dev/null 2>&1
-EOF
-chmod 644 /etc/cron.d/vaelo-respaldo
+paso "7/8 IP real de Cloudflare, copia de seguridad diaria y vigilante"
+bash "$APP_DIR/deploy/configurar-servidor.sh"
 
 paso "8/8 Cuenta de administración"
 ADMIN_EMAIL="administracionvaelo@vaelomensajeria.com"
@@ -139,5 +136,5 @@ echo
 echo "============================================="
 echo " Vaelo está instalado."
 echo " Abre:  https://$DOMINIO"
-echo " Panel: https://$DOMINIO/admin"
+echo " Panel: https://$DOMINIO/familiatecun"
 echo "============================================="

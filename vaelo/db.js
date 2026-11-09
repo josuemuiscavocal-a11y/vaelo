@@ -294,4 +294,81 @@ insAj.run('exigir_receptor', '1');         // quien recibe debe confirmar con fo
 // Ajustes de la versión 1 que ya no se usan
 db.prepare("DELETE FROM ajustes WHERE clave IN ('recargo_mediano','recargo_grande')").run();
 
+// ---------- Versión 3: entregas fallidas, cargos, avisos, precios por zona dibujada, seguro y tiendas ----------
+agregarColumnas('usuarios', [
+  ['terminos_aceptados', 'TEXT'],
+  // Tiendas en línea: clave de la API (se guarda solo su huella) y dirección para avisar cambios de estado
+  ['api_clave_hash', 'TEXT'], ['api_clave_pista', 'TEXT'], ['webhook_url', 'TEXT'], ['webhook_secreto', 'TEXT'],
+]);
+agregarColumnas('envios', [
+  // Entrega fallida: el cliente elige devolver (cargo fijo) o guardar en la sede (cargo por día)
+  ['fallo_motivo', 'TEXT'], ['fallo_nota', 'TEXT'], ['fallo_en', 'TEXT'], ['fallo_foto', 'TEXT'],
+  ['fallo_decision', 'TEXT'], ['fallo_decidido_en', 'TEXT'], ['fallo_decidido_por', 'TEXT'],
+  ['sede_llegada', 'TEXT'], ['sede_salida', 'TEXT'], ['devuelto_en', 'TEXT'], ['devuelto_a', 'TEXT'],
+  ['reentrega_de', 'INTEGER'],
+  // Momento en que el piloto terminó su parte (entregó, devolvió, dejó en la sede o le cancelaron yendo en camino)
+  ['piloto_cerro_en', 'TEXT'],
+  // Cargos pendientes del cliente que se cobran junto con este envío
+  ['cargos_extra', 'REAL NOT NULL DEFAULT 0'],
+  // Valor declarado y seguro opcional
+  ['valor_declarado', 'REAL NOT NULL DEFAULT 0'], ['seguro', 'REAL NOT NULL DEFAULT 0'],
+  // Transferencia: foto del comprobante y revisión
+  ['comprobante', 'TEXT'], ['pago_estado', 'TEXT'], ['pago_nota', 'TEXT'],
+  // El piloto califica al cliente
+  ['calif_cliente', 'INTEGER'], ['calif_cliente_comentario', 'TEXT'],
+  // Varias entregas en un solo viaje (envíos por archivo)
+  ['grupo', 'TEXT'],
+  // Puntos con los que se calculó el precio: si se mueven más de 1 km se vuelve a calcular
+  ['precio_o_lat', 'REAL'], ['precio_o_lng', 'REAL'], ['precio_d_lat', 'REAL'], ['precio_d_lng', 'REAL'],
+]);
+agregarColumnas('zonas_fijas', [['poligono', 'TEXT']]);
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_envios_grupo ON envios(grupo);
+  -- Cargos al cliente: cancelación tardía, devolución, días en la sede y nueva entrega desde la sede
+  CREATE TABLE IF NOT EXISTS cargos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_id INTEGER NOT NULL REFERENCES usuarios(id),
+    envio_id INTEGER REFERENCES envios(id),
+    tipo TEXT NOT NULL,
+    monto REAL NOT NULL,
+    nota TEXT,
+    cobrado_envio_id INTEGER,          -- se cobró junto con otro envío (lo recibe su piloto o va en su transferencia)
+    pagado_en TEXT, pagado_como TEXT,  -- pagado directo en la sede o marcado por la administración
+    anulado_en TEXT, anulado_por TEXT,
+    creado TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_cargos_usuario ON cargos(usuario_id);
+  -- Avisos al celular (notificaciones push)
+  CREATE TABLE IF NOT EXISTS push_suscripciones (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+    endpoint TEXT NOT NULL UNIQUE,
+    p256dh TEXT NOT NULL, auth TEXT NOT NULL,
+    creado TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  -- Enlaces para crear una contraseña nueva
+  CREATE TABLE IF NOT EXISTS tokens_clave (
+    token TEXT PRIMARY KEY,
+    usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+    expira INTEGER NOT NULL
+  );
+`);
+// Envíos que ya estaban entregados antes de esta versión: el piloto ya había terminado su parte
+db.exec("UPDATE envios SET piloto_cerro_en = COALESCE(entregado_en, actualizado) WHERE estado = 'entregado' AND mensajero_id IS NOT NULL AND piloto_cerro_en IS NULL");
+insAj.run('cargo_devolucion', '35');         // devolver el paquete a quien lo envió
+insAj.run('cargo_bodega_dia', '20');          // cada día (o fracción) que el paquete está en la sede
+insAj.run('cargo_reentrega', '35');           // volver a llevarlo desde la sede
+insAj.run('horas_decidir_fallido', '2');      // si el cliente no elige en este tiempo, el paquete va a la sede
+insAj.run('cargo_cancelacion', '15');         // cancelar cuando el piloto ya va a recoger
+insAj.run('pct_piloto_cancelacion', '50');    // parte del cargo por cancelación que gana el piloto
+insAj.run('sede_direccion', '');
+insAj.run('sede_lat', '');
+insAj.run('sede_lng', '');
+insAj.run('seguro_pct', '2');                 // costo del seguro: % del valor declarado
+insAj.run('seguro_minimo', '5');
+insAj.run('responsabilidad_max', '300');      // lo máximo que Vaelo responde por un paquete sin seguro
+insAj.run('km_max_tarifa_fija', '15');        // sin zonas dibujadas: más km que esto deja de ser tarifa fija
+insAj.run('datos_transferencia', '');
+insAj.run('correo_respaldos', '');
+
 module.exports = { db, DB_PATH, DATA_DIR };

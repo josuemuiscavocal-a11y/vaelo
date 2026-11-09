@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { db, DATA_DIR } = require('./db');
+const { crearPush } = require('./push');
 
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '127.0.0.1';
@@ -21,8 +22,15 @@ const DOCS_DIR = path.join(DATA_DIR, 'documentos');   // fotos de identificació
 // Servicio de rutas para medir kilómetros reales por calle. Si falla, se usa la distancia en línea recta × 1.4
 const OSRM_URL = process.env.VAELO_OSRM === 'no' ? '' : (process.env.VAELO_OSRM || 'https://router.project-osrm.org');
 
-const ESTADOS = ['pendiente', 'recogido', 'en_camino', 'entregado', 'cancelado'];
-const ESTADOS_MENSAJERO = ['recogido', 'en_camino', 'entregado'];
+// Estados del envío. Si falla la entrega: fallido -> (el cliente elige) devolviendo -> devuelto, o a_sede -> en_sede -> entregado (retirado) o reenviado
+const ESTADOS = ['pendiente', 'recogido', 'en_camino', 'entregado', 'fallido', 'devolviendo', 'devuelto', 'a_sede', 'en_sede', 'reenviado', 'cancelado'];
+const ESTADOS_CERRADOS = ['entregado', 'devuelto', 'reenviado', 'cancelado'];
+// Estados en los que el piloto todavía lleva el paquete (o va por él)
+const ESTADOS_PILOTO_ACTIVO = ['pendiente', 'recogido', 'en_camino', 'fallido', 'devolviendo', 'a_sede'];
+const SQL_PILOTO_ACTIVO = `('pendiente','recogido','en_camino','fallido','devolviendo','a_sede')`;
+const ESTADOS_MENSAJERO = ['recogido', 'en_camino', 'entregado', 'devuelto', 'en_sede'];
+// El viaje se hizo (se cobra el envío): todo lo que ya no está activo ni cancelado
+const SQL_VIAJE_HECHO = `e.estado NOT IN ('pendiente','recogido','en_camino','cancelado')`;
 const METODOS_PAGO = ['efectivo', 'transferencia', 'credito'];
 const OTRA_ZONA = 'Otra zona o municipio';
 
@@ -99,7 +107,17 @@ async function kilometros(a, b) {
   const clave = [a.lat, a.lng, b.lat, b.lng].map((n) => n.toFixed(5)).join(',');
   if (cacheRutas.has(clave)) return cacheRutas.get(clave);
   let km = null, fuente = 'calle';
-  if (OSRM_URL) {
+  // Con clave de Mapbox se usa su servicio de rutas (más confiable); si no, el servidor público de OSRM
+  const tokenMapbox = getAjustes().mapbox_token || process.env.MAPBOX_TOKEN || '';
+  if (tokenMapbox) {
+    try {
+      const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${a.lng},${a.lat};${b.lng},${b.lat}?overview=false&access_token=${encodeURIComponent(tokenMapbox)}`;
+      const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
+      const j = await r.json();
+      if (j.routes && j.routes[0]) km = j.routes[0].distance / 1000;
+    } catch { /* se intenta con OSRM */ }
+  }
+  if (km == null && OSRM_URL) {
     try {
       const url = `${OSRM_URL}/route/v1/driving/${a.lng},${a.lat};${b.lng},${b.lat}?overview=false`;
       const r = await fetch(url, { signal: AbortSignal.timeout(5000), headers: { 'User-Agent': 'Vaelo-Mensajeria/1.0' } });
@@ -114,6 +132,34 @@ async function kilometros(a, b) {
   return out;
 }
 
+// ---------- Zonas con tarifa fija ----------
+// Cada zona puede tener su forma dibujada en el mapa (panel > Tarifas). Si hay formas, la tarifa fija solo vale cuando
+// la recogida y la entrega caen dentro de alguna; si no hay ninguna dibujada, vale mientras la distancia no pase del máximo.
+function zonasConForma() {
+  return db.prepare('SELECT id, nombre, poligono FROM zonas_fijas WHERE activa = 1 AND poligono IS NOT NULL').all()
+    .map((z) => { try { return { ...z, puntos: JSON.parse(z.poligono) }; } catch { return null; } }).filter((z) => z && z.puntos.length >= 3);
+}
+function dentroDe(p, puntos) {   // puntos: [[lng, lat], ...]
+  let dentro = false;
+  for (let i = 0, j = puntos.length - 1; i < puntos.length; j = i++) {
+    const [xi, yi] = puntos[i], [xj, yj] = puntos[j];
+    if ((yi > p.lat) !== (yj > p.lat) && p.lng < ((xj - xi) * (p.lat - yi)) / (yj - yi) + xi) dentro = !dentro;
+  }
+  return dentro;
+}
+const zonaDePunto = (p) => zonasConForma().find((z) => dentroDe(p, z.puntos))?.nombre || null;
+const kmMaxFija = () => Number(getAjustes().km_max_tarifa_fija) || 15;
+// ¿Se puede cobrar tarifa fija? (null en un punto = todavía no se conoce)
+function aplicaTarifaFija(oz, dz, origen, destino, km) {
+  if (oz === OTRA_ZONA || dz === OTRA_ZONA) return false;
+  const formas = zonasConForma();
+  if (formas.length) {
+    for (const p of [origen, destino]) if (p && !formas.some((z) => dentroDe(p, z.puntos))) return false;
+    return true;
+  }
+  return km == null || km <= kmMaxFija();
+}
+
 // Calcula el precio: tarifa fija si recogida y entrega están en zonas cubiertas; si no, por kilómetro
 async function cotizar(body) {
   const vehiculo = db.prepare('SELECT * FROM vehiculos WHERE id = ? AND activo = 1').get(numero(body.vehiculo_id));
@@ -126,33 +172,49 @@ async function cotizar(body) {
   for (const z of [oz, dz]) if (z !== OTRA_ZONA && !nombresZonas.includes(z)) falla(400, 'Elige la zona de recogida y la de entrega.');
   const origen = coordenada(body.origen_lat, body.origen_lng);
   const destino = coordenada(body.destino_lat, body.destino_lng);
+  const km = origen && destino ? (await kilometros(origen, destino)) : null;
 
-  if (oz !== OTRA_ZONA && dz !== OTRA_ZONA) {
-    let km = null;
-    if (origen && destino) km = (await kilometros(origen, destino)).km;
-    return conFragil({ tipo: 'zona', km, precio: redondear(vehiculo.tarifa_zona), vehiculo, peso,
+  if (aplicaTarifaFija(oz, dz, origen, destino, km ? km.km : null)) {
+    return conExtras({ tipo: 'zona', km: km ? km.km : null, precio: redondear(vehiculo.tarifa_zona), vehiculo, peso,
       detalle: `Tarifa fija en zonas cubiertas (${vehiculo.nombre})` }, body);
   }
   // Todavía no se conocen las dos ubicaciones en vivo: se muestra la tarifa mínima y el precio final se calcula después
-  if (!origen || !destino) {
-    return conFragil({ tipo: 'km', km: null, por_confirmar: true, precio: redondear(Math.max(vehiculo.tarifa_zona, vehiculo.tarifa_base)), vehiculo, peso,
+  if (!km) {
+    return conExtras({ tipo: 'km', km: null, por_confirmar: true, precio: redondear(Math.max(vehiculo.tarifa_zona, vehiculo.tarifa_base)), vehiculo, peso,
       detalle: `Precio desde. Fuera de las zonas fijas se cobra Q${vehiculo.tarifa_base.toFixed(2)} + Q${vehiculo.precio_km.toFixed(2)} por km; el total se calcula cuando quien entrega y quien recibe compartan su ubicación` }, body);
   }
-  const { km, fuente } = await kilometros(origen, destino);
-  const precio = redondear(Math.max(vehiculo.tarifa_zona, vehiculo.tarifa_base + km * vehiculo.precio_km));
-  return conFragil({ tipo: 'km', km, precio, vehiculo, peso, fuente,
-    detalle: `Q${vehiculo.tarifa_base.toFixed(2)} + ${km} km × Q${vehiculo.precio_km.toFixed(2)}${fuente === 'estimado' ? ' (distancia aproximada)' : ''}` }, body);
+  const precio = redondear(Math.max(vehiculo.tarifa_zona, vehiculo.tarifa_base + km.km * vehiculo.precio_km));
+  return conExtras({ tipo: 'km', km: km.km, precio, vehiculo, peso, fuente: km.fuente,
+    detalle: `Q${vehiculo.tarifa_base.toFixed(2)} + ${km.km} km × Q${vehiculo.precio_km.toFixed(2)}${km.fuente === 'estimado' ? ' (distancia aproximada)' : ''}` }, body);
 }
-// Paquete frágil (cuidado especial): se suma el recargo que está en Tarifas y ajustes (Q10 al inicio)
-function conFragil(c, body) {
+// Paquete frágil (recargo de Tarifas y ajustes) y seguro opcional según el valor declarado
+function conExtras(c, body) {
+  const aj = getAjustes();
   const fragil = body.fragil === true || body.fragil === 'si' || body.fragil === 1;
-  const recargo = fragil ? redondear(Number(getAjustes().recargo_fragil) || 0) : 0;
-  return { ...c, fragil, recargo_fragil: recargo, precio: redondear(c.precio + recargo),
-    detalle: c.detalle + (recargo ? ` + Q${recargo.toFixed(2)} por frágil` : '') };
+  const recargo = fragil ? redondear(Number(aj.recargo_fragil) || 0) : 0;
+  const valor = body.valor_declarado === '' || body.valor_declarado == null ? 0 : numero(body.valor_declarado);
+  if (!Number.isFinite(valor) || valor < 0 || valor > 100000) falla(400, 'Revisa el valor declarado del paquete.');
+  const asegurar = (body.asegurar === true || body.asegurar === 'si' || body.asegurar === 1) && valor > 0;
+  const seguro = asegurar ? redondear(Math.max(Number(aj.seguro_minimo) || 0, (valor * (Number(aj.seguro_pct) || 0)) / 100)) : 0;
+  let detalle = c.detalle + (recargo ? ` + Q${recargo.toFixed(2)} por frágil` : '') + (seguro ? ` + Q${seguro.toFixed(2)} de seguro` : '');
+  return { ...c, fragil, recargo_fragil: recargo, valor_declarado: redondear(valor), seguro, precio: redondear(c.precio + recargo + seguro), detalle };
 }
 
-// Límite simple de intentos (por IP) para login y registro
+// Límite simple de intentos (por IP) para registro y otros envíos de formularios
 const intentos = new Map();
+// Intentos fallidos de contraseña: se cuentan por internet y por correo. Los correctos no cuentan, así varias
+// personas que comparten el mismo internet (por ejemplo, datos móviles) no se bloquean entre sí.
+function revisarFallos(req, grupo, email, { porIp = 30, porCorreo = 8, ventanaMs = 900_000 } = {}) {
+  const ahora = Date.now();
+  const kIp = `${grupo}:ip:${ipDe(req)}`, kCorreo = `${grupo}:correo:${email}`;
+  const fIp = (intentos.get(kIp) || []).filter((t) => ahora - t < ventanaMs);
+  const fCorreo = (intentos.get(kCorreo) || []).filter((t) => ahora - t < ventanaMs);
+  if (fIp.length >= porIp || (email && fCorreo.length >= porCorreo)) falla(429, `Demasiados intentos. Espera ${Math.round(ventanaMs / 60_000)} minutos e inténtalo de nuevo.`);
+  return {
+    fallo() { intentos.set(kIp, [...fIp, ahora]); if (email) intentos.set(kCorreo, [...fCorreo, ahora]); },
+    exito() { if (email) intentos.delete(kCorreo); },
+  };
+}
 function limitar(ip, clave, max, ventanaMs) {
   const k = `${clave}:${ip}`;
   const ahora = Date.now();
@@ -214,7 +276,13 @@ function leerCookies(req) {
 }
 const esHttps = (req) => req.headers['x-forwarded-proto'] === 'https' || /"scheme":"https"/.test(req.headers['cf-visitor'] || '');
 const cookieSesion = (req, token, maxAge) => `vaelo_sesion=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${esHttps(req) ? '; Secure' : ''}`;
-const ipDe = (req) => req.headers['cf-connecting-ip'] || req.headers['x-real-ip'] || req.socket.remoteAddress || '';
+// La IP real la pone Nginx en X-Real-IP (con Cloudflare, Nginx la toma de CF-Connecting-IP solo si la petición viene de Cloudflare).
+// No se lee CF-Connecting-IP directo porque cualquiera puede inventarla si entra sin pasar por Cloudflare.
+const ipDe = (req) => {
+  const directa = req.socket.remoteAddress || '';
+  const local = directa === '127.0.0.1' || directa === '::1' || directa === '::ffff:127.0.0.1';
+  return (local && req.headers['x-real-ip']) || directa;
+};
 
 function usuarioActual(req) {
   const token = leerCookies(req).vaelo_sesion;
@@ -268,14 +336,20 @@ const eventosDe = (id) => db.prepare('SELECT estado, nota, lat, lng, creado FROM
 
 function cambiarEstado(envioId, estado, nota, lat, lng) {
   const c = coordenada(lat, lng);
+  const antes = db.prepare('SELECT * FROM envios WHERE id = ?').get(envioId);
   db.prepare("UPDATE envios SET estado = ?, actualizado = datetime('now') WHERE id = ?").run(estado, envioId);
-  if (estado === 'entregado') {
-    const e = db.prepare('SELECT precio, mensajero_id, ganancia_piloto FROM envios WHERE id = ?').get(envioId);
-    db.prepare("UPDATE envios SET entregado_en = COALESCE(entregado_en, datetime('now')), ganancia_piloto = ? WHERE id = ?")
-      .run(e.mensajero_id ? (e.ganancia_piloto ?? gananciaPiloto(e.precio)) : null, envioId);
+  if (estado === 'entregado') db.prepare("UPDATE envios SET entregado_en = COALESCE(entregado_en, datetime('now')) WHERE id = ?").run(envioId);
+  // El piloto terminó su parte (entregó, devolvió o dejó en la sede): se calcula lo que gana
+  if (['entregado', 'devuelto', 'en_sede'].includes(estado) && antes.mensajero_id && !antes.piloto_cerro_en) {
+    let gana = antes.ganancia_piloto ?? gananciaPiloto(antes.precio);
+    if (estado === 'devuelto') gana = redondear(gana + gananciaPiloto(Number(getAjustes().cargo_devolucion) || 0));
+    db.prepare("UPDATE envios SET piloto_cerro_en = datetime('now'), ganancia_piloto = ? WHERE id = ?").run(gana, envioId);
   }
+  // Cancelado: los cargos pendientes que iban a cobrarse con este envío vuelven a quedar pendientes
+  if (estado === 'cancelado') liberarCargos(envioId);
   db.prepare('INSERT INTO eventos (envio_id, estado, nota, lat, lng) VALUES (?, ?, ?, ?, ?)')
     .run(envioId, estado, nota, c ? c.lat : null, c ? c.lng : null);
+  if (antes.estado !== estado) avisarEnvio(envioId, estado);
 }
 
 // ---------- Rutas de la API ----------
@@ -297,6 +371,10 @@ ruta('GET', '/api/config', () => {
     horario: aj.horario || '',
     recargo_fragil: Number(aj.recargo_fragil) || 0,
     promocion: promocionAnunciada(),
+    seguro: { pct: Number(aj.seguro_pct) || 0, minimo: Number(aj.seguro_minimo) || 0, responsabilidad_max: Number(aj.responsabilidad_max) || 0 },
+    datos_transferencia: aj.datos_transferencia || '',
+    cargos: { devolucion: Number(aj.cargo_devolucion) || 0, bodega_dia: Number(aj.cargo_bodega_dia) || 0, reentrega: Number(aj.cargo_reentrega) || 0,
+      cancelacion: Number(aj.cargo_cancelacion) || 0, horas_decidir: Number(aj.horas_decidir_fallido) || 2 },
   };
 });
 
@@ -304,9 +382,29 @@ ruta('POST', '/api/cotizar', async ({ req, body }) => {
   const c = await cotizar(body);
   const u = usuarioActual(req);
   const desc = mejorDescuento(c.precio, u ? u.id : null, body.cupon);
+  const pendientes = u ? redondear(cargosPendientes(u.id).reduce((t, x) => t + x.monto, 0)) : 0;
   return { tipo: c.tipo, km: c.km, precio_base: c.precio, precio: desc.precio, descuento: desc.descuento, promocion: desc.promocion,
-    error_cupon: desc.errorCupon, detalle: c.detalle, recargo_fragil: c.recargo_fragil };
+    error_cupon: desc.errorCupon, detalle: c.detalle, recargo_fragil: c.recargo_fragil, seguro: c.seguro, cargos_pendientes: pendientes,
+    por_confirmar: !!c.por_confirmar };
 });
+
+// Datos de entrega fallida, sede, cargos y pago que ven el cliente y el panel
+const CAMPOS_INTERNOS = ['foto_entrega', 'firma_entrega', 'liquidado_id', 'pago_piloto_id', 'ganancia_piloto', 'excluidos', 'intentos_codigo', 'fallo_foto', 'comprobante',
+  'calif_cliente', 'calif_cliente_comentario', 'precio_o_lat', 'precio_o_lng', 'precio_d_lat', 'precio_d_lng'];
+function infoExtra(e) {
+  const aj = getAjustes();
+  const out = { tiene_comprobante: !!e.comprobante };
+  if (e.fallo_en) {
+    out.fallo = { motivo: e.fallo_motivo, motivo_texto: MOTIVOS_FALLO[e.fallo_motivo] || '', nota: e.fallo_nota, en: e.fallo_en, tiene_foto: !!e.fallo_foto,
+      decision: e.fallo_decision, decidido_por: e.fallo_decidido_por,
+      decidir_antes: e.estado === 'fallido' ? new Date(fechaMs(e.fallo_en) + horasDecidir() * 3600_000).toISOString() : null,
+      cargo_devolucion: Number(aj.cargo_devolucion) || 0, cargo_bodega_dia: Number(aj.cargo_bodega_dia) || 0, cargo_reentrega: Number(aj.cargo_reentrega) || 0 };
+  }
+  if (e.sede_llegada) out.sede = { llegada: e.sede_llegada, salida: e.sede_salida, dias: diasEnSede(e), cargo: cargoBodega(e), direccion: aj.sede_direccion || '' };
+  if (e.reentrega_de) out.reentrega_de = db.prepare('SELECT guia FROM envios WHERE id = ?').get(e.reentrega_de)?.guia || null;
+  if (e.estado === 'reenviado') out.reenviado_como = db.prepare('SELECT id, guia FROM envios WHERE reentrega_de = ? ORDER BY id DESC LIMIT 1').get(e.id) || null;
+  return out;
+}
 
 
 // Cuentas
@@ -320,8 +418,9 @@ ruta('POST', '/api/registro', async ({ req, body }) => {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) falla(400, 'Escribe un correo válido.');
   if (telefono.replace(/\D/g, '').length < 8) falla(400, 'Escribe un teléfono de 8 dígitos.');
   if (password.length < 8) falla(400, 'La contraseña debe tener al menos 8 caracteres.');
+  if (body.acepto_terminos !== true) falla(400, 'Para crear tu cuenta acepta los términos y el aviso de privacidad.');
   if (db.prepare('SELECT 1 FROM usuarios WHERE email = ?').get(email)) falla(409, 'Ya existe una cuenta con ese correo. Inicia sesión.');
-  const r = db.prepare('INSERT INTO usuarios (nombre, email, telefono, password_hash, email_verificado) VALUES (?, ?, ?, ?, 0)')
+  const r = db.prepare("INSERT INTO usuarios (nombre, email, telefono, password_hash, email_verificado, terminos_aceptados) VALUES (?, ?, ?, ?, 0, datetime('now'))")
     .run(nombre, email, telefono, hashPassword(password));
   const id = Number(r.lastInsertRowid);
   const enviado = await enviarConfirmacion({ id, nombre, email });
@@ -329,30 +428,27 @@ ruta('POST', '/api/registro', async ({ req, body }) => {
 });
 
 ruta('POST', '/api/login', ({ req, body }) => {
-  if (limitar(ipDe(req), 'login', 10, 900_000)) falla(429, 'Demasiados intentos. Espera 15 minutos e inténtalo de nuevo.');
   const email = texto(body.email, 150).toLowerCase();
+  const control = revisarFallos(req, 'login', email);
   const password = typeof body.password === 'string' ? body.password : '';
   const u = db.prepare('SELECT * FROM usuarios WHERE email = ?').get(email);
-  if (!u || !verificarPassword(password, u.password_hash)) falla(401, 'Correo o contraseña incorrectos.');
-  // La cuenta de administración solo entra por su propia página; aquí responde igual que una contraseña equivocada
-  if (u.rol === 'admin') falla(401, 'Correo o contraseña incorrectos.');
-  if (u.rol === 'mensajero' || u.rol === 'operador') falla(401, 'Correo o contraseña incorrectos.');
+  // La administración, los pilotos y la oficina entran por su propia página; aquí responde igual que una contraseña equivocada
+  if (!u || u.rol !== 'cliente' || !verificarPassword(password, u.password_hash)) { control.fallo(); falla(401, 'Correo o contraseña incorrectos.'); }
+  control.exito();
   if (!u.activo) falla(403, 'Esta cuenta está desactivada. Comunícate con Vaelo.');
   return { _headers: { 'Set-Cookie': crearSesion(req, u.id) }, ok: true, rol: u.rol };
 });
 
 // Acceso de administración (solo desde /familiatecun y solo con el correo permitido)
 ruta('POST', '/api/acceso-familia', ({ req, body }) => {
-  // Solo cuentan los intentos fallidos: 5 errores bloquean ese internet por 30 minutos
-  const clave = `acceso-familia:${ipDe(req)}`, ahora = Date.now();
-  const fallos = (intentos.get(clave) || []).filter((t) => ahora - t < 1800_000);
-  if (fallos.length >= 5) falla(429, 'Demasiados intentos. Espera 30 minutos.');
+  // Solo cuentan los intentos fallidos: 5 errores bloquean ese internet (o ese correo) por 30 minutos
   const email = texto(body.email, 150).toLowerCase();
+  const control = revisarFallos(req, 'acceso-familia', email, { porIp: 5, porCorreo: 5, ventanaMs: 1800_000 });
   const password = typeof body.password === 'string' ? body.password : '';
   const u = db.prepare('SELECT * FROM usuarios WHERE email = ?').get(email);
   const ok = u && u.activo && ((email === ADMIN_EMAIL && u.rol === 'admin') || u.rol === 'operador') && verificarPassword(password, u.password_hash);
-  if (!ok) { intentos.set(clave, [...fallos, ahora]); falla(401, 'Datos incorrectos.'); }
-  intentos.delete(clave);
+  if (!ok) { control.fallo(); falla(401, 'Datos incorrectos.'); }
+  control.exito();
   db.prepare('DELETE FROM sesiones WHERE usuario_id = ?').run(u.id);   // cierra cualquier otra sesión abierta
   return { _headers: { 'Set-Cookie': crearSesion(req, u.id, SESION_ADMIN_HORAS * 3600) }, ok: true };
 });
@@ -404,6 +500,8 @@ ruta('POST', '/api/cambiar-password', ({ req, body }) => {
   const nueva = String(body.nueva || '');
   if (nueva.length < 8) falla(400, 'La nueva contraseña debe tener al menos 8 caracteres.');
   db.prepare('UPDATE usuarios SET password_hash = ? WHERE id = ?').run(hashPassword(nueva), u.id);
+  // Se cierran las demás sesiones abiertas (otros teléfonos o computadoras); esta sigue abierta
+  db.prepare('DELETE FROM sesiones WHERE usuario_id = ? AND token != ?').run(u.id, leerCookies(req).vaelo_sesion || '');
   return { ok: true };
 });
 
@@ -414,8 +512,10 @@ ruta('GET', '/api/envios', ({ req }) => {
     const out = sinCamposReceptor(envioSalida(e));
     out.receptor_confirmado = !!e.receptor_confirmado_en; out.receptor_listo = receptorListo(e);
     out.destino_lat = null; out.destino_lng = null;   // quien envía no ve dónde está quien recibe
+    Object.assign(out, infoExtra(e));
+    for (const k of CAMPOS_INTERNOS) delete out[k];
     return out;
-  }) };
+  }), datos_transferencia: getAjustes().datos_transferencia || '' };
 });
 
 ruta('GET', '/api/envios/:id', ({ req, params }) => {
@@ -427,7 +527,9 @@ ruta('GET', '/api/envios/:id', ({ req, params }) => {
   const aceptado = e.asignacion === 'aceptado' && e.mensajero_id;
   if (!aceptado) { out.mensajero_nombre = null; out.mensajero_telefono = null; out.mensajero_lat = null; out.mensajero_lng = null; }
   out.tiene_foto_entrega = !!e.foto_entrega; out.tiene_firma_entrega = !!e.firma_entrega;
-  for (const k of ['foto_entrega', 'firma_entrega', 'liquidado_id', 'pago_piloto_id', 'ganancia_piloto', 'excluidos', 'intentos_codigo']) delete out[k];
+  out.tiene_foto_fallo = !!e.fallo_foto;
+  Object.assign(out, infoExtra(e));
+  for (const k of CAMPOS_INTERNOS) delete out[k];
   // Quien envía ve si quien recibe ya confirmó, pero no su ubicación
   const r = datosReceptor(e);
   out.receptor = { confirmado: r.confirmado, omitido: !!r.omitido, listo: r.listo, exigido: r.exigido, en_vivo: r.en_vivo, nombre: r.nombre,
@@ -438,17 +540,31 @@ ruta('GET', '/api/envios/:id', ({ req, params }) => {
   // Quien envía no ve dónde está quien recibe
   out.destino_lat = null; out.destino_lng = null;
   sinCamposReceptor(out);
-  return { envio: out, eventos: eventosDe(e.id), piloto: aceptado ? pilotoParaCliente(e.mensajero_id) : null };
+  return { envio: out, eventos: eventosDe(e.id), piloto: aceptado ? pilotoParaCliente(e.mensajero_id) : null, datos_transferencia: getAjustes().datos_transferencia || '' };
 });
 
 
-ruta('POST', '/api/envios/:id/cancelar', ({ req, params }) => {
+ruta('POST', '/api/envios/:id/cancelar', ({ req, params, body }) => {
   const u = requiereUsuario(req);
   const e = db.prepare('SELECT * FROM envios WHERE id = ? AND usuario_id = ?').get(Number(params.id), u.id);
   if (!e) falla(404, 'No encontramos ese envío.');
   if (e.estado !== 'pendiente') falla(400, 'Solo puedes cancelar envíos que todavía no hemos recogido.');
-  cambiarEstado(e.id, 'cancelado', 'Cancelado por el cliente');
-  return { ok: true };
+  // Si el piloto ya aceptó y va en camino a recoger, cancelar tiene un cargo (una parte es para el piloto)
+  const cargo = e.mensajero_id && e.asignacion === 'aceptado' ? redondear(Number(getAjustes().cargo_cancelacion) || 0) : 0;
+  if (cargo > 0 && body.aceptar_cargo !== true) {
+    return { _status: 409, requiere_cargo: true, cargo, error: `El piloto ya va en camino a recoger. Si cancelas ahora se cobra ${'Q' + cargo.toFixed(2)} en tu próximo envío.` };
+  }
+  db.exec('BEGIN');
+  try {
+    cambiarEstado(e.id, 'cancelado', cargo > 0 ? `Cancelado por el cliente con el piloto en camino. Cargo: Q${cargo.toFixed(2)}` : 'Cancelado por el cliente');
+    if (cargo > 0) {
+      crearCargo(u.id, e.id, 'cancelacion', cargo, 'Cancelación con el piloto en camino');
+      const gana = redondear((cargo * (Number(getAjustes().pct_piloto_cancelacion) || 0)) / 100);
+      db.prepare("UPDATE envios SET piloto_cerro_en = datetime('now'), ganancia_piloto = ? WHERE id = ?").run(gana, e.id);
+    }
+    db.exec('COMMIT');
+  } catch (err) { db.exec('ROLLBACK'); throw err; }
+  return { ok: true, cargo };
 });
 
 // ---------- Documentos privados (fotos y PDF) ----------
@@ -623,7 +739,7 @@ const SQL_PILOTO = `SELECT u.*, v.nombre AS vehiculo,
     (SELECT ROUND(AVG(calificacion), 1) FROM envios WHERE mensajero_id = u.id AND calificacion IS NOT NULL) AS calificacion,
     (SELECT COUNT(*) FROM envios WHERE mensajero_id = u.id AND calificacion IS NOT NULL) AS calificaciones,
     (SELECT COUNT(*) FROM envios WHERE mensajero_id = u.id AND estado = 'entregado') AS entregados,
-    (SELECT COUNT(*) FROM envios WHERE mensajero_id = u.id AND estado IN ('pendiente','recogido','en_camino')) AS activos
+    (SELECT COUNT(*) FROM envios WHERE mensajero_id = u.id AND estado IN ${SQL_PILOTO_ACTIVO}) AS activos
   FROM usuarios u LEFT JOIN vehiculos v ON v.id = u.vehiculo_id`;
 const pilotoPorId = (id) => db.prepare(`${SQL_PILOTO} WHERE u.id = ? AND u.rol = 'mensajero'`).get(id);
 
@@ -692,6 +808,8 @@ function actualizarVerificacionCliente(id) {
   if (completo && ['sin_datos', 'rechazado'].includes(u.verificacion)) db.prepare("UPDATE usuarios SET verificacion = 'por_revisar' WHERE id = ?").run(id);
   if (!completo && u.verificacion === 'por_revisar') db.prepare("UPDATE usuarios SET verificacion = 'sin_datos' WHERE id = ?").run(id);
 }
+// Promedio de las calificaciones que los pilotos le dieron al cliente
+const califCliente = (id) => db.prepare('SELECT ROUND(AVG(calif_cliente), 1) AS calif_cliente, COUNT(calif_cliente) AS calif_cliente_n FROM envios WHERE usuario_id = ?').get(id);
 function datosCliente(u) {
   return { id: u.id, nombre: u.nombre, email: u.email, telefono: u.telefono, dpi: u.dpi, direccion: u.direccion,
     email_verificado: !!u.email_verificado, verificacion: u.verificacion, verificacion_nota: u.verificacion_nota,
@@ -703,7 +821,7 @@ function datosCliente(u) {
 const ultimoRegistroGps = new Map();
 function registrarUbicacion(piloto, c, precision, forzar = false) {
   db.prepare("UPDATE usuarios SET ubic_lat = ?, ubic_lng = ?, ubic_fecha = datetime('now') WHERE id = ?").run(c.lat, c.lng, piloto.id);
-  const activo = db.prepare("SELECT id FROM envios WHERE mensajero_id = ? AND asignacion = 'aceptado' AND estado IN ('pendiente','recogido','en_camino') ORDER BY id LIMIT 1").get(piloto.id);
+  const activo = db.prepare(`SELECT id FROM envios WHERE mensajero_id = ? AND asignacion = 'aceptado' AND estado IN ${SQL_PILOTO_ACTIVO} ORDER BY id LIMIT 1`).get(piloto.id);
   // Recorrido guardado: como máximo un punto cada 10 segundos
   if ((activo || piloto.en_linea) && (forzar || Date.now() - (ultimoRegistroGps.get(piloto.id) || 0) > 10_000)) {
     ultimoRegistroGps.set(piloto.id, Date.now());
@@ -735,6 +853,7 @@ function automatizarEnvios(pilotoId, c) {
     if (estado === 'en_camino' && d && !e.llegando_destino && distanciaRecta(c, d) <= 0.15) {
       db.prepare('UPDATE envios SET llegando_destino = 1 WHERE id = ?').run(e.id);
       db.prepare('INSERT INTO eventos (envio_id, estado, nota, lat, lng) VALUES (?, ?, ?, ?, ?)').run(e.id, 'en_camino', 'El piloto está llegando al destino', c.lat, c.lng);
+      avisarEnvio(e.id, 'llegando');
     }
   }
 }
@@ -774,15 +893,13 @@ ruta('POST', '/api/piloto/registro', ({ req, body }) => {
 });
 
 ruta('POST', '/api/piloto/entrar', ({ req, body }) => {
-  const clave = `piloto:${ipDe(req)}`, ahora = Date.now();
-  const fallos = (intentos.get(clave) || []).filter((t) => ahora - t < 900_000);
-  if (fallos.length >= 8) falla(429, 'Demasiados intentos. Espera 15 minutos.');
   const email = texto(body.email, 150).toLowerCase();
+  const control = revisarFallos(req, 'piloto', email);
   const password = typeof body.password === 'string' ? body.password : '';
   const u = db.prepare("SELECT * FROM usuarios WHERE email = ? AND rol = 'mensajero'").get(email);
-  if (!u || !verificarPassword(password, u.password_hash)) { intentos.set(clave, [...fallos, ahora]); falla(401, 'Correo o contraseña incorrectos.'); }
+  if (!u || !verificarPassword(password, u.password_hash)) { control.fallo(); falla(401, 'Correo o contraseña incorrectos.'); }
   if (u.estado_piloto === 'baja' || !u.activo) falla(403, 'Esta cuenta ya no está activa. Comunícate con Vaelo.');
-  intentos.delete(clave);
+  control.exito();
   return { _headers: { 'Set-Cookie': crearSesion(req, u.id, SESION_PILOTO_HORAS * 3600) }, ok: true };
 });
 
@@ -824,7 +941,7 @@ ruta('POST', '/api/piloto/en-linea', ({ req, body }) => {
     return { ok: true, en_linea: true };
   }
   const p = requierePiloto(req);
-  const activos = db.prepare("SELECT COUNT(*) AS n FROM envios WHERE mensajero_id = ? AND asignacion = 'aceptado' AND estado IN ('pendiente','recogido','en_camino')").get(p.id).n;
+  const activos = db.prepare(`SELECT COUNT(*) AS n FROM envios WHERE mensajero_id = ? AND asignacion = 'aceptado' AND estado IN ${SQL_PILOTO_ACTIVO}`).get(p.id).n;
   if (activos) falla(400, 'Tienes entregas en curso. Termínalas antes de desconectarte: tu ubicación debe seguir activa.');
   db.prepare('UPDATE usuarios SET en_linea = 0 WHERE id = ?').run(p.id);
   return { ok: true, en_linea: false };
@@ -840,12 +957,19 @@ ruta('POST', '/api/piloto/ubicacion', ({ req, body }) => {
 ruta('GET', '/api/piloto/envios', ({ req }) => {
   const p = requierePiloto(req);
   const filas = db.prepare(`${SQL_ENVIO} WHERE e.mensajero_id = ?
-    AND (e.estado IN ('pendiente','recogido','en_camino') OR (e.estado = 'entregado' AND date(e.actualizado) >= date('now','-1 day')))
-    ORDER BY CASE WHEN e.asignacion = 'por_aceptar' THEN 0 WHEN e.estado = 'en_camino' THEN 1 WHEN e.estado = 'recogido' THEN 2 WHEN e.estado = 'pendiente' THEN 3 ELSE 4 END, e.id`).all(p.id);
+    AND (e.estado IN ${SQL_PILOTO_ACTIVO} OR (e.piloto_cerro_en IS NOT NULL AND e.piloto_cerro_en >= datetime('now','-1 day')))
+    ORDER BY CASE WHEN e.asignacion = 'por_aceptar' THEN 0 WHEN e.estado IN ('fallido','devolviendo','a_sede') THEN 1 WHEN e.estado = 'en_camino' THEN 2 WHEN e.estado = 'recogido' THEN 3 WHEN e.estado = 'pendiente' THEN 4 ELSE 5 END, e.id`).all(p.id);
   return { envios: filas.map((e) => {
     const out = envioSalida(e);
-    for (const k of ['codigo_entrega', 'intentos_codigo', 'foto_entrega', 'firma_entrega', 'precio_base', 'descuento', 'promocion_id', 'liquidado_id', 'pago_piloto_id', 'excluidos', 'ganancia_piloto']) delete out[k];
+    const extra = infoExtra(e);
+    if (extra.fallo) out.fallo = extra.fallo;
+    if (e.estado === 'a_sede') { const sede = sedeUbicacion(); out.sede = { lat: sede?.lat ?? null, lng: sede?.lng ?? null, direccion: getAjustes().sede_direccion || '' }; }
+    out.ya_califique_cliente = !!e.calif_cliente;
+    for (const k of ['codigo_entrega', 'intentos_codigo', 'foto_entrega', 'firma_entrega', 'precio_base', 'descuento', 'promocion_id', 'liquidado_id', 'pago_piloto_id', 'excluidos', ...CAMPOS_INTERNOS]) delete out[k];
+    out.ganancia_piloto = e.ganancia_piloto;
+    out.grupo_total = e.grupo ? db.prepare('SELECT COUNT(*) AS n FROM envios WHERE grupo = ? AND mensajero_id = ?').get(e.grupo, p.id).n : 1;
     const c = db.prepare('SELECT verificacion, foto_perfil FROM usuarios WHERE id = ?').get(e.usuario_id) || {};
+    Object.assign(out, califCliente(e.usuario_id));
     out.cliente_verificado = c.verificacion === 'verificado';
     out.cliente_tiene_foto = !!c.foto_perfil;
     out.receptor = e.asignacion === 'aceptado' ? datosReceptor(e) : { listo: receptorListo(e), confirmado: !!e.receptor_confirmado_en };
@@ -860,12 +984,17 @@ ruta('POST', '/api/piloto/envios/:id/aceptar', ({ req, params, body }) => {
   const e = db.prepare("SELECT * FROM envios WHERE id = ? AND mensajero_id = ? AND asignacion = 'por_aceptar'").get(Number(params.id), p.id);
   if (!e) falla(404, 'Este envío ya no está esperando tu respuesta.');
   if (e.estado === 'cancelado') falla(400, 'El cliente canceló este envío.');
-  db.prepare("UPDATE envios SET asignacion = 'aceptado', actualizado = datetime('now') WHERE id = ?").run(e.id);
+  // Varias entregas en un solo viaje: se aceptan todas las del grupo
+  const lista = e.grupo ? db.prepare("SELECT * FROM envios WHERE grupo = ? AND mensajero_id = ? AND asignacion = 'por_aceptar' AND estado = 'pendiente'").all(e.grupo, p.id) : [e];
+  for (const x of lista) {
+    db.prepare("UPDATE envios SET asignacion = 'aceptado', actualizado = datetime('now') WHERE id = ?").run(x.id);
+    db.prepare('INSERT INTO eventos (envio_id, estado, nota, lat, lng) VALUES (?, ?, ?, ?, ?)')
+      .run(x.id, x.estado, `${p.nombre.split(' ')[0]} aceptó el envío y va hacia la recogida`, c.lat, c.lng);
+    avisarEnvio(x.id, 'aceptado');
+  }
   db.prepare('UPDATE usuarios SET en_linea = 1 WHERE id = ?').run(p.id);
-  db.prepare('INSERT INTO eventos (envio_id, estado, nota, lat, lng) VALUES (?, ?, ?, ?, ?)')
-    .run(e.id, e.estado, `${p.nombre.split(' ')[0]} aceptó el envío y va hacia la recogida`, c.lat, c.lng);
   registrarUbicacion({ ...p, en_linea: 1 }, c, numero(body.precision), true);
-  return { ok: true };
+  return { ok: true, aceptados: lista.length };
 });
 
 ruta('POST', '/api/piloto/envios/:id/rechazar', ({ req, params, body }) => {
@@ -873,8 +1002,13 @@ ruta('POST', '/api/piloto/envios/:id/rechazar', ({ req, params, body }) => {
   const e = db.prepare("SELECT * FROM envios WHERE id = ? AND mensajero_id = ? AND asignacion = 'por_aceptar'").get(Number(params.id), p.id);
   if (!e) falla(404, 'Este envío ya no está esperando tu respuesta.');
   const motivo = texto(body.motivo, 200);
-  db.prepare("UPDATE envios SET mensajero_id = NULL, asignacion = NULL, rechazado_en = datetime('now') WHERE id = ?").run(e.id);
-  db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(e.id, e.estado, `${p.nombre.split(' ')[0]} no aceptó el envío${motivo ? ': ' + motivo : ''}. Buscando otro piloto`);
+  const lista = e.grupo ? db.prepare("SELECT * FROM envios WHERE grupo = ? AND mensajero_id = ? AND asignacion = 'por_aceptar'").all(e.grupo, p.id) : [e];
+  for (const x of lista) {
+    // No se le vuelve a ofrecer a este piloto en la asignación automática
+    let fuera = []; try { fuera = JSON.parse(x.excluidos || '[]'); } catch { /* vacío */ }
+    db.prepare("UPDATE envios SET mensajero_id = NULL, asignacion = NULL, rechazado_en = datetime('now'), excluidos = ? WHERE id = ?").run(JSON.stringify([...new Set([...fuera, p.id])]), x.id);
+    db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(x.id, x.estado, `${p.nombre.split(' ')[0]} no aceptó el envío${motivo ? ': ' + motivo : ''}. Buscando otro piloto`);
+  }
   return { ok: true };
 });
 
@@ -884,10 +1018,34 @@ ruta('POST', '/api/piloto/envios/:id/estado', ({ req, params, body }) => {
   if (!e) falla(404, 'Este envío no está asignado a ti.');
   const estado = texto(body.estado, 20);
   if (!ESTADOS_MENSAJERO.includes(estado)) falla(400, 'Estado no válido.');
-  if (['entregado', 'cancelado'].includes(e.estado)) falla(400, 'Este envío ya está cerrado.');
+  if (!ESTADOS_PILOTO_ACTIVO.includes(e.estado)) falla(400, 'Este envío ya está cerrado.');
   const c = leerPosicion(body, true);
-  if (e.estado === 'pendiente' && !receptorListo(e)) falla(403, 'No recojas el paquete todavía: falta que quien entrega o quien recibe comparta su ubicación. Espera unos minutos o llama a la administración.');
   let nota = texto(body.nota, 300);
+  // Devolución y sede: solo después de la decisión del cliente
+  if (estado === 'devuelto' || estado === 'en_sede') {
+    if (estado === 'devuelto' && e.estado !== 'devolviendo') falla(400, 'Este paquete no está en devolución.');
+    if (estado === 'en_sede' && e.estado !== 'a_sede') falla(400, 'Este paquete no va para la sede.');
+    const destinoVuelta = estado === 'devuelto' ? (e.origen_lat != null ? { lat: e.origen_lat, lng: e.origen_lng } : null) : sedeUbicacion();
+    if (destinoVuelta) {
+      const km = distanciaRecta(c, destinoVuelta);
+      if (km > 0.5) falla(400, `Estás a ${km.toFixed(1)} km ${estado === 'devuelto' ? 'del punto de recogida' : 'de la sede'}. Márcalo cuando estés en el lugar.`);
+    }
+    if (estado === 'devuelto') {
+      const recibio = texto(body.recibio, 100);
+      if (recibio.length < 2) falla(400, 'Escribe el nombre de quien recibió el paquete de vuelta.');
+      guardarArchivoEnvio(e.id, 'foto', body.foto);
+      db.prepare("UPDATE envios SET devuelto_en = datetime('now'), devuelto_a = ? WHERE id = ?").run(recibio, e.id);
+      nota = `Devuelto a ${recibio}${nota ? '. ' + nota : ''}`;
+    } else {
+      db.prepare("UPDATE envios SET sede_llegada = datetime('now') WHERE id = ?").run(e.id);
+      nota = `Paquete guardado en la sede${nota ? '. ' + nota : ''}`;
+    }
+    registrarUbicacion(p, c, numero(body.precision), true);
+    cambiarEstado(e.id, estado, nota, c.lat, c.lng);
+    return { ok: true };
+  }
+  if (!['pendiente', 'recogido', 'en_camino'].includes(e.estado)) falla(400, 'Este envío está en devolución o va para la sede.');
+  if (e.estado === 'pendiente' && !receptorListo(e)) falla(403, 'No recojas el paquete todavía: falta que quien entrega o quien recibe comparta su ubicación. Espera unos minutos o llama a la administración.');
   if (estado === 'entregado') {
     if (e.destino_lat != null) {
       const km = distanciaRecta(c, { lat: e.destino_lat, lng: e.destino_lng });
@@ -916,9 +1074,66 @@ ruta('POST', '/api/piloto/envios/:id/estado', ({ req, params, body }) => {
   return { ok: true };
 }, { limite: 1_500_000 });
 
+// El piloto no pudo entregar: queda "fallido" y el cliente elige devolver o guardar en la sede
+const MOTIVOS_FALLO = { no_contesta: 'Quien recibe no contesta', no_esta: 'No había nadie en el lugar', direccion: 'Dirección o ubicación incorrecta',
+  rechazo: 'Quien recibe no aceptó el paquete', sin_cobro: 'Quien recibe no pagó el cobro', otro: 'Otro motivo' };
+ruta('POST', '/api/piloto/envios/:id/no-entregado', ({ req, params, body }) => {
+  const p = requierePiloto(req);
+  const e = db.prepare("SELECT * FROM envios WHERE id = ? AND mensajero_id = ? AND asignacion = 'aceptado'").get(Number(params.id), p.id);
+  if (!e) falla(404, 'Este envío no está asignado a ti.');
+  if (!['recogido', 'en_camino'].includes(e.estado)) falla(400, 'Solo puedes reportarlo cuando ya llevas el paquete.');
+  const motivo = MOTIVOS_FALLO[body.motivo] ? body.motivo : falla(400, 'Elige por qué no se pudo entregar.');
+  const nota = texto(body.nota, 300);
+  if (motivo === 'otro' && nota.length < 4) falla(400, 'Explica qué pasó.');
+  const c = leerPosicion(body, true);
+  if (e.destino_lat != null) {
+    const km = distanciaRecta(c, { lat: e.destino_lat, lng: e.destino_lng });
+    if (km > 0.5 && motivo !== 'direccion') falla(400, `Estás a ${km.toFixed(1)} km del punto de entrega. Repórtalo cuando hayas llegado al lugar.`);
+  }
+  if (body.foto) guardarArchivoEnvio(e.id, 'fallo', body.foto);
+  db.prepare("UPDATE envios SET fallo_motivo = ?, fallo_nota = ?, fallo_en = datetime('now') WHERE id = ?").run(motivo, nota || null, e.id);
+  registrarUbicacion(p, c, numero(body.precision), true);
+  cambiarEstado(e.id, 'fallido', `No se pudo entregar: ${MOTIVOS_FALLO[motivo]}${nota ? '. ' + nota : ''}`, c.lat, c.lng);
+  return { ok: true, horas: horasDecidir() };
+}, { limite: 1_500_000 });
+
+// El piloto califica al cliente (después de terminar su parte)
+ruta('POST', '/api/piloto/envios/:id/calificar-cliente', ({ req, params, body }) => {
+  const p = requierePiloto(req);
+  const e = db.prepare('SELECT * FROM envios WHERE id = ? AND mensajero_id = ?').get(Number(params.id), p.id);
+  if (!e) falla(404, 'Este envío no está asignado a ti.');
+  if (!e.piloto_cerro_en) falla(400, 'Puedes calificar al cliente cuando termines el envío.');
+  if (e.calif_cliente) falla(400, 'Ya calificaste a este cliente.');
+  const estrellas = numero(body.estrellas);
+  if (![1, 2, 3, 4, 5].includes(estrellas)) falla(400, 'Elige de 1 a 5 estrellas.');
+  db.prepare('UPDATE envios SET calif_cliente = ?, calif_cliente_comentario = ? WHERE id = ?').run(estrellas, texto(body.comentario, 300) || null, e.id);
+  return { ok: true };
+});
+
+// Lo que gana el piloto: por cobrar, efectivo que debe entregar, totales y pagos anteriores
+ruta('GET', '/api/piloto/ganancias', ({ req }) => {
+  const p = requierePiloto(req);
+  const suma = (cond) => redondear(db.prepare(`SELECT COALESCE(SUM(e.ganancia_piloto), 0) AS t FROM envios e WHERE e.mensajero_id = ? AND e.piloto_cerro_en IS NOT NULL AND ${cond}`).get(p.id).t);
+  const efectivo = db.prepare(`SELECT COALESCE(SUM(${SQL_EFECTIVO}), 0) AS t, COUNT(*) AS n FROM envios e WHERE e.mensajero_id = ? AND e.piloto_cerro_en IS NOT NULL AND e.liquidado_id IS NULL AND ${SQL_EFECTIVO} > 0`).get(p.id);
+  const hoy = hoyGT();
+  return {
+    por_cobrar: suma('e.pago_piloto_id IS NULL'),
+    efectivo_por_entregar: redondear(efectivo.t), envios_efectivo: efectivo.n,
+    hoy: suma(`date(e.piloto_cerro_en, '-6 hours') = '${hoy}'`),
+    semana: suma(`date(e.piloto_cerro_en, '-6 hours') >= '${sumarDias(hoy, -6)}'`),
+    mes: suma(`strftime('%Y-%m', e.piloto_cerro_en, '-6 hours') = '${hoy.slice(0, 7)}'`),
+    entregas_mes: db.prepare(`SELECT COUNT(*) AS n FROM envios e WHERE e.mensajero_id = ? AND e.estado = 'entregado' AND strftime('%Y-%m', e.piloto_cerro_en, '-6 hours') = ?`).get(p.id, hoy.slice(0, 7)).n,
+    comision: { tipo: getAjustes().comision_tipo, valor: Number(getAjustes().comision_valor) || 0 },
+    ultimas: db.prepare(`SELECT e.id, e.guia, e.estado, e.destino_zona, e.piloto_cerro_en, e.ganancia_piloto, e.metodo_pago, e.pago_piloto_id, ${SQL_EFECTIVO} AS efectivo
+      FROM envios e WHERE e.mensajero_id = ? AND e.piloto_cerro_en IS NOT NULL ORDER BY e.piloto_cerro_en DESC LIMIT 40`).all(p.id),
+    pagos: db.prepare('SELECT id, monto, envios, nota, creado FROM pagos_piloto WHERE piloto_id = ? ORDER BY id DESC LIMIT 12').all(p.id),
+    liquidaciones: db.prepare('SELECT id, esperado, recibido, envios, nota, creado FROM liquidaciones WHERE piloto_id = ? ORDER BY id DESC LIMIT 12').all(p.id),
+  };
+});
+
 ruta('GET', '/api/piloto/envios/:id/foto-cliente', ({ req, res, params }) => {
   const p = requierePiloto(req);
-  const e = db.prepare("SELECT usuario_id FROM envios WHERE id = ? AND mensajero_id = ? AND estado IN ('pendiente','recogido','en_camino')").get(Number(params.id), p.id);
+  const e = db.prepare(`SELECT usuario_id FROM envios WHERE id = ? AND mensajero_id = ? AND estado IN ${SQL_PILOTO_ACTIVO}`).get(Number(params.id), p.id);
   if (!e) falla(404, 'No hay foto.');
   return enviarDocumento(res, e.usuario_id, 'foto');
 });
@@ -1087,7 +1302,7 @@ ruta('GET', '/api/admin/flota', ({ req }) => {
   const pilotos = db.prepare(`${SQL_PILOTO} WHERE u.rol = 'mensajero' AND u.estado_piloto = 'aprobado' AND u.activo = 1`).all();
   return { pilotos: pilotos.map((p) => {
     const activo = db.prepare(`SELECT id, guia, estado, asignacion, origen_lat, origen_lng, destino_lat, destino_lng, destino_zona FROM envios
-      WHERE mensajero_id = ? AND estado IN ('pendiente','recogido','en_camino') ORDER BY CASE WHEN asignacion = 'aceptado' THEN 0 ELSE 1 END, id LIMIT 1`).get(p.id);
+      WHERE mensajero_id = ? AND estado IN ${SQL_PILOTO_ACTIVO} ORDER BY CASE WHEN asignacion = 'aceptado' THEN 0 ELSE 1 END, id LIMIT 1`).get(p.id);
     const vivo = enLineaReal(p);
     const minutos = p.ubic_fecha ? Math.round((Date.now() - fechaMs(p.ubic_fecha)) / 60_000) : null;
     return { id: p.id, nombre: p.nombre, telefono: p.telefono, vehiculo: p.vehiculo, placa: p.veh_placa, en_linea: vivo,
@@ -1120,9 +1335,11 @@ ruta('GET', '/api/admin/envios/:id/recorrido', ({ req, params }) => {
 ruta('GET', '/api/admin/clientes', ({ req }) => {
   const quien = requiereStaff(req);
   return { clientes: db.prepare(`
-    SELECT u.*, (SELECT COUNT(*) FROM envios e WHERE e.usuario_id = u.id) AS envios
+    SELECT u.*, (SELECT COUNT(*) FROM envios e WHERE e.usuario_id = u.id) AS envios,
+      (SELECT ROUND(AVG(e.calif_cliente), 1) FROM envios e WHERE e.usuario_id = u.id) AS calif_cliente,
+      (SELECT COALESCE(SUM(c.monto), 0) FROM cargos c WHERE c.usuario_id = u.id AND c.pagado_en IS NULL AND c.anulado_en IS NULL AND c.cobrado_envio_id IS NULL) AS cargos_pendientes
     FROM usuarios u WHERE u.rol = 'cliente'
-    ORDER BY CASE u.verificacion WHEN 'por_revisar' THEN 0 ELSE 1 END, u.id DESC LIMIT 500`).all().map((u) => ({ ...datosCliente(u), envios: u.envios })),
+    ORDER BY CASE u.verificacion WHEN 'por_revisar' THEN 0 ELSE 1 END, u.id DESC LIMIT 500`).all().map((u) => ({ ...datosCliente(u), envios: u.envios, calif_cliente: u.calif_cliente, cargos_pendientes: redondear(u.cargos_pendientes) })),
   correo_activo: correoActivo() };
 });
 
@@ -1153,16 +1370,16 @@ ruta('POST', '/api/admin/clientes/:id/activo', ({ req, params, body }) => {
 // =====================================================================
 
 // ---------- Entrega segura: foto y firma ----------
-const ARCHIVOS_ENTREGA = { foto: 'foto_entrega', firma: 'firma_entrega', receptor: 'receptor_foto', origen: 'origen_foto' };
-const FALTA_ARCHIVO = { foto: 'Toma la foto del paquete entregado.', firma: 'La firma no es válida.', receptor: 'La foto no es válida. Elige otra.', origen: 'La foto no es válida. Elige otra.' };
+const ARCHIVOS_ENTREGA = { foto: 'foto_entrega', firma: 'firma_entrega', receptor: 'receptor_foto', origen: 'origen_foto', fallo: 'fallo_foto', comprobante: 'comprobante' };
+const FALTA_ARCHIVO = { foto: 'Toma la foto del paquete.', firma: 'La firma no es válida.', receptor: 'La foto no es válida. Elige otra.', origen: 'La foto no es válida. Elige otra.', fallo: 'La foto no es válida.', comprobante: 'Sube una foto o PDF del comprobante.' };
 function guardarArchivoEnvio(envioId, tipo, dataUrl) {
   const col = ARCHIVOS_ENTREGA[tipo];
-  const m = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(String(dataUrl || ''));
-  if (!m) falla(400, FALTA_ARCHIVO[tipo]);
-  const datos = Buffer.from(m[2], 'base64');
+  const m = /^data:(?:image\/(jpeg|png|webp)|application\/(pdf));base64,([A-Za-z0-9+/=]+)$/.exec(String(dataUrl || ''));
+  if (!m || (m[2] && tipo !== 'comprobante')) falla(400, FALTA_ARCHIVO[tipo]);
+  const datos = Buffer.from(m[3], 'base64');
   if (datos.length < 300) falla(400, tipo === 'firma' ? 'La firma está vacía.' : 'La foto está vacía.');
-  if (datos.length > 700_000) falla(413, 'La foto es demasiado grande.');
-  const ext = m[1] === 'jpeg' ? 'jpg' : m[1];
+  if (datos.length > 700_000) falla(413, 'El archivo es demasiado grande (máximo 700 KB).');
+  const ext = m[2] ? 'pdf' : m[1] === 'jpeg' ? 'jpg' : m[1];
   if (!FIRMAS[ext].every((b, i) => datos[i] === b)) falla(400, 'El archivo no es válido.');
   fs.mkdirSync(DOCS_DIR, { recursive: true, mode: 0o750 });
   const nombre = `envio-${envioId}-${tipo}-${crypto.randomBytes(6).toString('hex')}.${ext}`;
@@ -1259,7 +1476,7 @@ function validarPedido(u, body) {
   if (!Number.isFinite(d.cobro_destinatario) || d.cobro_destinatario < 0 || d.cobro_destinatario > 50000) falla(400, 'El monto a cobrar a quien recibe no es válido.');
   return d;
 }
-function insertarEnvio(u, body, d, c, desc, programado) {
+function insertarEnvio(u, body, d, c, desc, programado, grupo = null) {
   // La recogida es donde está quien pide (su ubicación al enviar) o, si entrega otra persona, donde ella comparta la suya.
   // La entrega es donde comparta su ubicación quien recibe: al crear el envío todavía no hay punto.
   const o = d.origen_quien === 'cliente' ? coordenada(body.origen_lat, body.origen_lng) : null, de = null;
@@ -1273,17 +1490,21 @@ function insertarEnvio(u, body, d, c, desc, programado) {
      destino_nombre, destino_telefono, destino_direccion, destino_zona, destino_lat, destino_lng,
      tipo_tarifa, km, precio, metodo_pago, cobro_destinatario, notas, fragil, recargo_fragil,
      precio_base, descuento, promocion_id, codigo_entrega, programado_para, receptor_token,
-     origen_quien, origen_nombre, origen_token, origen_ubic_fecha, origen_precision, precio_por_confirmar)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${o ? "datetime('now')" : 'NULL'}, ?, ?)`).run(
+     origen_quien, origen_nombre, origen_token, origen_ubic_fecha, origen_precision, precio_por_confirmar,
+     valor_declarado, seguro, grupo, precio_o_lat, precio_o_lng, pago_estado)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${o ? "datetime('now')" : 'NULL'}, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
     guia, u.id, c.vehiculo.id, c.peso, d.descripcion, d.origen_direccion, texto(body.origen_zona, 60), d.origen_telefono,
     o ? o.lat : null, o ? o.lng : null, d.destino_nombre, d.destino_telefono, d.destino_direccion, texto(body.destino_zona, 60),
     de ? de.lat : null, de ? de.lng : null, c.tipo, c.km, desc.precio, d.metodo_pago, redondear(d.cobro_destinatario), d.notas,
     c.fragil ? 1 : 0, c.recargo_fragil, c.precio, desc.descuento, desc.promocion_id, codigo, programado, token,
-    d.origen_quien, d.origen_nombre, tokenEntrega, o ? (Number.isFinite(numero(body.origen_precision)) ? Math.round(numero(body.origen_precision)) : null) : null, c.por_confirmar ? 1 : 0);
+    d.origen_quien, d.origen_nombre, tokenEntrega, o ? (Number.isFinite(numero(body.origen_precision)) ? Math.round(numero(body.origen_precision)) : null) : null, c.por_confirmar ? 1 : 0,
+    c.valor_declarado || 0, c.seguro || 0, grupo, o ? o.lat : null, o ? o.lng : null, d.metodo_pago === 'transferencia' ? 'sin_comprobante' : null);
   const id = Number(r.lastInsertRowid);
+  // Los cargos pendientes del cliente (cancelación, devolución, sede) se cobran junto con este envío
+  const extra = sumarCargosPendientes(u.id, id);
   const nota = programado ? 'Solicitud recibida (programada)' : 'Solicitud recibida';
   db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(id, 'pendiente', nota + (desc.promocion ? `. Descuento: ${desc.promocion}` : ''));
-  return { id, guia, precio: desc.precio, descuento: desc.descuento, codigo_entrega: codigo, enlace_receptor: '/recibe/' + token,
+  return { id, guia, precio: desc.precio, descuento: desc.descuento, cargos_extra: extra, codigo_entrega: codigo, enlace_receptor: '/recibe/' + token,
     enlace_entrega: tokenEntrega ? '/entrega/' + tokenEntrega : null, exige_receptor: exigeReceptor(), precio_por_confirmar: !!c.por_confirmar };
 }
 function guardarDireccion(usuarioId, nombre, datos) {
@@ -1312,6 +1533,7 @@ ruta('POST', '/api/envios', async ({ req, body }) => {
     const out = insertarEnvio(u, body, d, c, desc, programado);
     if (body.guardar_destino) guardarDireccion(u.id, body.guardar_destino, { direccion: d.destino_direccion, zona: texto(body.destino_zona, 60), telefono: d.destino_telefono, contacto: d.destino_nombre });
     db.exec('COMMIT');
+    avisarEnvio(out.id, 'nuevo');
     return { _status: 201, ...out };
   } catch (err) { db.exec('ROLLBACK'); throw err; }
 });
@@ -1343,8 +1565,11 @@ ruta('POST', '/api/envios/lote', async ({ req, body }) => {
   if (errores.length) return { _status: 400, ok: false, errores };
   db.exec('BEGIN');
   try {
-    const creados = preparados.map((x) => insertarEnvio(u, x.b, x.d, x.c, x.desc, programado));
+    // Todos van en un solo viaje: la asignación automática los ofrece juntos al mismo piloto
+    const grupo = preparados.length > 1 ? 'G' + crypto.randomBytes(6).toString('hex') : null;
+    const creados = preparados.map((x) => insertarEnvio(u, x.b, x.d, x.c, x.desc, programado, grupo));
     db.exec('COMMIT');
+    avisarStaff({ titulo: `${creados.length} envíos nuevos por archivo`, cuerpo: `${f.empresa_nombre || f.nombre}, total Q${creados.reduce((s, x) => s + x.precio, 0).toFixed(2)}`, url: RUTA_ADMIN, etiqueta: 'nuevo' });
     return { _status: 201, ok: true, creados: creados.length, total: redondear(creados.reduce((s, x) => s + x.precio, 0)), guias: creados.map((x) => x.guia) };
   } catch (err) { db.exec('ROLLBACK'); throw err; }
 }, { limite: 400_000 });
@@ -1353,6 +1578,7 @@ ruta('GET', '/api/envios/:id/entrega/:tipo', ({ req, res, params }) => {
   const u = requiereUsuario(req);
   const e = db.prepare('SELECT * FROM envios WHERE id = ? AND usuario_id = ?').get(Number(params.id), u.id);
   if (!e) falla(404, 'No encontramos ese envío.');
+  if (!['foto', 'firma', 'fallo', 'comprobante'].includes(params.tipo)) falla(404, 'No hay archivo.');
   return enviarArchivoEnvio(res, e, params.tipo);
 });
 
@@ -1444,13 +1670,19 @@ function guardarPosicionOrigen(id, c, precision) {
   db.prepare("UPDATE envios SET origen_lat = ?, origen_lng = ?, origen_precision = ?, origen_ubic_fecha = datetime('now') WHERE id = ? AND estado = 'pendiente'")
     .run(c.lat, c.lng, precisionDe(precision), id);
 }
-// Fuera de las zonas fijas: con las dos ubicaciones ya se calculan los km y queda el precio final
-async function finalizarPrecio(id) {
+// Precio con los puntos reales: al conocerse las dos ubicaciones se confirma (tarifa fija solo si caen dentro de las zonas
+// cubiertas; si no, por km). Si después la recogida o la entrega se mueven más de 1 km, se vuelve a calcular.
+async function revisarPrecio(id) {
   const e = db.prepare('SELECT * FROM envios WHERE id = ?').get(id);
-  if (!e || !e.precio_por_confirmar || e.origen_lat == null || e.destino_lat == null) return;
+  if (!e || !['pendiente', 'recogido', 'en_camino'].includes(e.estado) || e.origen_lat == null || e.destino_lat == null) return;
+  const o = { lat: e.origen_lat, lng: e.origen_lng }, d = { lat: e.destino_lat, lng: e.destino_lng };
+  const movido = (lat, lng, p) => lat == null || distanciaRecta({ lat, lng }, p) > 1;
+  if (!e.precio_por_confirmar && !movido(e.precio_o_lat, e.precio_o_lng, o) && !movido(e.precio_d_lat, e.precio_d_lng, d)) return;
   const v = db.prepare('SELECT * FROM vehiculos WHERE id = ?').get(e.vehiculo_id);
-  const { km } = await kilometros({ lat: e.origen_lat, lng: e.origen_lng }, { lat: e.destino_lat, lng: e.destino_lng });
-  const base = redondear(Math.max(v.tarifa_zona, v.tarifa_base + km * v.precio_km) + (e.recargo_fragil || 0));
+  const { km } = await kilometros(o, d);
+  const fija = aplicaTarifaFija(e.origen_zona, e.destino_zona, o, d, km);
+  const viaje = fija ? v.tarifa_zona : Math.max(v.tarifa_zona, v.tarifa_base + km * v.precio_km);
+  const base = redondear(viaje + (e.recargo_fragil || 0) + (e.seguro || 0));
   let descuento = 0;
   const p = e.promocion_id ? db.prepare('SELECT * FROM promociones WHERE id = ?').get(e.promocion_id) : null;
   if (p) descuento = montoPromo(p, base);
@@ -1459,9 +1691,13 @@ async function finalizarPrecio(id) {
     if (u && u.tipo_cuenta === 'empresa' && u.descuento_empresa > 0) descuento = redondear((base * Math.min(100, u.descuento_empresa)) / 100);
   }
   const precio = redondear(base - descuento);
-  const r = db.prepare('UPDATE envios SET km = ?, precio_base = ?, descuento = ?, precio = ?, precio_por_confirmar = 0 WHERE id = ? AND precio_por_confirmar = 1')
-    .run(km, base, descuento, precio, id);
-  if (r.changes) db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(id, e.estado, `Precio final: ${'Q' + precio.toFixed(2)} por ${km} km`);
+  const r = db.prepare(`UPDATE envios SET tipo_tarifa = ?, km = ?, precio_base = ?, descuento = ?, precio = ?, precio_por_confirmar = 0,
+      precio_o_lat = ?, precio_o_lng = ?, precio_d_lat = ?, precio_d_lng = ? WHERE id = ? AND estado IN ('pendiente','recogido','en_camino')`)
+    .run(fija ? 'zona' : 'km', km, base, descuento, precio, o.lat, o.lng, d.lat, d.lng, id);
+  if (!r.changes || Math.abs(precio - e.precio) < 0.01) return;
+  const razon = e.tipo_tarifa === 'zona' && !fija ? 'La entrega queda fuera de las zonas con tarifa fija' : e.precio_por_confirmar ? 'Precio final' : 'Cambió el punto de recogida o de entrega';
+  db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(id, e.estado, `${razon}: ${'Q' + precio.toFixed(2)}${fija ? ' (tarifa fija)' : ` por ${km} km`}`);
+  avisarEnvio(id, 'precio', { precio, razon });
 }
 
 ruta('GET', '/api/recibe/:token', ({ params }) => {
@@ -1520,7 +1756,7 @@ ruta('POST', '/api/recibe/:token/confirmar', async ({ req, params, body }) => {
     guardarPosicionReceptor(e, c, body.precision);
     if (primera) db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(e.id, e.estado, `${nombre.split(' ')[0]} confirmó que recibe y comparte su ubicación`);
   }
-  await finalizarPrecio(e.id);
+  await revisarPrecio(e.id);
   return { ok: true };
 }, { limite: 1_500_000 });
 
@@ -1533,7 +1769,7 @@ ruta('POST', '/api/recibe/:token/ubicacion', async ({ params, body }) => {
   const c = coordenada(body.lat, body.lng);
   if (!c) falla(400, 'Ubicación no válida.');
   if (entrega) guardarPosicionOrigen(e.id, c, body.precision); else guardarPosicionReceptor(e, c, body.precision);
-  await finalizarPrecio(e.id);
+  await revisarPrecio(e.id);
   return { ok: true };
 });
 
@@ -1544,7 +1780,7 @@ ruta('POST', '/api/yo/ubicacion', async ({ req, body }) => {
   const c = coordenada(body.lat, body.lng);
   if (!c) falla(400, 'Ubicación no válida.');
   const ids = db.prepare("SELECT id FROM envios WHERE usuario_id = ? AND origen_quien = 'cliente' AND estado = 'pendiente'").all(u.id).map((x) => x.id);
-  for (const id of ids) { guardarPosicionOrigen(id, c, body.precision); await finalizarPrecio(id); }
+  for (const id of ids) { guardarPosicionOrigen(id, c, body.precision); await revisarPrecio(id); }
   return { ok: true, envios: ids.length };
 });
 
@@ -1607,7 +1843,7 @@ ruta('POST', '/api/piloto/emergencia', ({ req, body }) => {
   const p = requierePiloto(req);
   const tipo = TIPOS_EMERGENCIA[body.tipo] ? body.tipo : 'otro';
   const c = coordenada(body.lat, body.lng) || (p.ubic_lat != null ? { lat: p.ubic_lat, lng: p.ubic_lng } : null);
-  const activo = db.prepare("SELECT id FROM envios WHERE mensajero_id = ? AND estado IN ('pendiente','recogido','en_camino') ORDER BY id LIMIT 1").get(p.id);
+  const activo = db.prepare(`SELECT id FROM envios WHERE mensajero_id = ? AND estado IN ${SQL_PILOTO_ACTIVO} ORDER BY id LIMIT 1`).get(p.id);
   // No repetir la misma alerta abierta en el último minuto
   if (!db.prepare("SELECT 1 FROM alertas WHERE piloto_id = ? AND atendida_en IS NULL AND creado > datetime('now','-1 minute')").get(p.id)) {
     db.prepare('INSERT INTO alertas (piloto_id, tipo, lat, lng, envio_id) VALUES (?, ?, ?, ?, ?)').run(p.id, tipo, c?.lat ?? null, c?.lng ?? null, activo?.id ?? null);
@@ -1626,22 +1862,25 @@ ruta('POST', '/api/admin/alertas/:id/atender', ({ req, params }) => {
 ruta('GET', '/api/admin/alertas', ({ req }) => { requiereStaff(req); return { alertas: alertasAbiertas() }; });
 
 // ---------- Caja: efectivo de pilotos, pagos a pilotos, cobros a devolver y crédito de empresas (solo administración) ----------
-const SQL_EFECTIVO = `(CASE WHEN e.metodo_pago = 'efectivo' THEN e.precio ELSE 0 END + e.cobro_destinatario)`;
+// Efectivo que tiene el piloto por un envío: el pago del envío (y cargos pendientes que se cobraron con él) si fue en efectivo,
+// más el cobro a quien recibe cuando él lo entregó (si se retiró en la sede, lo cobró la oficina)
+const SQL_EFECTIVO = `(CASE WHEN e.estado != 'cancelado' AND e.metodo_pago = 'efectivo' THEN e.precio + e.cargos_extra ELSE 0 END
+  + CASE WHEN e.estado = 'entregado' AND e.sede_llegada IS NULL THEN e.cobro_destinatario ELSE 0 END)`;
 ruta('GET', '/api/admin/caja', ({ req }) => {
   requiereRol(req, 'admin');
   const pilotos = db.prepare(`SELECT u.id, u.nombre, u.telefono,
-      (SELECT COALESCE(SUM(${SQL_EFECTIVO}), 0) FROM envios e WHERE e.mensajero_id = u.id AND e.estado = 'entregado' AND e.liquidado_id IS NULL) AS efectivo,
-      (SELECT COUNT(*) FROM envios e WHERE e.mensajero_id = u.id AND e.estado = 'entregado' AND e.liquidado_id IS NULL AND ${SQL_EFECTIVO} > 0) AS envios_efectivo,
-      (SELECT COALESCE(SUM(e.ganancia_piloto), 0) FROM envios e WHERE e.mensajero_id = u.id AND e.estado = 'entregado' AND e.pago_piloto_id IS NULL) AS ganancia,
-      (SELECT COUNT(*) FROM envios e WHERE e.mensajero_id = u.id AND e.estado = 'entregado' AND e.pago_piloto_id IS NULL) AS envios_ganancia
+      (SELECT COALESCE(SUM(${SQL_EFECTIVO}), 0) FROM envios e WHERE e.mensajero_id = u.id AND e.piloto_cerro_en IS NOT NULL AND e.liquidado_id IS NULL) AS efectivo,
+      (SELECT COUNT(*) FROM envios e WHERE e.mensajero_id = u.id AND e.piloto_cerro_en IS NOT NULL AND e.liquidado_id IS NULL AND ${SQL_EFECTIVO} > 0) AS envios_efectivo,
+      (SELECT COALESCE(SUM(e.ganancia_piloto), 0) FROM envios e WHERE e.mensajero_id = u.id AND e.piloto_cerro_en IS NOT NULL AND e.pago_piloto_id IS NULL) AS ganancia,
+      (SELECT COUNT(*) FROM envios e WHERE e.mensajero_id = u.id AND e.piloto_cerro_en IS NOT NULL AND e.pago_piloto_id IS NULL AND e.ganancia_piloto > 0) AS envios_ganancia
     FROM usuarios u WHERE u.rol = 'mensajero' ORDER BY u.nombre`).all().filter((p) => p.efectivo > 0 || p.ganancia > 0);
   const detalle = (id) => db.prepare(`SELECT e.id, e.guia, e.entregado_en, e.precio, e.metodo_pago, e.cobro_destinatario, ${SQL_EFECTIVO} AS efectivo
-    FROM envios e WHERE e.mensajero_id = ? AND e.estado = 'entregado' AND e.liquidado_id IS NULL AND ${SQL_EFECTIVO} > 0 ORDER BY e.id`).all(id);
+    FROM envios e WHERE e.mensajero_id = ? AND e.piloto_cerro_en IS NOT NULL AND e.liquidado_id IS NULL AND ${SQL_EFECTIVO} > 0 ORDER BY e.id`).all(id);
   const cobros = db.prepare(`SELECT u.id, u.nombre, u.telefono, u.empresa_nombre, COUNT(*) AS envios, SUM(e.cobro_destinatario) AS monto
     FROM envios e JOIN usuarios u ON u.id = e.usuario_id WHERE e.estado = 'entregado' AND e.cobro_destinatario > 0 AND e.cobro_pagado_en IS NULL
     GROUP BY u.id ORDER BY monto DESC`).all();
-  const credito = db.prepare(`SELECT u.id, u.nombre, u.empresa_nombre, COUNT(*) AS envios, SUM(e.precio) AS monto, MIN(e.creado) AS desde
-    FROM envios e JOIN usuarios u ON u.id = e.usuario_id WHERE e.metodo_pago = 'credito' AND e.estado = 'entregado' AND e.credito_pagado_en IS NULL
+  const credito = db.prepare(`SELECT u.id, u.nombre, u.empresa_nombre, COUNT(*) AS envios, SUM(e.precio + e.cargos_extra) AS monto, MIN(e.creado) AS desde
+    FROM envios e JOIN usuarios u ON u.id = e.usuario_id WHERE e.metodo_pago = 'credito' AND ${SQL_VIAJE_HECHO} AND e.credito_pagado_en IS NULL
     GROUP BY u.id ORDER BY monto DESC`).all();
   const historial = db.prepare(`SELECT 'liquidacion' AS tipo, l.id AS id, l.creado AS creado, u.nombre AS nombre, l.esperado AS esperado, l.recibido AS monto, l.envios AS envios, l.nota AS nota FROM liquidaciones l JOIN usuarios u ON u.id = l.piloto_id
     UNION ALL SELECT 'pago' AS tipo, p.id, p.creado, u.nombre, NULL, p.monto, p.envios, p.nota FROM pagos_piloto p JOIN usuarios u ON u.id = p.piloto_id
@@ -1653,7 +1892,7 @@ ruta('POST', '/api/admin/caja/liquidar', ({ req, body }) => {
   requiereRol(req, 'admin');
   const id = numero(body.piloto_id), recibido = numero(body.recibido);
   if (!(recibido >= 0)) falla(400, 'Escribe cuánto efectivo entregó el piloto.');
-  const envios = db.prepare(`SELECT e.id, ${SQL_EFECTIVO} AS efectivo FROM envios e WHERE e.mensajero_id = ? AND e.estado = 'entregado' AND e.liquidado_id IS NULL AND ${SQL_EFECTIVO} > 0`).all(id);
+  const envios = db.prepare(`SELECT e.id, ${SQL_EFECTIVO} AS efectivo FROM envios e WHERE e.mensajero_id = ? AND e.piloto_cerro_en IS NOT NULL AND e.liquidado_id IS NULL AND ${SQL_EFECTIVO} > 0`).all(id);
   if (!envios.length) falla(400, 'Este piloto no tiene efectivo pendiente.');
   const esperado = redondear(envios.reduce((s, x) => s + x.efectivo, 0));
   db.exec('BEGIN');
@@ -1668,7 +1907,7 @@ ruta('POST', '/api/admin/caja/liquidar', ({ req, body }) => {
 ruta('POST', '/api/admin/caja/pagar-piloto', ({ req, body }) => {
   requiereRol(req, 'admin');
   const id = numero(body.piloto_id);
-  const envios = db.prepare("SELECT id, ganancia_piloto FROM envios WHERE mensajero_id = ? AND estado = 'entregado' AND pago_piloto_id IS NULL").all(id);
+  const envios = db.prepare("SELECT id, ganancia_piloto FROM envios WHERE mensajero_id = ? AND piloto_cerro_en IS NOT NULL AND pago_piloto_id IS NULL AND ganancia_piloto > 0").all(id);
   if (!envios.length) falla(400, 'No hay entregas pendientes de pago para este piloto.');
   const monto = redondear(envios.reduce((s, x) => s + (x.ganancia_piloto || 0), 0));
   db.exec('BEGIN');
@@ -1687,7 +1926,7 @@ ruta('POST', '/api/admin/caja/pagar-cobros', ({ req, body }) => {
 });
 ruta('POST', '/api/admin/caja/cobrar-credito', ({ req, body }) => {
   requiereRol(req, 'admin');
-  const r = db.prepare("UPDATE envios SET credito_pagado_en = datetime('now') WHERE usuario_id = ? AND metodo_pago = 'credito' AND estado = 'entregado' AND credito_pagado_en IS NULL").run(numero(body.cliente_id));
+  const r = db.prepare("UPDATE envios SET credito_pagado_en = datetime('now') WHERE usuario_id = ? AND metodo_pago = 'credito' AND estado NOT IN ('pendiente','recogido','en_camino','cancelado') AND credito_pagado_en IS NULL").run(numero(body.cliente_id));
   return { ok: true, envios: Number(r.changes) };
 });
 
@@ -1761,14 +2000,14 @@ ruta('GET', '/api/admin/reportes', ({ req, query }) => {
   requiereRol(req, 'admin');
   const { desde, hasta } = rangoReporte(query);
   const g = db.prepare(`SELECT COUNT(*) AS envios,
-      SUM(e.estado = 'entregado') AS entregados, SUM(e.estado = 'cancelado') AS cancelados,
-      COALESCE(SUM(CASE WHEN e.estado = 'entregado' THEN e.precio END), 0) AS ingresos,
-      COALESCE(SUM(CASE WHEN e.estado = 'entregado' THEN e.descuento END), 0) AS descuentos,
-      COALESCE(SUM(CASE WHEN e.estado = 'entregado' THEN e.ganancia_piloto END), 0) AS pagos_pilotos,
+      SUM(e.estado = 'entregado') AS entregados, SUM(e.estado = 'cancelado') AS cancelados, SUM(e.fallo_en IS NOT NULL) AS fallidos,
+      COALESCE(SUM(CASE WHEN ${SQL_VIAJE_HECHO} THEN e.precio END), 0) AS ingresos,
+      COALESCE(SUM(CASE WHEN ${SQL_VIAJE_HECHO} THEN e.descuento END), 0) AS descuentos,
+      COALESCE(SUM(e.ganancia_piloto), 0) AS pagos_pilotos,
       AVG(CASE WHEN e.estado = 'entregado' AND e.entregado_en IS NOT NULL THEN (julianday(e.entregado_en) - julianday(COALESCE(e.programado_para, e.creado))) * 1440 END) AS minutos,
       COUNT(DISTINCT e.usuario_id) AS clientes
     FROM envios e WHERE ${FILTRO_RANGO}`).get(desde, hasta);
-  const porDia = db.prepare(`SELECT date(e.creado, '-6 hours') AS dia, COUNT(*) AS envios, COALESCE(SUM(CASE WHEN e.estado = 'entregado' THEN e.precio END), 0) AS ingresos
+  const porDia = db.prepare(`SELECT date(e.creado, '-6 hours') AS dia, COUNT(*) AS envios, COALESCE(SUM(CASE WHEN ${SQL_VIAJE_HECHO} THEN e.precio END), 0) AS ingresos
     FROM envios e WHERE ${FILTRO_RANGO} GROUP BY dia ORDER BY dia`).all(desde, hasta);
   const porZona = db.prepare(`SELECT e.destino_zona AS zona, COUNT(*) AS envios FROM envios e WHERE ${FILTRO_RANGO} AND e.estado != 'cancelado' GROUP BY zona ORDER BY envios DESC LIMIT 12`).all(desde, hasta);
   const porHora = db.prepare(`SELECT CAST(strftime('%H', e.creado, '-6 hours') AS INTEGER) AS hora, COUNT(*) AS envios FROM envios e WHERE ${FILTRO_RANGO} GROUP BY hora ORDER BY hora`).all(desde, hasta);
@@ -1777,7 +2016,10 @@ ruta('GET', '/api/admin/reportes', ({ req, query }) => {
     FROM envios e JOIN usuarios u ON u.id = e.mensajero_id WHERE ${FILTRO_RANGO} AND e.estado = 'entregado' GROUP BY u.id ORDER BY entregas DESC`).all(desde, hasta);
   const promos = db.prepare(`SELECT p.nombre, COUNT(*) AS usos, SUM(e.descuento) AS descontado FROM envios e JOIN promociones p ON p.id = e.promocion_id
     WHERE ${FILTRO_RANGO} AND e.estado != 'cancelado' GROUP BY p.id ORDER BY usos DESC`).all(desde, hasta);
-  return { desde, hasta, general: { ...g, ingresos: redondear(g.ingresos), descuentos: redondear(g.descuentos), pagos_pilotos: redondear(g.pagos_pilotos),
+  // Cargos a clientes (cancelación tardía, devoluciones, días en la sede y nuevas entregas)
+  const cargos = db.prepare(`SELECT c.tipo, COUNT(*) AS n, SUM(c.monto) AS monto FROM cargos c
+    WHERE c.anulado_en IS NULL AND date(c.creado, '-6 hours') BETWEEN ? AND ? GROUP BY c.tipo`).all(desde, hasta);
+  return { desde, hasta, cargos, general: { ...g, fallidos: g.fallidos || 0, ingresos: redondear(g.ingresos), descuentos: redondear(g.descuentos), pagos_pilotos: redondear(g.pagos_pilotos),
     entregados: g.entregados || 0, cancelados: g.cancelados || 0, minutos: g.minutos ? Math.round(g.minutos) : null,
     ticket: g.entregados ? redondear(g.ingresos / g.entregados) : 0 }, porDia, porZona, porHora, pilotos, promos };
 });
@@ -1830,6 +2072,442 @@ ruta('PUT', '/api/admin/operadores/:id', ({ req, params, body }) => {
   return { ok: true };
 });
 
+
+// =====================================================================
+// Versión 3: avisos, cargos, entregas fallidas y sede, contraseña olvidada,
+// comprobantes de transferencia, conexión para tiendas y salud del servidor
+// =====================================================================
+
+// ---------- Avisos al celular (push) y por correo ----------
+const push = crearPush({ dataDir: DATA_DIR, contacto: `mailto:${ADMIN_EMAIL}` });
+async function avisarUsuario(usuarioId, datos) {
+  const subs = db.prepare('SELECT * FROM push_suscripciones WHERE usuario_id = ?').all(usuarioId);
+  for (const sub of subs) {
+    if ((await push.enviar(sub, datos)) === 'vencida') db.prepare('DELETE FROM push_suscripciones WHERE id = ?').run(sub.id);
+  }
+}
+const avisar = (usuarioId, datos) => { if (usuarioId) avisarUsuario(usuarioId, datos).catch(() => {}); };
+function avisarStaff(datos) {
+  for (const u of db.prepare("SELECT id FROM usuarios WHERE activo = 1 AND ((rol = 'admin' AND email = ?) OR rol = 'operador')").all(ADMIN_EMAIL)) avisar(u.id, datos);
+}
+// Correo con el diseño de Vaelo: título, párrafos y un botón
+function correoVaelo(titulo, parrafos, boton) {
+  const p = parrafos.map((t) => `<p style="margin:0 0 12px">${escaparHtml(t)}</p>`).join('');
+  const b = boton ? `<p style="margin:22px 0"><a href="${URL_SITIO}${boton.url}" style="background:#1c3faa;color:#fff;padding:12px 20px;border-radius:8px;text-decoration:none;font-weight:bold">${escaparHtml(boton.texto)}</a></p>` : '';
+  return `<div style="font-family:Arial,sans-serif;max-width:520px;margin:auto;color:#15171c">
+    <div style="background:#0e2463;padding:20px 24px;border-radius:10px 10px 0 0"><img src="${URL_SITIO}/img/logo-blanco.png" alt="Vaelo" height="32"></div>
+    <div style="border:1px solid #d9dce5;border-top:0;padding:24px;border-radius:0 0 10px 10px"><h2 style="margin:0 0 14px">${escaparHtml(titulo)}</h2>${p}${b}
+    <p style="color:#5a6072;font-size:12px;margin-top:20px">Vaelo Mensajería · Guatemala</p></div></div>`;
+}
+function correoA(usuarioId, asunto, titulo, parrafos, boton) {
+  const u = db.prepare('SELECT email, nombre FROM usuarios WHERE id = ?').get(usuarioId);
+  if (!u) return;
+  enviarCorreo(u.email, asunto, correoVaelo(titulo, parrafos, boton), [titulo, ...parrafos, boton ? URL_SITIO + boton.url : ''].join('\n')).catch(() => {});
+}
+// Qué se avisa en cada momento del envío (al cliente, al piloto y a la oficina) y a la tienda conectada
+function avisarEnvio(envioId, tipo, extra = {}) {
+  try {
+    const e = db.prepare(`${SQL_ENVIO} WHERE e.id = ?`).get(envioId);
+    if (!e) return;
+    const url = `/mi-cuenta?envio=${e.id}`, guia = e.guia, piloto = (e.mensajero_nombre || 'El piloto').split(' ')[0];
+    const cli = (titulo, cuerpo, conCorreo, parrafos, urgente) => {
+      avisar(e.usuario_id, { titulo, cuerpo, url, etiqueta: 'envio-' + e.id, urgente });
+      if (conCorreo) correoA(e.usuario_id, `${titulo} · ${guia}`, titulo, parrafos || [cuerpo], { texto: 'Ver mi envío', url });
+    };
+    const pil = (titulo, cuerpo, urgente = true) => e.mensajero_id && avisar(e.mensajero_id, { titulo, cuerpo, url: RUTA_PILOTO, etiqueta: 'piloto-' + e.id, urgente });
+    switch (tipo) {
+      case 'nuevo': avisarStaff({ titulo: 'Pedido nuevo', cuerpo: `${guia} · ${e.cliente_nombre} · ${e.origen_zona} → ${e.destino_zona} · Q${e.precio.toFixed(2)}`, url: RUTA_ADMIN, etiqueta: 'nuevo' }); break;
+      case 'aceptado': cli('Tu piloto va en camino', `${piloto} aceptó tu envío ${guia} y va a recoger el paquete.`); break;
+      case 'llegando': cli('Tu paquete está por llegar', `${piloto} está llegando al punto de entrega del envío ${guia}.`); break;
+      case 'recogido': cli('Paquete recogido', `${piloto} ya tiene tu paquete ${guia}.`); break;
+      case 'entregado': cli('Paquete entregado', `Tu envío ${guia} fue entregado${e.recibio ? ' a ' + e.recibio : ''}.`, true,
+        [`Tu envío ${guia} fue entregado${e.recibio ? ' a ' + e.recibio : ''}.`, 'En tu cuenta puedes ver la foto de la entrega y calificar al piloto.']); break;
+      case 'fallido': {
+        const aj = getAjustes(), horas = horasDecidir();
+        const parrafos = [`${piloto} no pudo entregar tu envío ${guia}: ${MOTIVOS_FALLO[e.fallo_motivo] || 'motivo no indicado'}.`,
+          `Elige qué hacemos con el paquete: devolvértelo (Q${Number(aj.cargo_devolucion).toFixed(2)}) o guardarlo en nuestra sede (Q${Number(aj.cargo_bodega_dia).toFixed(2)} por día hasta que se entregue).`,
+          `Si no eliges en ${horas === 1 ? '1 hora' : horas + ' horas'}, lo llevamos a la sede.`];
+        cli('No pudimos entregar tu paquete', parrafos[0] + ' Elige qué hacemos con él.', true, parrafos, true);
+        avisarStaff({ titulo: 'Entrega fallida', cuerpo: `${guia}: ${MOTIVOS_FALLO[e.fallo_motivo] || ''}`, url: RUTA_ADMIN, etiqueta: 'fallido-' + e.id });
+        break;
+      }
+      case 'devolviendo': pil('Devuelve el paquete', `${guia}: el cliente pidió que se lo devuelvas al punto de recogida.`); cli('Devolución en camino', `${piloto} te devolverá el paquete ${guia}.`); break;
+      case 'a_sede': extra.auto = e.fallo_decidido_por === 'automático'; pil('Lleva el paquete a la sede', `${guia}: déjalo en la sede de Vaelo.`); cli('Tu paquete va a la sede', `Guardaremos tu paquete ${guia} en la sede. Desde tu cuenta puedes pedir que se entregue de nuevo.`, extra.auto,
+        [`Guardaremos tu paquete ${guia} en la sede de Vaelo${extra.auto ? ' porque no recibimos tu elección a tiempo' : ''}.`, `Cuesta Q${Number(getAjustes().cargo_bodega_dia).toFixed(2)} por día hasta que se entregue. Desde tu cuenta puedes pedir que lo llevemos de nuevo.`]); break;
+      case 'devuelto': cli('Paquete devuelto', `Tu paquete ${guia} fue devuelto${e.devuelto_a ? ' a ' + e.devuelto_a : ''}.`, true); break;
+      case 'en_sede': cli('Tu paquete está en la sede', `El paquete ${guia} ya está guardado en la sede de Vaelo.`); break;
+      case 'cancelado': if (e.asignacion) pil('Envío cancelado', `${guia} fue cancelado. Ya no tienes que recogerlo.`); break;
+      case 'asignado': pil('Nuevo envío para ti', `${e.origen_zona} → ${e.destino_zona} · ${e.vehiculo}. Tienes ${Math.max(20, Number(getAjustes().segundos_aceptar) || 60)} segundos para aceptar.`); break;
+      case 'precio': cli('Precio de tu envío actualizado', `${guia}: ${extra.razon}. Total Q${Number(extra.precio).toFixed(2)}.`, true); break;
+      case 'comprobante': avisarStaff({ titulo: 'Comprobante de transferencia', cuerpo: `${guia} · ${e.cliente_nombre} · Q${(e.precio + e.cargos_extra).toFixed(2)}`, url: RUTA_ADMIN, etiqueta: 'pago-' + e.id }); break;
+    }
+    if (ESTADOS.includes(tipo) || tipo === 'precio' || tipo === 'aceptado') avisarTienda(e, tipo);
+  } catch (err) { console.error('Aviso de envío:', err.message); }
+}
+
+// ---------- Suscripciones push ----------
+ruta('GET', '/api/push/clave', () => ({ clave: push.clavePublica }));
+ruta('POST', '/api/push/suscribir', ({ req, body }) => {
+  const u = requiereUsuario(req);
+  const sub = body.suscripcion || {};
+  const endpoint = texto(sub.endpoint, 1000), p256dh = texto(sub.keys?.p256dh, 200), auth = texto(sub.keys?.auth, 100);
+  if (!/^https:\/\//.test(endpoint) || !p256dh || !auth) falla(400, 'Suscripción no válida.');
+  db.prepare(`INSERT INTO push_suscripciones (usuario_id, endpoint, p256dh, auth) VALUES (?, ?, ?, ?)
+    ON CONFLICT(endpoint) DO UPDATE SET usuario_id = excluded.usuario_id, p256dh = excluded.p256dh, auth = excluded.auth`).run(u.id, endpoint, p256dh, auth);
+  return { ok: true };
+});
+ruta('POST', '/api/push/quitar', ({ req, body }) => {
+  const u = requiereUsuario(req);
+  db.prepare('DELETE FROM push_suscripciones WHERE usuario_id = ? AND endpoint = ?').run(u.id, texto(body.endpoint, 1000));
+  return { ok: true };
+});
+ruta('POST', '/api/push/probar', async ({ req }) => {
+  const u = requiereUsuario(req);
+  if (limitar(String(u.id), 'push-probar', 5, 600_000)) falla(429, 'Espera unos minutos.');
+  await avisarUsuario(u.id, { titulo: 'Avisos activados', cuerpo: 'Así te llegarán los avisos de Vaelo.', url: '/' });
+  return { ok: true };
+});
+
+// ---------- Cargos al cliente ----------
+const TIPOS_CARGO = { cancelacion: 'Cancelación con el piloto en camino', devolucion: 'Devolución del paquete', bodega: 'Días en la sede', reentrega: 'Nueva entrega desde la sede' };
+function crearCargo(usuarioId, envioId, tipo, monto, nota) {
+  if (!(monto > 0)) return;
+  db.prepare('INSERT INTO cargos (usuario_id, envio_id, tipo, monto, nota) VALUES (?, ?, ?, ?, ?)').run(usuarioId, envioId, tipo, redondear(monto), nota || TIPOS_CARGO[tipo]);
+}
+// Al crear un envío, los cargos pendientes se cobran con él
+function sumarCargosPendientes(usuarioId, envioId) {
+  const r = db.prepare("UPDATE cargos SET cobrado_envio_id = ? WHERE usuario_id = ? AND cobrado_envio_id IS NULL AND pagado_en IS NULL AND anulado_en IS NULL").run(envioId, usuarioId);
+  if (!r.changes) return 0;
+  const total = redondear(db.prepare('SELECT COALESCE(SUM(monto), 0) AS t FROM cargos WHERE cobrado_envio_id = ?').get(envioId).t);
+  db.prepare('UPDATE envios SET cargos_extra = ? WHERE id = ?').run(total, envioId);
+  db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(envioId, 'pendiente', `Incluye Q${total.toFixed(2)} de cargos pendientes`);
+  return total;
+}
+function liberarCargos(envioId) {
+  db.prepare('UPDATE cargos SET cobrado_envio_id = NULL WHERE cobrado_envio_id = ?').run(envioId);
+  db.prepare('UPDATE envios SET cargos_extra = 0 WHERE id = ?').run(envioId);
+}
+const cargosPendientes = (usuarioId) => db.prepare(`SELECT c.*, e.guia FROM cargos c LEFT JOIN envios e ON e.id = c.envio_id
+  WHERE c.usuario_id = ? AND c.pagado_en IS NULL AND c.anulado_en IS NULL AND c.cobrado_envio_id IS NULL ORDER BY c.id`).all(usuarioId);
+ruta('GET', '/api/yo/cargos', ({ req }) => {
+  const u = requiereUsuario(req);
+  const pendientes = cargosPendientes(u.id);
+  const historial = db.prepare(`SELECT c.*, e.guia, ec.guia AS cobrado_guia FROM cargos c LEFT JOIN envios e ON e.id = c.envio_id LEFT JOIN envios ec ON ec.id = c.cobrado_envio_id
+    WHERE c.usuario_id = ? ORDER BY c.id DESC LIMIT 50`).all(u.id);
+  return { pendientes, total: redondear(pendientes.reduce((t, c) => t + c.monto, 0)), historial, tipos: TIPOS_CARGO };
+});
+
+// ---------- Entrega fallida: decisión, devolución y sede ----------
+const horasDecidir = () => Math.max(0.25, Number(getAjustes().horas_decidir_fallido) || 2);
+function sedeUbicacion() {
+  const a = getAjustes();
+  return coordenada(a.sede_lat, a.sede_lng);
+}
+// Días en la sede (cada día o fracción cuenta), hasta hoy o hasta que salió
+function diasEnSede(e) {
+  if (!e.sede_llegada) return 0;
+  const fin = e.sede_salida ? fechaMs(e.sede_salida) : Date.now();
+  return Math.max(1, Math.ceil((fin - fechaMs(e.sede_llegada)) / 86400_000));
+}
+const cargoBodega = (e) => redondear(diasEnSede(e) * (Number(getAjustes().cargo_bodega_dia) || 0));
+function decidirFallido(e, decision, por) {
+  if (e.estado !== 'fallido') falla(400, 'Este envío ya no está esperando una decisión.');
+  if (!['devolver', 'sede'].includes(decision)) falla(400, 'Elige devolver el paquete o guardarlo en la sede.');
+  const aj = getAjustes();
+  db.exec('BEGIN');
+  try {
+    db.prepare("UPDATE envios SET fallo_decision = ?, fallo_decidido_en = datetime('now'), fallo_decidido_por = ? WHERE id = ?").run(decision, por, e.id);
+    if (decision === 'devolver') {
+      crearCargo(e.usuario_id, e.id, 'devolucion', Number(aj.cargo_devolucion) || 0);
+      cambiarEstado(e.id, 'devolviendo', `Se devolverá a quien lo envió (decidió: ${por}). Cargo: Q${(Number(aj.cargo_devolucion) || 0).toFixed(2)}`);
+    } else {
+      cambiarEstado(e.id, 'a_sede', `Se guardará en la sede (decidió: ${por}). Q${(Number(aj.cargo_bodega_dia) || 0).toFixed(2)} por día`);
+    }
+    db.exec('COMMIT');
+  } catch (err) { db.exec('ROLLBACK'); throw err; }
+}
+ruta('POST', '/api/envios/:id/decidir', ({ req, params, body }) => {
+  const u = requiereUsuario(req);
+  const e = db.prepare('SELECT * FROM envios WHERE id = ? AND usuario_id = ?').get(Number(params.id), u.id);
+  if (!e) falla(404, 'No encontramos ese envío.');
+  decidirFallido(e, texto(body.decision, 10), 'el cliente');
+  return { ok: true };
+});
+// Si el cliente no elige a tiempo, el paquete va a la sede
+function decisionesVencidas() {
+  const minutos = Math.round(horasDecidir() * 60);
+  for (const e of db.prepare("SELECT * FROM envios WHERE estado = 'fallido' AND fallo_en < datetime('now', ?)").all(`-${minutos} minutes`)) {
+    try { decidirFallido(e, 'sede', 'automático'); } catch (err) { console.error('Decisión automática:', err.message); }
+  }
+}
+if (require.main === module) setInterval(() => { try { decisionesVencidas(); } catch (err) { console.error(err.message); } }, 60_000).unref();
+
+// Paquete en la sede: lo retira alguien (se cobra lo de la sede) o se manda de nuevo con un piloto
+function retirarDeSede(e, recibio, quien) {
+  if (e.estado !== 'en_sede') falla(400, 'Este paquete no está en la sede.');
+  if (recibio.length < 2) falla(400, 'Escribe el nombre de quien retiró el paquete.');
+  db.exec('BEGIN');
+  try {
+    db.prepare("UPDATE envios SET sede_salida = datetime('now'), recibio = ? WHERE id = ?").run(recibio, e.id);
+    const f = db.prepare('SELECT * FROM envios WHERE id = ?').get(e.id);
+    crearCargo(e.usuario_id, e.id, 'bodega', cargoBodega(f), `${diasEnSede(f)} día(s) en la sede`);
+    // Lo pendiente del cliente se paga en la sede al retirar
+    db.prepare("UPDATE cargos SET pagado_en = datetime('now'), pagado_como = 'en la sede' WHERE usuario_id = ? AND pagado_en IS NULL AND anulado_en IS NULL AND cobrado_envio_id IS NULL").run(e.usuario_id);
+    cambiarEstado(e.id, 'entregado', `Retirado en la sede por ${recibio} (${quien})`);
+    db.exec('COMMIT');
+  } catch (err) { db.exec('ROLLBACK'); throw err; }
+}
+function reenviarDesdeSede(e, quien) {
+  if (e.estado !== 'en_sede') falla(400, 'Este paquete no está en la sede.');
+  const sede = sedeUbicacion();
+  if (!sede) falla(400, 'Falta la ubicación de la sede (panel > Tarifas y ajustes).');
+  const aj = getAjustes();
+  db.exec('BEGIN');
+  try {
+    db.prepare("UPDATE envios SET sede_salida = datetime('now') WHERE id = ?").run(e.id);
+    const f = db.prepare('SELECT * FROM envios WHERE id = ?').get(e.id);
+    crearCargo(e.usuario_id, e.id, 'bodega', cargoBodega(f), `${diasEnSede(f)} día(s) en la sede`);
+    const cargoRe = Number(aj.cargo_reentrega) || 0;
+    crearCargo(e.usuario_id, e.id, 'reentrega', cargoRe);
+    // El enlace de quien recibe pasa al envío nuevo, así sigue funcionando el mismo
+    const token = e.receptor_token;
+    db.prepare('UPDATE envios SET receptor_token = NULL WHERE id = ?').run(e.id);
+    const guia = nuevaGuia();
+    const r = db.prepare(`INSERT INTO envios (guia, usuario_id, vehiculo_id, peso, descripcion, origen_direccion, origen_zona, origen_telefono, origen_lat, origen_lng,
+        destino_nombre, destino_telefono, destino_direccion, destino_zona, destino_lat, destino_lng, tipo_tarifa, precio, precio_base, metodo_pago, cobro_destinatario,
+        notas, fragil, codigo_entrega, receptor_token, receptor_nombre, receptor_confirmado_en, receptor_lat, receptor_lng, receptor_ubic_fecha, receptor_omitido,
+        origen_quien, origen_nombre, origen_ubic_fecha, ganancia_piloto, reentrega_de, valor_declarado, seguro)
+      VALUES (?, ?, ?, ?, ?, ?, 'Sede Vaelo', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'zona', 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'sede', 'Sede Vaelo', datetime('now'), ?, ?, ?, ?)`).run(
+      guia, e.usuario_id, e.vehiculo_id, e.peso, e.descripcion, aj.sede_direccion || 'Sede Vaelo', e.origen_telefono, sede.lat, sede.lng,
+      e.destino_nombre, e.destino_telefono, e.destino_direccion, e.destino_zona, e.destino_lat, e.destino_lng, e.metodo_pago === 'credito' ? 'credito' : 'efectivo', e.cobro_destinatario,
+      `Nueva entrega del envío ${e.guia} desde la sede`, e.fragil, e.codigo_entrega, token, e.receptor_nombre, e.receptor_confirmado_en, e.receptor_lat, e.receptor_lng, e.receptor_ubic_fecha, e.receptor_omitido,
+      gananciaPiloto(cargoRe), e.id, e.valor_declarado, e.seguro);
+    const nuevo = Number(r.lastInsertRowid);
+    db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(nuevo, 'pendiente', `Nueva entrega del envío ${e.guia} desde la sede`);
+    cambiarEstado(e.id, 'reenviado', `Sale de la sede con la guía ${guia} (${quien})`);
+    db.exec('COMMIT');
+    return { guia, id: nuevo };
+  } catch (err) { db.exec('ROLLBACK'); throw err; }
+}
+ruta('POST', '/api/envios/:id/reenviar', ({ req, params }) => {
+  const u = requiereUsuario(req);
+  const e = db.prepare('SELECT * FROM envios WHERE id = ? AND usuario_id = ?').get(Number(params.id), u.id);
+  if (!e) falla(404, 'No encontramos ese envío.');
+  return { ok: true, ...reenviarDesdeSede(e, 'pedido por el cliente') };
+});
+// Panel: decidir por el cliente, recibir en la sede, entregar en la sede o mandar de nuevo
+ruta('POST', '/api/admin/envios/:id/fallido', ({ req, params, body }) => {
+  const quien = requiereStaff(req);
+  const e = db.prepare('SELECT * FROM envios WHERE id = ?').get(Number(params.id));
+  if (!e) falla(404, 'No encontramos ese envío.');
+  const accion = texto(body.accion, 20), nombre = quien.nombre.split(' ')[0];
+  if (accion === 'devolver' || accion === 'sede') { decidirFallido(e, accion, `la oficina (${nombre})`); return { ok: true }; }
+  if (accion === 'recibido') {
+    if (e.estado !== 'a_sede') falla(400, 'Este paquete no va para la sede.');
+    db.prepare("UPDATE envios SET sede_llegada = datetime('now') WHERE id = ?").run(e.id);
+    cambiarEstado(e.id, 'en_sede', `Recibido en la sede (${nombre})`);
+    return { ok: true };
+  }
+  if (accion === 'retirar') { retirarDeSede(e, texto(body.recibio, 100), nombre); return { ok: true }; }
+  if (accion === 'reenviar') return { ok: true, ...reenviarDesdeSede(e, nombre) };
+  falla(400, 'Acción no válida.');
+});
+// Panel: cargos de los clientes (anular un cargo o marcarlo pagado)
+ruta('GET', '/api/admin/cargos', ({ req }) => {
+  requiereRol(req, 'admin');
+  return { cargos: db.prepare(`SELECT c.*, u.nombre AS cliente, u.empresa_nombre, e.guia, ec.guia AS cobrado_guia FROM cargos c JOIN usuarios u ON u.id = c.usuario_id
+      LEFT JOIN envios e ON e.id = c.envio_id LEFT JOIN envios ec ON ec.id = c.cobrado_envio_id ORDER BY c.pagado_en IS NULL AND c.anulado_en IS NULL AND c.cobrado_envio_id IS NULL DESC, c.id DESC LIMIT 200`).all(),
+    tipos: TIPOS_CARGO };
+});
+ruta('POST', '/api/admin/cargos/:id', ({ req, params, body }) => {
+  const u = requiereRol(req, 'admin');
+  const c = db.prepare('SELECT * FROM cargos WHERE id = ?').get(Number(params.id));
+  if (!c) falla(404, 'No encontramos ese cargo.');
+  if (c.anulado_en || c.pagado_en) falla(400, 'Este cargo ya está cerrado.');
+  if (body.accion === 'anular') {
+    if (c.cobrado_envio_id) {   // se quita del envío con el que se iba a cobrar
+      db.prepare('UPDATE envios SET cargos_extra = MAX(0, cargos_extra - ?) WHERE id = ?').run(c.monto, c.cobrado_envio_id);
+    }
+    db.prepare("UPDATE cargos SET anulado_en = datetime('now'), anulado_por = ?, cobrado_envio_id = NULL WHERE id = ?").run(texto(body.nota, 200) || u.nombre, c.id);
+  } else if (body.accion === 'pagado') {
+    if (c.cobrado_envio_id) falla(400, 'Este cargo se cobra con otro envío.');
+    db.prepare("UPDATE cargos SET pagado_en = datetime('now'), pagado_como = ? WHERE id = ?").run(texto(body.nota, 100) || 'marcado en el panel', c.id);
+  } else falla(400, 'Acción no válida.');
+  return { ok: true };
+});
+
+// ---------- Transferencias: comprobante y revisión ----------
+ruta('POST', '/api/envios/:id/comprobante', ({ req, params, body }) => {
+  const u = requiereUsuario(req);
+  const e = db.prepare('SELECT * FROM envios WHERE id = ? AND usuario_id = ?').get(Number(params.id), u.id);
+  if (!e) falla(404, 'No encontramos ese envío.');
+  if (e.metodo_pago !== 'transferencia') falla(400, 'Este envío no se paga por transferencia.');
+  if (e.pago_estado === 'verificado') falla(400, 'Tu pago ya fue verificado.');
+  guardarArchivoEnvio(e.id, 'comprobante', body.archivo);
+  db.prepare("UPDATE envios SET pago_estado = 'por_revisar', pago_nota = NULL WHERE id = ?").run(e.id);
+  db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(e.id, e.estado, 'El cliente subió el comprobante de transferencia');
+  avisarEnvio(e.id, 'comprobante');
+  return { ok: true };
+}, { limite: 1_000_000 });
+ruta('GET', '/api/admin/pagos', ({ req }) => {
+  requiereRol(req, 'admin');
+  return { pagos: db.prepare(`SELECT e.id, e.guia, e.precio, e.cargos_extra, e.pago_estado, e.pago_nota, e.creado, e.estado, u.nombre AS cliente, u.empresa_nombre
+    FROM envios e JOIN usuarios u ON u.id = e.usuario_id WHERE e.metodo_pago = 'transferencia' AND e.estado != 'cancelado' AND COALESCE(e.pago_estado, '') != 'verificado'
+    ORDER BY CASE e.pago_estado WHEN 'por_revisar' THEN 0 ELSE 1 END, e.id DESC LIMIT 100`).all() };
+});
+ruta('POST', '/api/admin/pagos/:id', ({ req, params, body }) => {
+  const u = requiereRol(req, 'admin');
+  const e = db.prepare("SELECT * FROM envios WHERE id = ? AND metodo_pago = 'transferencia'").get(Number(params.id));
+  if (!e) falla(404, 'No encontramos ese envío.');
+  const estado = body.estado === 'verificado' ? 'verificado' : body.estado === 'rechazado' ? 'rechazado' : falla(400, 'Estado no válido.');
+  const nota = texto(body.nota, 200);
+  if (estado === 'rechazado' && nota.length < 4) falla(400, 'Escribe por qué se rechaza, para que el cliente lo corrija.');
+  db.prepare('UPDATE envios SET pago_estado = ?, pago_nota = ? WHERE id = ?').run(estado, nota || null, e.id);
+  db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(e.id, e.estado, estado === 'verificado' ? `Transferencia verificada (${u.nombre.split(' ')[0]})` : `Comprobante rechazado: ${nota}`);
+  if (estado === 'rechazado') avisar(e.usuario_id, { titulo: 'Revisa tu comprobante', cuerpo: `${e.guia}: ${nota}`, url: `/mi-cuenta?envio=${e.id}` });
+  return { ok: true };
+});
+ruta('GET', '/api/admin/envios/:id/comprobante', ({ req, res, params }) => {
+  requiereStaff(req);
+  const e = db.prepare('SELECT * FROM envios WHERE id = ?').get(Number(params.id));
+  if (!e) falla(404, 'No encontramos ese envío.');
+  return enviarArchivoEnvio(res, e, 'comprobante');
+});
+
+// ---------- Olvidé mi contraseña (clientes y pilotos) ----------
+ruta('POST', '/api/clave/olvide', async ({ req, body }) => {
+  if (limitar(ipDe(req), 'clave-olvide', 6, 3600_000)) falla(429, 'Demasiados intentos. Espera una hora.');
+  const email = texto(body.email, 150).toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) falla(400, 'Escribe tu correo.');
+  if (!correoActivo()) falla(503, 'El envío de correos todavía no está configurado. Escríbenos por WhatsApp para cambiar tu contraseña.');
+  const u = db.prepare("SELECT * FROM usuarios WHERE email = ? AND rol IN ('cliente','mensajero') AND activo = 1").get(email);
+  // Siempre se responde igual, así nadie puede averiguar qué correos tienen cuenta
+  if (u && !limitar(email, 'clave-correo', 3, 3600_000)) {
+    const token = crypto.randomBytes(32).toString('hex');
+    db.prepare('DELETE FROM tokens_clave WHERE usuario_id = ?').run(u.id);
+    db.prepare('INSERT INTO tokens_clave (token, usuario_id, expira) VALUES (?, ?, ?)').run(token, u.id, Date.now() + 3600_000);
+    await enviarCorreo(u.email, 'Crea una contraseña nueva en Vaelo',
+      correoVaelo(`Hola, ${u.nombre.split(' ')[0]}`, ['Pediste crear una contraseña nueva para tu cuenta de Vaelo.', 'El enlace sirve durante 1 hora. Si no fuiste tú, ignora este correo: tu contraseña sigue igual.'],
+        { texto: 'Crear contraseña nueva', url: `/recuperar?t=${token}` }),
+      `Crea una contraseña nueva en Vaelo (vence en 1 hora): ${URL_SITIO}/recuperar?t=${token}`);
+  }
+  return { ok: true };
+});
+ruta('POST', '/api/clave/nueva', ({ req, body }) => {
+  if (limitar(ipDe(req), 'clave-nueva', 10, 3600_000)) falla(429, 'Demasiados intentos. Espera una hora.');
+  const token = String(body.token || '');
+  const fila = /^[a-f0-9]{64}$/.test(token) && db.prepare('SELECT * FROM tokens_clave WHERE token = ?').get(token);
+  if (!fila || fila.expira < Date.now()) falla(400, 'El enlace venció o ya se usó. Pide uno nuevo.');
+  const nueva = String(body.password || '');
+  if (nueva.length < 8) falla(400, 'La contraseña debe tener al menos 8 caracteres.');
+  const u = db.prepare('SELECT id, rol FROM usuarios WHERE id = ?').get(fila.usuario_id);
+  db.prepare('UPDATE usuarios SET password_hash = ? WHERE id = ?').run(hashPassword(nueva), u.id);
+  db.prepare('DELETE FROM tokens_clave WHERE usuario_id = ?').run(u.id);
+  db.prepare('DELETE FROM sesiones WHERE usuario_id = ?').run(u.id);
+  return { ok: true, destino: u.rol === 'mensajero' ? RUTA_PILOTO : '/entrar' };
+});
+
+// ---------- Tiendas en línea: clave de la API y avisos (webhook) ----------
+const huella = (t) => crypto.createHash('sha256').update(t).digest('hex');
+ruta('GET', '/api/yo/tienda', ({ req }) => {
+  const u = requiereRol(req, 'cliente');
+  const f = db.prepare('SELECT tipo_cuenta, api_clave_pista, webhook_url FROM usuarios WHERE id = ?').get(u.id);
+  return { empresa: f.tipo_cuenta === 'empresa', clave_pista: f.api_clave_pista, webhook_url: f.webhook_url,
+    recogida: db.prepare('SELECT id, nombre, direccion, zona FROM direcciones WHERE usuario_id = ? AND lat IS NOT NULL ORDER BY nombre').all(u.id) };
+});
+ruta('POST', '/api/yo/tienda', ({ req, body }) => {
+  const u = requiereRol(req, 'cliente');
+  const f = db.prepare('SELECT * FROM usuarios WHERE id = ?').get(u.id);
+  if (f.tipo_cuenta !== 'empresa') falla(403, 'La conexión con tiendas es para cuentas de empresa. Escríbenos para activarla.');
+  const out = { ok: true };
+  if (body.nueva_clave) {
+    const clave = 'vaelo_' + crypto.randomBytes(24).toString('hex');
+    const secreto = f.webhook_secreto || crypto.randomBytes(24).toString('hex');
+    db.prepare('UPDATE usuarios SET api_clave_hash = ?, api_clave_pista = ?, webhook_secreto = ? WHERE id = ?').run(huella(clave), clave.slice(0, 10) + '…' + clave.slice(-4), secreto, u.id);
+    out.clave = clave; out.secreto = secreto;   // se muestran una sola vez
+  }
+  if (body.quitar_clave) db.prepare('UPDATE usuarios SET api_clave_hash = NULL, api_clave_pista = NULL WHERE id = ?').run(u.id);
+  if (body.webhook_url !== undefined) {
+    const w = texto(body.webhook_url, 300);
+    if (w && !/^https:\/\/[^\s/]+\.[^\s]+$/.test(w)) falla(400, 'La dirección para avisos debe empezar con https://');
+    db.prepare('UPDATE usuarios SET webhook_url = ?, webhook_secreto = COALESCE(webhook_secreto, ?) WHERE id = ?').run(w || null, crypto.randomBytes(24).toString('hex'), u.id);
+    if (w) out.secreto = db.prepare('SELECT webhook_secreto FROM usuarios WHERE id = ?').get(u.id).webhook_secreto;
+  }
+  return out;
+});
+function usuarioApi(req) {
+  const m = /^Bearer\s+(vaelo_[a-f0-9]{48})$/.exec(req.headers.authorization || '');
+  if (!m) falla(401, 'Falta la clave de la API (Authorization: Bearer vaelo_...).');
+  if (limitar(m[1].slice(-12), 'api', 120, 60_000)) falla(429, 'Demasiadas peticiones. Máximo 120 por minuto.');
+  const u = db.prepare("SELECT * FROM usuarios WHERE api_clave_hash = ? AND activo = 1 AND rol = 'cliente' AND tipo_cuenta = 'empresa'").get(huella(m[1]));
+  if (!u) falla(401, 'La clave de la API no es válida.');
+  return u;
+}
+function envioParaTienda(e) {
+  return { guia: e.guia, estado: e.estado, precio: e.precio, cargos_extra: e.cargos_extra, destino_nombre: e.destino_nombre, destino_zona: e.destino_zona,
+    enlace_receptor: e.receptor_token && ESTADOS_ACTIVOS.includes(e.estado) ? URL_SITIO + '/recibe/' + e.receptor_token : null,
+    rastreo: `${URL_SITIO}/rastreo?guia=${e.guia}`, recibio: e.recibio, entregado_en: e.entregado_en, creado: e.creado, actualizado: e.actualizado };
+}
+// Crear un envío desde la tienda. La recogida sale de una dirección guardada con ubicación (direccion_id) o de origen_lat/origen_lng.
+ruta('POST', '/api/v1/envios', async ({ req, body }) => {
+  const u = usuarioApi(req);
+  const b = { ...body, origen_quien: 'cliente' };
+  if (body.direccion_id) {
+    const dir = db.prepare('SELECT * FROM direcciones WHERE id = ? AND usuario_id = ? AND lat IS NOT NULL').get(numero(body.direccion_id), u.id);
+    if (!dir) falla(400, 'direccion_id no existe o no tiene ubicación en el mapa.');
+    Object.assign(b, { origen_lat: dir.lat, origen_lng: dir.lng, origen_direccion: dir.direccion, origen_zona: dir.zona, origen_telefono: dir.telefono || u.telefono });
+  }
+  if (!b.origen_zona) b.origen_zona = (coordenada(b.origen_lat, b.origen_lng) && zonaDePunto(coordenada(b.origen_lat, b.origen_lng))) || OTRA_ZONA;
+  if (!b.destino_zona) b.destino_zona = OTRA_ZONA;
+  if (!b.vehiculo_id) b.vehiculo_id = db.prepare('SELECT id FROM vehiculos WHERE activo = 1 ORDER BY orden, id LIMIT 1').get()?.id;
+  const d = validarPedido(u, b);
+  const c = await cotizar(b);
+  const desc = mejorDescuento(c.precio, u.id, b.cupon);
+  db.exec('BEGIN');
+  let out;
+  try { out = insertarEnvio(u, b, d, c, desc, programadoUtc(b.programado_para)); db.exec('COMMIT'); } catch (err) { db.exec('ROLLBACK'); throw err; }
+  avisarEnvio(out.id, 'nuevo');
+  const e = db.prepare('SELECT * FROM envios WHERE id = ?').get(out.id);
+  return { _status: 201, ...envioParaTienda(e), codigo_entrega: out.codigo_entrega, precio_por_confirmar: out.precio_por_confirmar };
+});
+ruta('GET', '/api/v1/envios/:guia', ({ req, params }) => {
+  const u = usuarioApi(req);
+  const e = db.prepare('SELECT * FROM envios WHERE guia = ? AND usuario_id = ?').get(decodeURIComponent(params.guia).toUpperCase(), u.id);
+  if (!e) falla(404, 'No encontramos esa guía en tu cuenta.');
+  return { ...envioParaTienda(e), eventos: eventosDe(e.id).map(({ estado, nota, creado }) => ({ estado, nota, creado })) };
+});
+// Aviso a la tienda en cada cambio, firmado con su secreto (cabecera X-Vaelo-Firma: sha256=...)
+function avisarTienda(e, tipo) {
+  const u = db.prepare('SELECT webhook_url, webhook_secreto FROM usuarios WHERE id = ?').get(e.usuario_id);
+  if (!u || !u.webhook_url || !u.webhook_secreto) return;
+  const fila = db.prepare('SELECT * FROM envios WHERE id = ?').get(e.id);
+  const cuerpo = JSON.stringify({ evento: tipo, envio: envioParaTienda(fila), enviado: new Date().toISOString() });
+  const firma = crypto.createHmac('sha256', u.webhook_secreto).update(cuerpo).digest('hex');
+  fetch(u.webhook_url, { method: 'POST', signal: AbortSignal.timeout(8000), headers: { 'Content-Type': 'application/json', 'X-Vaelo-Firma': 'sha256=' + firma, 'User-Agent': 'Vaelo-Webhook/1.0' }, body: cuerpo })
+    .catch((err) => console.error('Aviso a tienda falló:', err.message));
+}
+
+// ---------- Zona de un punto (para elegirla sola en el formulario) ----------
+ruta('GET', '/api/zona', ({ query }) => {
+  const c = coordenada(query.get('lat'), query.get('lng'));
+  return { zona: c ? zonaDePunto(c) : null, hay_formas: zonasConForma().length > 0 };
+});
+
+// ---------- Salud del servidor y respaldo descargable ----------
+ruta('GET', '/api/salud', () => { db.prepare('SELECT 1').get(); return { ok: true, hora: new Date().toISOString() }; });
+ruta('GET', '/api/admin/respaldo', ({ req, res }) => {
+  requiereRol(req, 'admin');
+  const dir = path.join(DATA_DIR, 'respaldos');
+  fs.mkdirSync(dir, { recursive: true });
+  const tmp = path.join(dir, `descarga-${Date.now()}.db`);
+  db.exec(`VACUUM INTO '${tmp.replace(/'/g, "''")}'`);
+  const datos = require('node:zlib').gzipSync(fs.readFileSync(tmp));
+  fs.rmSync(tmp, { force: true });
+  res.writeHead(200, { 'Content-Type': 'application/gzip', 'Content-Length': datos.length, 'Content-Disposition': `attachment; filename="vaelo-respaldo-${hoyGT()}.db.gz"`, 'Cache-Control': 'no-store', ...CABECERAS_SEGURIDAD });
+  res.end(datos);
+  return { _enviado: true };
+});
+
 // ---------- Asignación automática al piloto más cercano ----------
 // Cada 10 segundos: si un piloto no acepta a tiempo pasa al siguiente; los envíos sin piloto se ofrecen al más cercano libre.
 function asignacionAutomatica() {
@@ -1845,23 +2523,44 @@ function asignacionAutomatica() {
   }
   // 2) Envíos sin piloto (los programados, 30 minutos antes)
   const pendientes = db.prepare(`SELECT * FROM envios WHERE estado = 'pendiente' AND mensajero_id IS NULL AND origen_lat IS NOT NULL
-    AND (programado_para IS NULL OR programado_para <= datetime('now', '+30 minutes')) ORDER BY COALESCE(programado_para, creado) LIMIT 20`).all();
+    AND (programado_para IS NULL OR programado_para <= datetime('now', '+30 minutes')) ORDER BY COALESCE(programado_para, creado) LIMIT 40`).all();
   if (exigeReceptor()) for (let i = pendientes.length - 1; i >= 0; i--) if (!receptorListo(pendientes[i])) pendientes.splice(i, 1);
   if (!pendientes.length) return;
   const libres = db.prepare(`${SQL_PILOTO} WHERE u.rol = 'mensajero' AND u.estado_piloto = 'aprobado' AND u.activo = 1 AND u.en_linea = 1`).all()
-    .filter((p) => enLineaReal(p) && puedeTrabajar(p) && p.activos < 3);
+    .filter((p) => enLineaReal(p) && puedeTrabajar(p));
+  const yaAsignados = new Set();
   for (const e of pendientes) {
+    if (yaAsignados.has(e.id)) continue;
+    // Varias entregas en un solo viaje: todo el grupo se ofrece junto al mismo piloto
+    const grupo = e.grupo ? pendientes.filter((x) => x.grupo === e.grupo && !yaAsignados.has(x.id)) : [e];
     const fuera = excluidos(e);
     const o = { lat: e.origen_lat, lng: e.origen_lng };
-    const candidatos = libres.filter((p) => p.vehiculo_id === e.vehiculo_id && !fuera.includes(p.id) && !p._ocupado)
+    const delVehiculo = libres.filter((p) => p.vehiculo_id === e.vehiculo_id && !p._ocupado && (grupo.length > 1 ? p.activos === 0 : p.activos < 3));
+    const candidatos = delVehiculo.filter((p) => !fuera.includes(p.id))
       .map((p) => ({ p, km: distanciaRecta(o, { lat: p.ubic_lat, lng: p.ubic_lng }) })).sort((x, y) => x.km - y.km || x.p.activos - y.p.activos);
+    if (!candidatos.length) {
+      // Todos los pilotos libres ya lo dejaron pasar: se vuelve a ofrecer desde el principio y se avisa a la oficina
+      if (delVehiculo.length && fuera.length) {
+        for (const x of grupo) db.prepare('UPDATE envios SET excluidos = NULL WHERE id = ?').run(x.id);
+        db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(e.id, e.estado, 'Ningún piloto disponible aceptó. Se vuelve a ofrecer');
+        if (Date.now() - (avisoSinPiloto.get(e.id) || 0) > 15 * 60_000) {
+          avisoSinPiloto.set(e.id, Date.now());
+          avisarStaff({ titulo: 'Envío sin piloto', cuerpo: `${e.guia}: ningún piloto aceptó. Revísalo en el panel.`, url: RUTA_ADMIN, etiqueta: 'sinpiloto-' + e.id, urgente: true });
+        }
+      }
+      continue;
+    }
     const elegido = candidatos[0];
-    if (!elegido) continue;
-    elegido.p._ocupado = true;   // un envío nuevo por piloto en cada vuelta
-    db.prepare("UPDATE envios SET mensajero_id = ?, asignacion = 'por_aceptar', asignado_en = datetime('now'), actualizado = datetime('now') WHERE id = ?").run(elegido.p.id, e.id);
-    db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(e.id, e.estado, `Asignado automáticamente a ${elegido.p.nombre.split(' ')[0]} (a ${elegido.km.toFixed(1)} km), esperando que acepte`);
+    elegido.p._ocupado = true;   // un envío (o un grupo) nuevo por piloto en cada vuelta
+    for (const x of grupo) {
+      yaAsignados.add(x.id);
+      db.prepare("UPDATE envios SET mensajero_id = ?, asignacion = 'por_aceptar', asignado_en = datetime('now'), actualizado = datetime('now') WHERE id = ?").run(elegido.p.id, x.id);
+      db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(x.id, x.estado, `Asignado automáticamente a ${elegido.p.nombre.split(' ')[0]} (a ${elegido.km.toFixed(1)} km)${grupo.length > 1 ? `, junto con ${grupo.length - 1} entrega(s) más` : ''}, esperando que acepte`);
+    }
+    avisarEnvio(e.id, 'asignado');
   }
 }
+const avisoSinPiloto = new Map();
 if (require.main === module) setInterval(() => { try { asignacionAutomatica(); } catch (err) { console.error('Asignación automática:', err.message); } }, 10_000).unref();
 
 // Administración
@@ -1871,11 +2570,12 @@ ruta('GET', '/api/admin/resumen', ({ req }) => {
   for (const s of ESTADOS) porEstado[s] = 0;
   for (const r of db.prepare('SELECT estado, COUNT(*) AS n FROM envios GROUP BY estado').all()) porEstado[r.estado] = r.n;
   const hoy = db.prepare("SELECT COUNT(*) AS n FROM envios WHERE date(creado, '-6 hours') = date('now', '-6 hours')").get().n;
-  const mes = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(precio), 0) AS total FROM envios
-    WHERE estado = 'entregado' AND strftime('%Y-%m', actualizado, '-6 hours') = strftime('%Y-%m', 'now', '-6 hours')`).get();
+  // Ingresos del mes por la fecha en que se hizo el viaje (no por la última vez que se modificó el envío)
+  const mes = db.prepare(`SELECT SUM(e.estado = 'entregado') AS n, COALESCE(SUM(e.precio), 0) AS total FROM envios e
+    WHERE ${SQL_VIAJE_HECHO} AND strftime('%Y-%m', COALESCE(e.piloto_cerro_en, e.entregado_en, e.actualizado), '-6 hours') = strftime('%Y-%m', 'now', '-6 hours')`).get();
   const sinAsignar = db.prepare("SELECT COUNT(*) AS n FROM envios WHERE mensajero_id IS NULL AND estado = 'pendiente'").get().n;
   const clientes = db.prepare("SELECT COUNT(*) AS n FROM usuarios WHERE rol = 'cliente'").get().n;
-  return { porEstado, hoy, sinAsignar, entregadosMes: mes.n, ingresosMes: esOperador(quien) ? null : redondear(mes.total), clientes,
+  return { porEstado, hoy, sinAsignar, entregadosMes: mes.n || 0, ingresosMes: esOperador(quien) ? null : redondear(mes.total), clientes,
     rol: esOperador(quien) ? 'operador' : 'admin', nombre: quien.nombre };
 });
 
@@ -1900,6 +2600,7 @@ ruta('GET', '/api/admin/envios', ({ req, query }) => {
   const cond = [], args = [];
   const estado = query.get('estado');
   if (estado === 'sin_asignar') cond.push("e.mensajero_id IS NULL AND e.estado = 'pendiente'");
+  else if (estado === 'atencion') cond.push("e.estado IN ('fallido','devolviendo','a_sede','en_sede')");
   else if (estado && ESTADOS.includes(estado)) { cond.push('e.estado = ?'); args.push(estado); }
   const q = (query.get('q') || '').trim().slice(0, 100);
   if (q) {
@@ -1911,6 +2612,7 @@ ruta('GET', '/api/admin/envios', ({ req, query }) => {
   return { envios: db.prepare(`${SQL_ENVIO} ${where} ORDER BY e.id DESC LIMIT 300`).all(...args).map((e) => {
     const out = sinCamposReceptor(envioSalida(e));
     out.receptor_confirmado = !!e.receptor_confirmado_en; out.receptor_listo = receptorListo(e);
+    Object.assign(out, infoExtra(e));
     return out;
   }) };
 });
@@ -1921,22 +2623,31 @@ ruta('GET', '/api/admin/envios/:id', ({ req, params }) => {
   if (!e) falla(404, 'No encontramos ese envío.');
   const cliente = db.prepare('SELECT * FROM usuarios WHERE id = ?').get(e.usuario_id);
   const out = envioSalida(e);
-  out.tiene_foto_entrega = !!e.foto_entrega; out.tiene_firma_entrega = !!e.firma_entrega;
+  out.tiene_foto_entrega = !!e.foto_entrega; out.tiene_firma_entrega = !!e.firma_entrega; out.tiene_foto_fallo = !!e.fallo_foto;
+  Object.assign(out, infoExtra(e));
+  out.cargos = db.prepare('SELECT * FROM cargos WHERE envio_id = ? OR cobrado_envio_id = ? ORDER BY id').all(e.id, e.id);
   out.receptor = { ...datosReceptor(e, true), enlace: ESTADOS_ACTIVOS.includes(e.estado) ? '/recibe/' + tokenReceptor(e) : null };
   out.origen = { ...datosOrigen(e, true), enlace: e.origen_quien === 'tercero' && e.estado === 'pendiente' && e.origen_token ? '/entrega/' + e.origen_token : null };
   sinCamposReceptor(out);
   if (esOperador(quien)) for (const k of ['ganancia_piloto', 'liquidado_id', 'pago_piloto_id']) delete out[k];
-  return { envio: out, eventos: eventosDe(e.id), cliente: cliente ? datosCliente(cliente) : null,
+  return { envio: out, eventos: eventosDe(e.id), cliente: cliente ? { ...datosCliente(cliente), ...califCliente(cliente.id) } : null,
     piloto: e.mensajero_id ? pilotoParaCliente(e.mensajero_id) : null };
 });
 
 ruta('POST', '/api/admin/envios/:id/estado', ({ req, params, body }) => {
   const quien = requiereStaff(req);
   const estado = texto(body.estado, 20);
-  if (!ESTADOS.includes(estado)) falla(400, 'Estado no válido.');
-  const e = db.prepare('SELECT id FROM envios WHERE id = ?').get(Number(params.id));
+  // A mano solo se mueven envíos en curso entre los estados normales. La devolución y la sede tienen sus propios botones,
+  // y un envío cerrado o que ya entró a la caja no se puede reabrir (descuadraría la caja y los reportes).
+  if (!['pendiente', 'recogido', 'en_camino', 'entregado', 'cancelado'].includes(estado)) falla(400, 'Estado no válido.');
+  const e = db.prepare('SELECT * FROM envios WHERE id = ?').get(Number(params.id));
   if (!e) falla(404, 'No encontramos ese envío.');
-  cambiarEstado(e.id, estado, texto(body.nota, 300));
+  if (!['pendiente', 'recogido', 'en_camino'].includes(e.estado)) falla(400, 'Este envío ya está cerrado o en devolución; usa los botones de entrega fallida.');
+  if (e.liquidado_id || e.pago_piloto_id) falla(400, 'Este envío ya entró en la caja y no se puede cambiar.');
+  if (estado === e.estado) falla(400, 'El envío ya está en ese estado.');
+  const nota = texto(body.nota, 300);
+  if (nota.length < 4) falla(400, 'Escribe por qué se cambia el estado a mano.');
+  cambiarEstado(e.id, estado, `${nota} (cambio manual: ${quien.nombre.split(' ')[0]})`);
   return { ok: true };
 });
 
@@ -1944,7 +2655,8 @@ ruta('POST', '/api/admin/envios/:id/asignar', ({ req, params, body }) => {
   const quien = requiereStaff(req);
   const e = db.prepare('SELECT * FROM envios WHERE id = ?').get(Number(params.id));
   if (!e) falla(404, 'No encontramos ese envío.');
-  if (['entregado', 'cancelado'].includes(e.estado)) falla(400, 'Este envío ya está cerrado.');
+  if (!ESTADOS_PILOTO_ACTIVO.includes(e.estado)) falla(400, 'Este envío ya está cerrado o está en la sede.');
+  if (e.piloto_cerro_en) falla(400, 'El piloto ya terminó su parte de este envío.');
   if (body.mensajero_id === '' || body.mensajero_id == null) {
     db.prepare('UPDATE envios SET mensajero_id = NULL, asignacion = NULL, asignado_en = NULL, llego_origen = 0, llegando_destino = 0 WHERE id = ?').run(e.id);
     db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(e.id, e.estado, 'Se quitó el piloto asignado');
@@ -1955,6 +2667,7 @@ ruta('POST', '/api/admin/envios/:id/asignar', ({ req, params, body }) => {
   db.prepare(`UPDATE envios SET mensajero_id = ?, asignacion = 'por_aceptar', asignado_en = datetime('now'), llego_origen = 0, llegando_destino = 0,
     actualizado = datetime('now') WHERE id = ?`).run(m.id, e.id);
   db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(e.id, e.estado, `Asignado a ${m.nombre.split(' ')[0]}, esperando que acepte`);
+  avisarEnvio(e.id, 'asignado');
   return { ok: true, en_linea: enLineaReal(m) };
 });
 
@@ -1998,7 +2711,17 @@ ruta('PUT', '/api/admin/zonas/:id', ({ req, params, body }) => {
   if (!z) falla(404, 'No encontramos esa zona.');
   const nombre = body.nombre !== undefined ? texto(body.nombre, 60) : z.nombre;
   if (nombre.length < 2 || nombre === OTRA_ZONA) falla(400, 'Escribe el nombre de la zona.');
-  db.prepare('UPDATE zonas_fijas SET nombre = ?, activa = ? WHERE id = ?').run(nombre, body.activa !== undefined ? (body.activa ? 1 : 0) : z.activa, z.id);
+  let poligono = z.poligono;
+  if (body.poligono !== undefined) {
+    // Forma de la zona dibujada en el mapa: lista de puntos [lng, lat] dentro de Guatemala
+    if (body.poligono === null || (Array.isArray(body.poligono) && !body.poligono.length)) poligono = null;
+    else {
+      if (!Array.isArray(body.poligono) || body.poligono.length < 3 || body.poligono.length > 200) falla(400, 'Dibuja la zona con al menos 3 puntos.');
+      const pts = body.poligono.map((x) => { const c = Array.isArray(x) && coordenada(x[1], x[0]); if (!c) falla(400, 'Hay un punto de la zona fuera de Guatemala.'); return [Math.round(c.lng * 1e6) / 1e6, Math.round(c.lat * 1e6) / 1e6]; });
+      poligono = JSON.stringify(pts);
+    }
+  }
+  db.prepare('UPDATE zonas_fijas SET nombre = ?, activa = ?, poligono = ? WHERE id = ?').run(nombre, body.activa !== undefined ? (body.activa ? 1 : 0) : z.activa, poligono, z.id);
   return { ok: true };
 });
 
@@ -2030,6 +2753,27 @@ ruta('PUT', '/api/admin/ajustes', ({ req, body }) => {
     if (t && !/^pk\.[A-Za-z0-9._-]{20,}$/.test(t)) falla(400, 'La clave de Mapbox debe ser la pública (empieza con pk.).');
     up.run('mapbox_token', t);
   }
+  // Montos de cargos, seguro y tarifa fija
+  const montos = { cargo_devolucion: [0, 1000], cargo_bodega_dia: [0, 1000], cargo_reentrega: [0, 1000], cargo_cancelacion: [0, 1000], pct_piloto_cancelacion: [0, 100],
+    horas_decidir_fallido: [0.25, 48], seguro_pct: [0, 50], seguro_minimo: [0, 1000], responsabilidad_max: [0, 100000], km_max_tarifa_fija: [1, 200] };
+  for (const [k, [min, max]] of Object.entries(montos)) {
+    if (body[k] === undefined) continue;
+    const n = numero(body[k]);
+    if (!(n >= min && n <= max)) falla(400, `Revisa el valor de "${k.replace(/_/g, ' ')}" (de ${min} a ${max}).`);
+    up.run(k, String(redondear(n)));
+  }
+  if (body.sede_direccion !== undefined) up.run('sede_direccion', texto(String(body.sede_direccion), 200));
+  if (body.sede_lat !== undefined || body.sede_lng !== undefined) {
+    const c = coordenada(body.sede_lat, body.sede_lng);
+    if ((body.sede_lat || body.sede_lng) && !c) falla(400, 'La ubicación de la sede debe estar en Guatemala.');
+    up.run('sede_lat', c ? String(c.lat) : ''); up.run('sede_lng', c ? String(c.lng) : '');
+  }
+  if (body.datos_transferencia !== undefined) up.run('datos_transferencia', texto(String(body.datos_transferencia), 600));
+  if (body.correo_respaldos !== undefined) {
+    const c = texto(String(body.correo_respaldos), 150).toLowerCase();
+    if (c && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c)) falla(400, 'Escribe un correo válido para los respaldos.');
+    up.run('correo_respaldos', c);
+  }
   if (body.vigencia_antecedentes !== undefined) {
     const n = numero(body.vigencia_antecedentes);
     if (!(Number.isInteger(n) && n >= 1 && n <= 24)) falla(400, 'La vigencia de los antecedentes debe ser de 1 a 24 meses.');
@@ -2045,7 +2789,8 @@ const TIPOS = {
   '.ico': 'image/x-icon', '.pdf': 'application/pdf', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.txt': 'text/plain; charset=utf-8', '.xml': 'application/xml; charset=utf-8',
 };
 const PAGINAS = { '/': 'index.html', '/entrar': 'entrar.html', '/registro': 'registro.html', '/mi-cuenta': 'cliente.html',
-  '/enviar': 'cliente.html', '/rastreo': 'rastreo.html' };
+  '/enviar': 'cliente.html', '/rastreo': 'rastreo.html', '/recuperar': 'recuperar.html', '/terminos': 'terminos.html', '/privacidad': 'privacidad.html',
+  '/tiendas': 'tiendas.html' };
 // Páginas que piden cuenta: si no has iniciado sesión, el servidor te manda a entrar antes de mostrar nada
 const PIDEN_CUENTA = { '/enviar': ['cliente', 'admin'], '/mi-cuenta': ['cliente', 'admin'] };
 
@@ -2164,4 +2909,4 @@ const servidor = http.createServer(async (req, res) => {
 if (require.main === module) {
   servidor.listen(PORT, HOST, () => console.log(`Vaelo funcionando en http://${HOST}:${PORT}`));
 }
-module.exports = { servidor, hashPassword };
+module.exports = { servidor, hashPassword, asignacionAutomatica, decisionesVencidas, push };

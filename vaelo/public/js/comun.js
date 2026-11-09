@@ -6,8 +6,70 @@ const ESTADOS = {
   recogido: 'Recogido',
   en_camino: 'En camino',
   entregado: 'Entregado',
+  fallido: 'No se pudo entregar',
+  devolviendo: 'Devolviéndose',
+  devuelto: 'Devuelto',
+  a_sede: 'Va a la sede',
+  en_sede: 'En la sede',
+  reenviado: 'Enviado de nuevo',
   cancelado: 'Cancelado',
 };
+const MOTIVOS_FALLO = { no_contesta: 'Quien recibe no contesta', no_esta: 'No había nadie en el lugar', direccion: 'Dirección o ubicación incorrecta',
+  rechazo: 'Quien recibe no aceptó el paquete', sin_cobro: 'Quien recibe no pagó el cobro', otro: 'Otro motivo' };
+const TIPOS_CARGO = { cancelacion: 'Cancelación con el piloto en camino', devolucion: 'Devolución del paquete', bodega: 'Días en la sede', reentrega: 'Nueva entrega desde la sede' };
+// Tiempo que falta hasta una fecha ISO: "1 h 25 min"
+function faltaPara(iso) {
+  const min = Math.max(0, Math.round((new Date(iso).getTime() - Date.now()) / 60000));
+  return min >= 60 ? `${Math.floor(min / 60)} h ${min % 60} min` : `${min} min`;
+}
+// Íconos de línea (dibujos propios). Uso: icono('paquete')
+const ICONOS = {
+  paquete: '<path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5z"/><path d="M3 7.5 12 12l9-4.5M12 12v9"/>',
+  piloto: '<circle cx="5.5" cy="17" r="2.5"/><circle cx="18.5" cy="17" r="2.5"/><path d="M5.5 17h5l3-6h3l2 6"/><path d="M14 6.5h2.5l1.5 4.5"/>',
+  clientes: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.6-3.6 3.2-5.5 6.5-5.5s5.9 1.9 6.5 5.5"/><path d="M15.5 4.8a3.4 3.4 0 0 1 0 6.4M18 14.8c2 .7 3.2 2.4 3.5 5.2"/>',
+  caja: '<rect x="2.5" y="6" width="19" height="13" rx="2"/><path d="M2.5 10h19"/><path d="M6.5 15h4"/>',
+  etiqueta: '<path d="M3 12.5V4h8.5L21 13.5 13.5 21z"/><circle cx="7.5" cy="8.5" r="1.4"/>',
+  grafica: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  ajustes: '<circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M4.6 4.6l2.1 2.1M17.3 17.3l2.1 2.1M2.5 12h3M18.5 12h3M4.6 19.4l2.1-2.1M17.3 6.7l2.1-2.1"/>',
+  alerta: '<path d="M12 3 2 20h20z"/><path d="M12 10v4.5M12 17.5v.01"/>',
+  campana: '<path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 20.5a2 2 0 0 0 4 0"/>',
+  sonido: '<path d="M4 9.5h4l5-4v13l-5-4H4z"/><path d="M16.5 9a4 4 0 0 1 0 6M19 6.5a7.5 7.5 0 0 1 0 11"/>',
+  recargar: '<path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v4.5h-4.5"/>',
+  salir: '<path d="M14 4h5v16h-5"/><path d="M10 8l-4 4 4 4M6 12h10"/>',
+  reloj: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  ruta: '<circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M8.5 18H15a3 3 0 0 0 0-6H9a3 3 0 0 1 0-6h6.5"/>',
+  sede: '<path d="M3 21V9l9-5 9 5v12"/><path d="M9 21v-6h6v6"/>',
+  devolver: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
+  dinero: '<rect x="2.5" y="6" width="19" height="12" rx="2"/><circle cx="12" cy="12" r="2.8"/><path d="M6 9.5v.01M18 14.5v.01"/>',
+  menu: '<path d="M4 6.5h16M4 12h16M4 17.5h16"/>',
+  tienda: '<path d="M4 9.5 5.5 4h13L20 9.5"/><path d="M4 9.5a2.7 2.7 0 0 0 5.3 0 2.7 2.7 0 0 0 5.4 0 2.7 2.7 0 0 0 5.3 0"/><path d="M5 11.5V20h14v-8.5"/>',
+  usuario: '<circle cx="12" cy="8" r="4"/><path d="M4 21c.8-4.2 4-6.5 8-6.5s7.2 2.3 8 6.5"/>',
+  check: '<path d="m4.5 12.5 5 5 10-11"/>',
+  estrella: '<path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
+};
+function icono(nombre, clase = '') {
+  const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('fill', 'none'); s.setAttribute('stroke', 'currentColor');
+  s.setAttribute('stroke-width', '1.8'); s.setAttribute('stroke-linecap', 'round'); s.setAttribute('stroke-linejoin', 'round');
+  s.setAttribute('aria-hidden', 'true'); s.setAttribute('class', 'icono-l ' + clase);
+  s.innerHTML = ICONOS[nombre] || '';
+  return s;
+}
+// Pasos del envío para la barra de progreso (los fallidos muestran su propio camino)
+function pasosEnvio(estado) {
+  const normal = [['pendiente', 'Pedido'], ['recogido', 'Recogido'], ['en_camino', 'En camino'], ['entregado', 'Entregado']];
+  if (['fallido', 'devolviendo', 'devuelto'].includes(estado)) return [['recogido', 'Recogido'], ['fallido', 'No entregado'], ['devolviendo', 'De vuelta'], ['devuelto', 'Devuelto']];
+  if (['a_sede', 'en_sede', 'reenviado'].includes(estado)) return [['recogido', 'Recogido'], ['fallido', 'No entregado'], ['a_sede', 'A la sede'], ['en_sede', 'En la sede']];
+  return normal;
+}
+function barraPasos(estado) {
+  const pasos = pasosEnvio(estado);
+  let i = pasos.findIndex(([k]) => k === estado);
+  if (estado === 'reenviado') i = pasos.length - 1;
+  if (estado === 'entregado' && i < 0) i = pasos.length - 1;
+  return el('ol', { class: 'pasos-envio' + (estado === 'cancelado' ? ' cancelado' : '') + (['fallido', 'devolviendo', 'devuelto', 'a_sede', 'en_sede', 'reenviado'].includes(estado) ? ' desvio' : '') },
+    ...pasos.map(([k, t], j) => el('li', { class: j < i ? 'hecho' : j === i ? 'actual' : '' }, el('span', { text: t }))));
+}
 const PAGOS = { efectivo: 'Efectivo', transferencia: 'Transferencia', credito: 'A fin de mes (crédito)' };
 // Fecha y hora en Guatemala de un texto UTC de la base, para mostrar envíos programados
 const fechaProgramada = (t) => t ? new Date(t.replace(' ', 'T') + 'Z').toLocaleString('es-GT', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '';
@@ -35,6 +97,7 @@ async function api(ruta, opciones = {}) {
   if (!res.ok) {
     const err = new Error(data.error || 'Algo salió mal. Inténtalo de nuevo.');
     err.status = res.status;
+    err.datos = data;
     throw err;
   }
   return data;
@@ -214,6 +277,23 @@ class Mapa {
     if (!this.estiloListo) return;
     if (this.mapa.getLayer(id)) this.mapa.removeLayer(id);
     if (this.mapa.getSource(id)) this.mapa.removeSource(id);
+  }
+  // Área rellena [[lat, lng], ...] (zonas dibujadas). op: color, opacidad
+  poligono(puntos, op = {}) {
+    const id = 'area-' + (++this.cuenta);
+    const pintar = () => {
+      if (!this.estiloListo) return;
+      const anillo = puntos.length >= 3 ? [...puntos, puntos[0]] : puntos;
+      const datos = { type: 'Feature', geometry: puntos.length >= 3 ? { type: 'Polygon', coordinates: [anillo.map(([la, ln]) => [ln, la])] } : { type: 'LineString', coordinates: anillo.map(([la, ln]) => [ln, la]) } };
+      const f = this.mapa.getSource(id);
+      if (f) { f.setData(datos); return; }
+      this.mapa.addSource(id, { type: 'geojson', data: datos });
+      this.mapa.addLayer({ id: id + '-relleno', type: 'fill', source: id, paint: { 'fill-color': op.color || '#1c3faa', 'fill-opacity': op.opacidad ?? 0.18 }, filter: ['==', '$type', 'Polygon'] });
+      this.mapa.addLayer({ id: id + '-borde', type: 'line', source: id, paint: { 'line-color': op.color || '#1c3faa', 'line-width': 2.5 } });
+    };
+    if (this.estiloListo) pintar(); else this.mapa.once('style.load', pintar);
+    const quitar = () => { for (const c of [id + '-relleno', id + '-borde']) if (this.mapa.getLayer(c)) this.mapa.removeLayer(c); if (this.mapa.getSource(id)) this.mapa.removeSource(id); };
+    return { quitar, actualizar: (p) => { puntos = p; pintar(); } };
   }
   // Grupo de marcadores y líneas que se borran juntos (para el mapa de la flota que se actualiza)
   grupo() {
@@ -541,6 +621,49 @@ async function notificacionSistema(titulo, cuerpo, url, etiqueta) {
     const reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
     if (reg) await reg.showNotification(titulo, op); else new Notification(titulo, op);
   } catch { try { new Notification(titulo, op); } catch { /* sin notificación */ } }
+}
+
+// ---------- Avisos al celular aunque Vaelo esté cerrado (notificaciones push) ----------
+const pushDisponible = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window && window.isSecureContext;
+async function suscripcionPush() {
+  if (!pushDisponible()) return null;
+  const reg = await navigator.serviceWorker.ready;
+  return reg.pushManager.getSubscription();
+}
+async function activarPush() {
+  if (!pushDisponible()) throw new Error(esIos() && !yaInstalada() ? 'En iPhone primero instala Vaelo en tu pantalla de inicio y ábrelo desde ahí.' : 'Este navegador no permite avisos. Usa Chrome.');
+  const permiso = await Notification.requestPermission();
+  if (permiso !== 'granted') throw new Error('No diste permiso para los avisos. Puedes activarlo en los ajustes del navegador (candado junto a la dirección).');
+  const reg = await navigator.serviceWorker.ready;
+  const { clave } = await api('/api/push/clave');
+  const bytes = Uint8Array.from(atob(clave.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+  let sub = await reg.pushManager.getSubscription();
+  if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: bytes });
+  await api('/api/push/suscribir', { body: { suscripcion: sub.toJSON() } });
+  return sub;
+}
+// Tarjeta para activar los avisos. texto: qué avisos recibirá
+function bloqueAvisos(texto) {
+  const caja = el('div', { class: 'avisos-push', hidden: true });
+  const pintar = async () => {
+    if (!pushDisponible() && !(esIos() && !yaInstalada())) { caja.hidden = true; return; }
+    let sub = null;
+    try { sub = await suscripcionPush(); } catch { /* sin servicio */ }
+    if (sub && Notification.permission === 'granted') {
+      api('/api/push/suscribir', { body: { suscripcion: sub.toJSON() } }).catch(() => {});   // por si cambió de cuenta
+      caja.hidden = true; return;
+    }
+    const msg = el('small', { class: 'avisos-error' });
+    caja.replaceChildren(icono('campana'), el('div', {}, el('strong', { text: 'Activa los avisos' }), el('small', { text: texto }), msg),
+      el('button', { class: 'boton chico', type: 'button', text: 'Activar', onclick: async (ev) => {
+        ev.target.disabled = true;
+        try { await activarPush(); await api('/api/push/probar', { body: {} }).catch(() => {}); caja.hidden = true; }
+        catch (e) { msg.textContent = e.message; ev.target.disabled = false; }
+      } }));
+    caja.hidden = false;
+  };
+  setTimeout(pintar, 0);
+  return caja;
 }
 
 // ---------- Instalar como app desde Chrome (celular y computadora, sin .apk ni Play Store) ----------

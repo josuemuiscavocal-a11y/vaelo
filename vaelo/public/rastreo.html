@@ -70,10 +70,7 @@
               el('div', { style: 'color:var(--suave)', text: `${r.vehiculo}: ${r.origen_zona || ''} a ${r.destino_zona || ''}${r.destinatario ? ', para ' + r.destinatario : ''}` })),
             chipEstado(r.estado)),
         ];
-        if (r.estado !== 'cancelado') {
-          nodos.push(el('div', { class: 'progreso', 'aria-hidden': 'true' }, PASOS.map((_, i) => el('i', { class: i <= idx ? 'lleno' : '' }))));
-          nodos.push(el('div', { class: 'progreso-textos' }, ETIQUETAS.map((t, i) => el('span', { class: i === idx ? 'actual' : '', text: t }))));
-        }
+        if (r.estado !== 'cancelado') nodos.push(barraPasos(r.estado));
         if (r.programado_para && r.estado === 'pendiente') nodos.push(el('p', { class: 'mensaje aviso', text: 'Recogida programada: ' + fechaProgramada(r.programado_para) }));
         let cajaMapa = null;
         if (r.piloto) {

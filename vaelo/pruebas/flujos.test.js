@@ -1,0 +1,255 @@
+// Pruebas de los flujos principales de Vaelo. Uso: node --test pruebas/
+// Arranca el servidor con una base de datos temporal (no toca la real).
+'use strict';
+const os = require('node:os');
+const fs = require('node:fs');
+const path = require('node:path');
+const crypto = require('node:crypto');
+const test = require('node:test');
+const assert = require('node:assert');
+
+const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'vaelo-prueba-'));
+process.env.VAELO_DATA = DIR;
+process.env.VAELO_OSRM = 'no';
+const { db } = require('../db');
+const { servidor, hashPassword, asignacionAutomatica, decisionesVencidas, push } = require('../server');
+
+let BASE;
+const ZONA1 = { lat: 14.6407, lng: -90.5133 };      // centro de la capital
+const CERCA = { lat: 14.6100, lng: -90.4700 };      // a unos 5 km
+const LEJOS = { lat: 14.3000, lng: -90.7800 };      // a más de 40 km
+
+// Cliente HTTP con cookie de sesión
+function cliente() {
+  let cookie = '';
+  return async function pedir(metodo, ruta, body, cabeceras = {}) {
+    const r = await fetch(BASE + ruta, { method: metodo, headers: { 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}), ...cabeceras },
+      body: body ? JSON.stringify(body) : undefined, redirect: 'manual' });
+    const sc = r.headers.get('set-cookie');
+    if (sc) cookie = sc.split(';')[0];
+    const t = await r.text();
+    let j; try { j = JSON.parse(t); } catch { j = t; }
+    return { status: r.status, j };
+  };
+}
+const FOTO = 'data:image/jpeg;base64,' + Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), crypto.randomBytes(2000)]).toString('base64');
+const ajuste = (k, v) => db.prepare('INSERT INTO ajustes (clave, valor) VALUES (?, ?) ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor').run(k, String(v));
+
+let admin, ana, piloto, pilotoId, anaId;
+
+test.before(async () => {
+  await new Promise((ok) => servidor.listen(0, '127.0.0.1', ok));
+  BASE = `http://127.0.0.1:${servidor.address().port}`;
+  const h = hashPassword('clave-de-prueba-123');
+  db.prepare("INSERT INTO usuarios (nombre,email,telefono,password_hash,rol,email_verificado,verificacion) VALUES ('Admin','administracionvaelo@vaelomensajeria.com','55550000',?,'admin',1,'verificado')").run(h);
+  pilotoId = Number(db.prepare(`INSERT INTO usuarios (nombre,email,telefono,password_hash,rol,email_verificado,verificacion,estado_piloto,vehiculo_id,
+    fecha_nacimiento,dpi,doc_frente,doc_reverso,foto_perfil,direccion,emergencia_nombre,emergencia_telefono,penales_doc,penales_fecha,policiacos_doc,policiacos_fecha,
+    licencia_numero,licencia_tipo,licencia_vence,licencia_frente,veh_placa,veh_marca,veh_modelo,veh_color,veh_tarjeta,veh_foto_frente,reglas_aceptadas)
+    VALUES ('Carlos Pérez','carlos@prueba.com','55552222',?,'mensajero',1,'verificado','aprobado',1,'1995-01-01','1234567890123','x','x','x','Zona 6','Mamá','55553333','x',date('now','-10 days'),'x',date('now','-10 days'),
+    'L1','M',date('now','+300 days'),'x','M-123ABC','Honda','XR','Rojo','x','x',datetime('now'))`).run(h).lastInsertRowid);
+  admin = cliente(); ana = cliente(); piloto = cliente();
+  assert.equal((await admin('POST', '/api/acceso-familia', { email: 'administracionvaelo@vaelomensajeria.com', password: 'clave-de-prueba-123' })).status, 200);
+  assert.equal((await piloto('POST', '/api/piloto/entrar', { email: 'carlos@prueba.com', password: 'clave-de-prueba-123' })).status, 200);
+  const sinTerminos = await ana('POST', '/api/registro', { nombre: 'Ana López', email: 'ana@prueba.com', telefono: '55551111', password: 'clave-de-prueba-123' });
+  assert.equal(sinTerminos.status, 400, 'pide aceptar los términos');
+  assert.equal((await ana('POST', '/api/registro', { nombre: 'Ana López', email: 'ana@prueba.com', telefono: '55551111', password: 'clave-de-prueba-123', acepto_terminos: true })).status, 201);
+  anaId = db.prepare("SELECT id FROM usuarios WHERE email = 'ana@prueba.com'").get().id;
+  db.prepare('UPDATE usuarios SET email_verificado = 1 WHERE id = ?').run(anaId);
+  ajuste('sede_lat', 14.6200); ajuste('sede_lng', -90.5200); ajuste('sede_direccion', 'Sede Vaelo, Zona 9');
+});
+test.after(() => { servidor.close(); fs.rmSync(DIR, { recursive: true, force: true }); });
+
+// Crea un envío de Ana, quien recibe confirma en "destino", y el piloto lo acepta y lo recoge
+async function envioEnCamino(destino = CERCA) {
+  const r = await ana('POST', '/api/envios', { vehiculo_id: 1, peso: 2, origen_zona: 'Zona 1', destino_zona: 'Zona 16', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng,
+    destino_nombre: 'Luis Gómez', destino_telefono: '55554444', destino_direccion: 'Casa verde', metodo_pago: 'efectivo' });
+  assert.equal(r.status, 201, JSON.stringify(r.j));
+  const token = r.j.enlace_receptor.split('/').pop();
+  assert.equal((await cliente()('POST', `/api/recibe/${token}/confirmar`, { nombre: 'Luis Gómez', lat: destino.lat, lng: destino.lng })).status, 200);
+  await new Promise((ok) => setTimeout(ok, 50));
+  db.prepare("UPDATE envios SET mensajero_id = ?, asignacion = 'por_aceptar', asignado_en = datetime('now') WHERE id = ?").run(pilotoId, r.j.id);
+  assert.equal((await piloto('POST', `/api/piloto/envios/${r.j.id}/aceptar`, { lat: ZONA1.lat, lng: ZONA1.lng })).status, 200);
+  assert.equal((await piloto('POST', `/api/piloto/envios/${r.j.id}/estado`, { estado: 'recogido', lat: ZONA1.lat, lng: ZONA1.lng })).status, 200);
+  return r.j;
+}
+const fila = (id) => db.prepare('SELECT * FROM envios WHERE id = ?').get(id);
+
+test('los intentos fallidos no se saltan cambiando la cabecera CF-Connecting-IP', async () => {
+  const c = cliente();
+  let ultimo;
+  for (let i = 0; i < 10; i++) ultimo = await c('POST', '/api/login', { email: 'x@x.com', password: 'mala' }, { 'CF-Connecting-IP': `10.0.0.${i}` });
+  assert.equal(ultimo.status, 429);
+});
+
+test('un login correcto no cuenta como intento fallido', async () => {
+  for (let i = 0; i < 12; i++) assert.equal((await cliente()('POST', '/api/login', { email: 'ana@prueba.com', password: 'clave-de-prueba-123' })).status, 200);
+});
+
+test('la tarifa fija cambia a precio por km si la entrega queda lejos', async () => {
+  const r = await ana('POST', '/api/envios', { vehiculo_id: 1, peso: 2, origen_zona: 'Zona 1', destino_zona: 'Zona 16', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng,
+    destino_nombre: 'Luis', destino_telefono: '55554444', destino_direccion: 'x', metodo_pago: 'efectivo' });
+  assert.equal(r.j.precio, 35);
+  const token = r.j.enlace_receptor.split('/').pop();
+  await cliente()('POST', `/api/recibe/${token}/confirmar`, { nombre: 'Luis Gómez', lat: LEJOS.lat, lng: LEJOS.lng });
+  const e = fila(r.j.id);
+  assert.equal(e.tipo_tarifa, 'km');
+  assert.ok(e.precio > 100, `precio por km ${e.precio}`);
+  // Quien recibe se acerca más de 1 km: se recalcula y vuelve a tarifa fija
+  await cliente()('POST', `/api/recibe/${token}/ubicacion`, { lat: CERCA.lat, lng: CERCA.lng });
+  assert.equal(fila(r.j.id).precio, 35);
+  await ana('POST', `/api/envios/${r.j.id}/cancelar`, {});
+});
+
+test('con zonas dibujadas, fuera de la forma no hay tarifa fija', async () => {
+  const z = db.prepare("SELECT id FROM zonas_fijas WHERE nombre = 'Zona 1'").get().id;
+  const forma = [[-90.53, 14.63], [-90.50, 14.63], [-90.50, 14.65], [-90.53, 14.65]];
+  assert.equal((await admin('PUT', `/api/admin/zonas/${z}`, { poligono: forma })).status, 200);
+  const c = await ana('POST', '/api/cotizar', { vehiculo_id: 1, peso: 2, origen_zona: 'Zona 1', destino_zona: 'Zona 1', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng, destino_lat: CERCA.lat, destino_lng: CERCA.lng });
+  assert.equal(c.j.tipo, 'km');
+  assert.equal((await cliente()('GET', `/api/zona?lat=${ZONA1.lat}&lng=${ZONA1.lng}`)).j.zona, 'Zona 1');
+  await admin('PUT', `/api/admin/zonas/${z}`, { poligono: null });
+});
+
+test('entrega fallida: el cliente elige devolver y se cobra la devolución', async () => {
+  const env = await envioEnCamino();
+  const lejos = await piloto('POST', `/api/piloto/envios/${env.id}/no-entregado`, { motivo: 'no_contesta', lat: ZONA1.lat, lng: ZONA1.lng });
+  assert.equal(lejos.status, 400, 'pide estar en el lugar');
+  const r = await piloto('POST', `/api/piloto/envios/${env.id}/no-entregado`, { motivo: 'no_contesta', lat: CERCA.lat, lng: CERCA.lng, foto: FOTO });
+  assert.equal(r.status, 200, JSON.stringify(r.j));
+  const vista = await ana('GET', `/api/envios/${env.id}`);
+  assert.equal(vista.j.envio.estado, 'fallido');
+  assert.ok(vista.j.envio.fallo.decidir_antes);
+  assert.equal((await ana('POST', `/api/envios/${env.id}/decidir`, { decision: 'devolver' })).status, 200);
+  assert.equal(fila(env.id).estado, 'devolviendo');
+  assert.equal(db.prepare("SELECT monto FROM cargos WHERE envio_id = ? AND tipo = 'devolucion'").get(env.id).monto, 35);
+  const dev = await piloto('POST', `/api/piloto/envios/${env.id}/estado`, { estado: 'devuelto', recibio: 'Ana', foto: FOTO, lat: ZONA1.lat, lng: ZONA1.lng });
+  assert.equal(dev.status, 200, JSON.stringify(dev.j));
+  const f = fila(env.id);
+  assert.equal(f.estado, 'devuelto');
+  assert.ok(f.piloto_cerro_en);
+  assert.equal(f.ganancia_piloto, 49, 'gana el 70% del envío (24.5) y de la devolución (24.5)');
+  // El piloto califica al cliente
+  assert.equal((await piloto('POST', `/api/piloto/envios/${env.id}/calificar-cliente`, { estrellas: 4 })).status, 200);
+});
+
+test('entrega fallida sin respuesta: va a la sede, cobra por día y se reenvía', async () => {
+  const env = await envioEnCamino();
+  await piloto('POST', `/api/piloto/envios/${env.id}/no-entregado`, { motivo: 'no_esta', lat: CERCA.lat, lng: CERCA.lng });
+  db.prepare("UPDATE envios SET fallo_en = datetime('now', '-3 hours') WHERE id = ?").run(env.id);
+  decisionesVencidas();
+  assert.equal(fila(env.id).estado, 'a_sede');
+  assert.equal(fila(env.id).fallo_decidido_por, 'automático');
+  assert.equal((await piloto('POST', `/api/piloto/envios/${env.id}/estado`, { estado: 'en_sede', lat: 14.6201, lng: -90.5201 })).status, 200);
+  db.prepare("UPDATE envios SET sede_llegada = datetime('now', '-50 hours') WHERE id = ?").run(env.id);
+  const vista = await ana('GET', `/api/envios/${env.id}`);
+  assert.equal(vista.j.envio.sede.dias, 3);
+  assert.equal(vista.j.envio.sede.cargo, 60);
+  const re = await ana('POST', `/api/envios/${env.id}/reenviar`, {});
+  assert.equal(re.status, 200, JSON.stringify(re.j));
+  assert.equal(fila(env.id).estado, 'reenviado');
+  const hijo = fila(re.j.id);
+  assert.equal(hijo.origen_quien, 'sede');
+  assert.ok(hijo.receptor_token, 'el enlace de quien recibe pasa al envío nuevo');
+  const cargos = await ana('GET', '/api/yo/cargos');
+  assert.equal(cargos.j.total, 60 + 35);
+  // El siguiente envío de Ana cobra esos cargos
+  const sig = await ana('POST', '/api/envios', { vehiculo_id: 1, peso: 2, origen_zona: 'Zona 1', destino_zona: 'Zona 16', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng,
+    destino_nombre: 'Luis', destino_telefono: '55554444', destino_direccion: 'x', metodo_pago: 'efectivo' });
+  assert.equal(sig.j.cargos_extra, 95);
+  assert.equal((await ana('GET', '/api/yo/cargos')).j.total, 0);
+  // Si se cancela, los cargos vuelven a quedar pendientes
+  await ana('POST', `/api/envios/${sig.j.id}/cancelar`, {});
+  assert.equal((await ana('GET', '/api/yo/cargos')).j.total, 95);
+});
+
+test('cancelar con el piloto en camino pide aceptar el cargo', async () => {
+  const r = await ana('POST', '/api/envios', { vehiculo_id: 1, peso: 2, origen_zona: 'Zona 1', destino_zona: 'Zona 16', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng,
+    destino_nombre: 'Luis', destino_telefono: '55554444', destino_direccion: 'x', metodo_pago: 'efectivo' });
+  db.prepare("UPDATE envios SET mensajero_id = ?, asignacion = 'aceptado' WHERE id = ?").run(pilotoId, r.j.id);
+  const sinAceptar = await ana('POST', `/api/envios/${r.j.id}/cancelar`, {});
+  assert.equal(sinAceptar.status, 409);
+  assert.equal(sinAceptar.j.cargo, 15);
+  assert.equal((await ana('POST', `/api/envios/${r.j.id}/cancelar`, { aceptar_cargo: true })).status, 200);
+  assert.equal(fila(r.j.id).ganancia_piloto, 7.5);
+  // Lo que gana el piloto aparece en "Mis ganancias"
+  const g = await piloto('GET', '/api/piloto/ganancias');
+  assert.ok(g.j.por_cobrar >= 7.5 + 49);
+});
+
+test('el panel no puede reabrir un envío cerrado y pide motivo', async () => {
+  const e = db.prepare("SELECT id FROM envios WHERE estado = 'devuelto' LIMIT 1").get();
+  assert.equal((await admin('POST', `/api/admin/envios/${e.id}/estado`, { estado: 'pendiente', nota: 'prueba' })).status, 400);
+  const r = await ana('POST', '/api/envios', { vehiculo_id: 1, peso: 2, origen_zona: 'Zona 1', destino_zona: 'Zona 16', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng,
+    destino_nombre: 'Luis', destino_telefono: '55554444', destino_direccion: 'x', metodo_pago: 'efectivo' });
+  assert.equal((await admin('POST', `/api/admin/envios/${r.j.id}/estado`, { estado: 'cancelado' })).status, 400);
+  assert.equal((await admin('POST', `/api/admin/envios/${r.j.id}/estado`, { estado: 'cancelado', nota: 'Cliente llamó' })).status, 200);
+});
+
+test('asignación automática: si todos lo rechazan, se vuelve a ofrecer', async () => {
+  ajuste('auto_asignar', 1);
+  db.prepare("UPDATE usuarios SET en_linea = 1, ubic_lat = ?, ubic_lng = ?, ubic_fecha = datetime('now') WHERE id = ?").run(ZONA1.lat, ZONA1.lng, pilotoId);
+  db.prepare("UPDATE envios SET mensajero_id = NULL WHERE estado = 'pendiente' AND asignacion IS NULL").run();
+  const r = await ana('POST', '/api/envios', { vehiculo_id: 1, peso: 2, origen_zona: 'Zona 1', destino_zona: 'Zona 16', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng,
+    destino_nombre: 'Luis', destino_telefono: '55554444', destino_direccion: 'x', metodo_pago: 'efectivo' });
+  db.prepare("UPDATE envios SET receptor_omitido = 'prueba' WHERE id = ?").run(r.j.id);
+  // Se liberan los envíos activos del piloto para que esté libre
+  db.prepare("UPDATE envios SET estado = 'cancelado' WHERE estado IN ('pendiente','recogido','en_camino','fallido','devolviendo','a_sede') AND id != ?").run(r.j.id);
+  asignacionAutomatica();
+  assert.equal(fila(r.j.id).mensajero_id, pilotoId);
+  await piloto('POST', `/api/piloto/envios/${r.j.id}/rechazar`, {});
+  asignacionAutomatica();   // el único piloto ya lo rechazó: se limpia la lista
+  assert.equal(fila(r.j.id).excluidos, null);
+  asignacionAutomatica();   // y se le vuelve a ofrecer
+  assert.equal(fila(r.j.id).mensajero_id, pilotoId);
+  ajuste('auto_asignar', 0);
+});
+
+test('comprobante de transferencia y revisión en el panel', async () => {
+  const r = await ana('POST', '/api/envios', { vehiculo_id: 1, peso: 2, origen_zona: 'Zona 1', destino_zona: 'Zona 16', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng,
+    destino_nombre: 'Luis', destino_telefono: '55554444', destino_direccion: 'x', metodo_pago: 'transferencia' });
+  assert.equal(fila(r.j.id).pago_estado, 'sin_comprobante');
+  assert.equal((await ana('POST', `/api/envios/${r.j.id}/comprobante`, { archivo: FOTO })).status, 200);
+  assert.ok((await admin('GET', '/api/admin/pagos')).j.pagos.some((p) => p.id === r.j.id && p.pago_estado === 'por_revisar'));
+  assert.equal((await admin('POST', `/api/admin/pagos/${r.j.id}`, { estado: 'verificado' })).status, 200);
+});
+
+test('contraseña nueva con el enlace del correo', async () => {
+  const token = crypto.randomBytes(32).toString('hex');
+  db.prepare('INSERT INTO tokens_clave (token, usuario_id, expira) VALUES (?, ?, ?)').run(token, anaId, Date.now() + 60_000);
+  assert.equal((await cliente()('POST', '/api/clave/nueva', { token, password: 'otra-clave-123' })).status, 200);
+  assert.equal((await cliente()('POST', '/api/clave/nueva', { token, password: 'otra-clave-123' })).status, 400, 'el enlace sirve una sola vez');
+  assert.equal((await cliente()('POST', '/api/login', { email: 'ana@prueba.com', password: 'otra-clave-123' })).status, 200);
+  ana = cliente();
+  await ana('POST', '/api/login', { email: 'ana@prueba.com', password: 'otra-clave-123' });
+});
+
+test('tienda en línea: crear un envío con la clave de la API', async () => {
+  assert.equal((await ana('POST', '/api/yo/tienda', { nueva_clave: true })).status, 403, 'solo empresas');
+  await admin('PUT', `/api/admin/clientes/${anaId}/empresa`, { tipo_cuenta: 'empresa', empresa_nombre: 'Tienda Ana' });
+  const k = await ana('POST', '/api/yo/tienda', { nueva_clave: true });
+  assert.ok(k.j.clave.startsWith('vaelo_'));
+  const api = cliente();
+  const r = await api('POST', '/api/v1/envios', { origen_lat: ZONA1.lat, origen_lng: ZONA1.lng, origen_direccion: 'Bodega', destino_nombre: 'Comprador', destino_telefono: '55559999',
+    destino_direccion: 'Casa', peso: 1, metodo_pago: 'efectivo' }, { Authorization: 'Bearer ' + k.j.clave });
+  assert.equal(r.status, 201, JSON.stringify(r.j));
+  assert.ok(r.j.enlace_receptor.includes('/recibe/'));
+  assert.equal((await api('GET', `/api/v1/envios/${r.j.guia}`, null, { Authorization: 'Bearer ' + k.j.clave })).j.estado, 'pendiente');
+  assert.equal((await api('GET', `/api/v1/envios/${r.j.guia}`, null, { Authorization: 'Bearer vaelo_' + 'a'.repeat(48) })).status, 401);
+});
+
+test('el cifrado de los avisos push se puede descifrar con las claves del celular', () => {
+  const ua = crypto.createECDH('prime256v1'); const uaPub = ua.generateKeys();
+  const auth = crypto.randomBytes(16);
+  const b64 = (b) => b.toString('base64url');
+  const cuerpo = push.cifrar({ p256dh: b64(uaPub), auth: b64(auth) }, '{"titulo":"hola"}');
+  const sal = cuerpo.subarray(0, 16), idlen = cuerpo[20], asPub = cuerpo.subarray(21, 21 + idlen), cifrado = cuerpo.subarray(21 + idlen);
+  const compartido = ua.computeSecret(asPub);
+  const ikm = Buffer.from(crypto.hkdfSync('sha256', compartido, auth, Buffer.concat([Buffer.from('WebPush: info\0'), uaPub, asPub]), 32));
+  const cek = Buffer.from(crypto.hkdfSync('sha256', ikm, sal, Buffer.from('Content-Encoding: aes128gcm\0'), 16));
+  const nonce = Buffer.from(crypto.hkdfSync('sha256', ikm, sal, Buffer.from('Content-Encoding: nonce\0'), 12));
+  const d = crypto.createDecipheriv('aes-128-gcm', cek, nonce);
+  d.setAuthTag(cifrado.subarray(-16));
+  const plano = Buffer.concat([d.update(cifrado.subarray(0, -16)), d.final()]);
+  assert.equal(plano.subarray(0, -1).toString(), '{"titulo":"hola"}');
+  assert.equal(plano[plano.length - 1], 2);
+});

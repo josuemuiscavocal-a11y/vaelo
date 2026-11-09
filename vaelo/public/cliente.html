@@ -15,11 +15,16 @@
 </head>
 <body>
   <header id="barra" class="barra"><div class="contenedor"><a href="/" class="marca"><img src="/img/logo-blanco.png" alt="Vaelo" width="139" height="40"></a></div></header>
-  <main class="area">
+  <section class="cliente-hero">
     <div class="contenedor">
-      <div class="area-cabecera">
-        <div><h1 id="saludo">Mis envíos</h1><p>Envía un paquete o sigue los que ya pediste.</p></div>
-      </div>
+      <div><h1 id="saludo">Mis envíos</h1><p>Envía un paquete o sigue los que ya pediste.</p></div>
+      <div class="cliente-resumen" id="cliente-resumen"></div>
+    </div>
+  </section>
+  <main class="cliente-cuerpo">
+    <div class="contenedor">
+      <div id="zona-avisos-push"></div>
+      <div id="cargos-pendientes"></div>
 
       <div id="promo"></div>
       <div id="avisos-cuenta"></div>
@@ -50,6 +55,10 @@
             <div class="fila">
               <div class="campo"><label for="peso">Peso aproximado (libras)</label><input id="peso" type="number" min="0.1" step="0.1" inputmode="decimal" placeholder="Ej. 5" required></div>
               <div class="campo"><label for="descripcion">¿Qué contiene? <span class="ayuda">Opcional</span></label><input id="descripcion" maxlength="200" placeholder="Documentos, ropa, repuestos…"></div>
+            </div>
+            <div class="fila">
+              <div class="campo"><label for="valor_declarado">Valor del contenido (Q) <span class="ayuda" id="ayuda-valor">Opcional. Sin seguro, Vaelo responde hasta un máximo</span></label><input id="valor_declarado" type="number" min="0" step="1" inputmode="decimal" placeholder="0"></div>
+              <div class="campo" style="align-self:end"><label class="casilla" for="asegurar" style="margin-bottom:.9rem"><input type="checkbox" id="asegurar" style="width:auto"><span><strong>Asegurarlo</strong> <span id="texto-seguro"></span></span></label></div>
             </div>
             <label class="casilla opcion-fragil" for="fragil"><input type="checkbox" id="fragil" style="width:auto"><span><strong>Es frágil: cuidado especial</strong> <span id="recargo-fragil-texto">(+Q10.00)</span><br><small style="color:var(--suave)">El piloto lo maneja con cuidado extra y la guía lo marca como frágil.</small></span></label>
           </fieldset>
@@ -112,6 +121,7 @@
                 <label class="opcion" id="opcion-credito" hidden><input type="radio" name="metodo_pago" value="credito"><span>A fin de mes<small>Cuenta de empresa</small></span></label>
               </div>
             </div>
+            <div class="mensaje aviso" id="datos-transferencia" hidden></div>
             <div class="campo"><label for="cupon">Cupón de descuento <span class="ayuda">Opcional</span></label>
               <div class="cupon-fila"><input id="cupon" maxlength="30" autocomplete="off" style="text-transform:uppercase"><button class="boton borde chico" type="button" id="aplicar-cupon">Aplicar</button></div>
               <small id="cupon-msg" class="pista"></small></div>
@@ -121,7 +131,8 @@
             </div>
           </fieldset>
 
-          <div class="resumen-precio"><span>Precio del envío<span class="desglose" id="desglose"></span></span><span class="precio-final"><del id="precio-antes"></del><strong id="precio" aria-live="polite">—</strong></span></div>
+          <div class="resumen-precio"><span>Precio del envío<span class="desglose" id="desglose"></span><span class="desglose" id="desglose-cargos"></span></span><span class="precio-final"><del id="precio-antes"></del><strong id="precio" aria-live="polite">—</strong></span></div>
+          <p class="pista" style="margin:-.4rem 0 1rem">Al enviar aceptas los <a href="/terminos" target="_blank">términos del servicio</a>.</p>
           <button class="boton" type="submit">Enviar paquete</button>
         </form>
       </section>
@@ -151,6 +162,21 @@
           <p style="color:var(--suave)">Si quieres, elige una foto tuya de la galería. El piloto la ve mientras recoge tu paquete para reconocerte más fácil.</p>
           <div id="docs-identidad" class="docs"></div>
         </section>
+        <section class="bloque" id="bloque-cargos">
+          <h2>Cargos</h2>
+          <p class="bloque-nota">Cargos por cancelar con el piloto en camino, devoluciones, días en la sede o nuevas entregas. Los pendientes se cobran junto con tu siguiente envío.</p>
+          <div id="lista-cargos"></div>
+        </section>
+        <section class="bloque" id="bloque-tienda" hidden>
+          <h2>Conectar tu tienda en línea</h2>
+          <p class="bloque-nota">Crea envíos desde tu tienda (Shopify, WooCommerce u otra) con una clave privada, y recibe un aviso en tu sistema cada vez que cambia el estado. <a href="/tiendas" target="_blank">Ver instrucciones para tu programador</a>.</p>
+          <div id="msg-tienda" class="mensaje" role="alert"></div>
+          <div id="tienda-clave"></div>
+          <div class="fila" style="align-items:end;margin-top:.75rem">
+            <div class="campo"><label for="webhook">Dirección para avisos de estado <span class="ayuda">Opcional, empieza con https://</span></label><input id="webhook" type="url" maxlength="300" placeholder="https://mitienda.com/vaelo/avisos"></div>
+            <div class="campo"><button class="boton borde" type="button" id="guardar-webhook">Guardar dirección</button></div>
+          </div>
+        </section>
         <form class="bloque" id="form-pass" novalidate>
           <h2>Cambiar contraseña</h2>
           <div id="msg-pass" class="mensaje" role="alert"></div>
@@ -177,7 +203,7 @@
       pickup: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 16V11h8V7h5l3.5 4H22v5"/><path d="M15 7v4h3.5"/><circle cx="6.5" cy="16.5" r="2"/><circle cx="17.5" cy="16.5" r="2"/><path d="M8.5 16.5h7M2 16h2.5M19.5 16.5H22"/></svg>',
       paquete: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5z"/><path d="M3 7.5 12 12l9-4.5M12 12v9"/></svg>',
     };
-    function icono(nombre) {
+    function iconoVehiculo(nombre) {
       const n = (nombre || '').toLowerCase();
       const caja = document.createElement('span');
       caja.innerHTML = SVG_ICONOS[n.includes('moto') ? 'moto' : n.includes('pick') ? 'pickup' : 'paquete'];
@@ -197,7 +223,7 @@
       return {
         vehiculo_id: document.querySelector('input[name="vehiculo_id"]:checked')?.value,
         peso: $('peso').value, origen_zona: $('origen_zona').value, destino_zona: $('destino_zona').value, fragil: $('fragil').checked,
-        cupon: $('cupon').value.trim(),
+        cupon: $('cupon').value.trim(), valor_declarado: $('valor_declarado').value, asegurar: $('asegurar').checked,
       };
     }
     let temporizador = null, turno = 0;
@@ -214,7 +240,9 @@
           if ($('precio').textContent !== textoPrecio) { $('precio').classList.remove('pulso'); void $('precio').offsetWidth; $('precio').classList.add('pulso'); }
           $('precio').textContent = textoPrecio;
           $('precio-antes').textContent = r.descuento ? dinero(r.precio_base) : '';
-          $('desglose').textContent = r.detalle + (r.descuento ? `. ${r.promocion}: −${dinero(r.descuento)}` : '');
+          $('desglose').textContent = r.detalle + (r.descuento ? `. ${r.promocion}: −${dinero(r.descuento)}` : '') +
+            (r.tipo === 'zona' ? '. Si la entrega queda fuera de las zonas cubiertas, se cobra por km.' : '');
+          $('desglose-cargos').textContent = r.cargos_pendientes > 0 ? `Más ${dinero(r.cargos_pendientes)} de cargos pendientes que se cobran con este envío.` : '';
           const cm = $('cupon-msg');
           cm.textContent = r.error_cupon || (datos.cupon && r.descuento ? `Cupón aplicado: ${r.promocion}` : '');
           cm.className = r.error_cupon ? 'pista error-texto' : 'pista ok';
@@ -225,26 +253,81 @@
       }, 350);
     }
 
+    // Entrega fallida: el cliente elige devolver o guardar en la sede
+    function cajaDecision(e, alListo) {
+      if (e.estado === 'fallido' && e.fallo) {
+        const f = e.fallo;
+        const elegir = (decision, texto) => async (ev) => {
+          if (!confirm(texto)) return;
+          ev.currentTarget.disabled = true;
+          try { await api(`/api/envios/${e.id}/decidir`, { body: { decision } }); alListo(); } catch (err) { alert(err.message); ev.currentTarget.disabled = false; }
+        };
+        return el('div', { class: 'decision-fallido' },
+          el('div', {}, el('strong', { text: 'No pudimos entregar este paquete' }), el('br'), `${f.motivo_texto}${f.nota ? '. ' + f.nota : ''}.`),
+          el('div', { class: 'pista', text: `Elige qué hacemos. Si no eliges en ${faltaPara(f.decidir_antes)}, lo llevamos a la sede.` }),
+          el('div', { class: 'decision-opciones' },
+            el('button', { class: 'boton', type: 'button', onclick: elegir('devolver', `Te devolvemos el paquete en el punto de recogida. Se cobran ${dinero(f.cargo_devolucion)}. ¿Continuar?`) },
+              'Devolvérmelo', el('small', { text: `${dinero(f.cargo_devolucion)}, el piloto lo regresa al punto de recogida` })),
+            el('button', { class: 'boton borde', type: 'button', onclick: elegir('sede', `Guardamos el paquete en la sede. Cuesta ${dinero(f.cargo_bodega_dia)} por día hasta que se entregue. ¿Continuar?`) },
+              'Guardarlo en la sede', el('small', { text: `${dinero(f.cargo_bodega_dia)} por día hasta que se entregue` }))));
+      }
+      if (e.estado === 'en_sede' && e.sede) {
+        return el('div', { class: 'decision-fallido' },
+          el('div', {}, el('strong', { text: 'Tu paquete está en la sede' }), el('br'), `${e.sede.dias} día(s) hasta hoy: ${dinero(e.sede.cargo)}.${e.sede.direccion ? ' Dirección: ' + e.sede.direccion + '.' : ''}`),
+          el('div', { class: 'pista', text: 'Puedes recogerlo (o que lo recoja quien lo recibe) en la sede, o pedir que lo llevemos de nuevo.' }),
+          el('button', { class: 'boton', type: 'button', text: `Llevarlo de nuevo (${dinero(e.fallo ? e.fallo.cargo_reentrega : 0)} + días en sede)`, onclick: async (ev) => {
+            if (!confirm('Mandamos un piloto a llevarlo desde la sede a quien recibe, con el mismo enlace y el mismo código. ¿Continuar?')) return;
+            ev.target.disabled = true;
+            try { const r = await api(`/api/envios/${e.id}/reenviar`, { body: {} }); alert(`Listo. La nueva guía es ${r.guia}.`); alListo(); } catch (err) { alert(err.message); ev.target.disabled = false; }
+          } }));
+      }
+      return null;
+    }
+    // Transferencia: subir el comprobante
+    function cajaComprobante(e, alListo) {
+      if (e.metodo_pago !== 'transferencia' || e.estado === 'cancelado' || e.pago_estado === 'verificado') return null;
+      const texto = { sin_comprobante: 'Sube la foto del comprobante de tu transferencia.', por_revisar: 'Recibimos tu comprobante. Lo estamos revisando.', rechazado: `Revisa tu comprobante: ${e.pago_nota || 'no lo pudimos verificar'}.` }[e.pago_estado] || '';
+      const entrada = el('input', { type: 'file', accept: 'image/*,application/pdf' });
+      entrada.addEventListener('change', async () => {
+        try { await api(`/api/envios/${e.id}/comprobante`, { body: { archivo: await prepararArchivo(entrada.files[0], true) } }); alListo(); }
+        catch (err) { alert(err.message); }
+      });
+      return el('div', { class: 'cargos-aviso' }, el('span', {}, el('strong', { style: 'font-size:1rem', text: `Transferencia de ${dinero(e.precio + (e.cargos_extra || 0))}` }), el('br'), el('small', { text: texto })),
+        e.pago_estado !== 'por_revisar' ? el('label', { class: 'boton chico doc-boton' }, e.tiene_comprobante ? 'Cambiar comprobante' : 'Subir comprobante', entrada) : null);
+    }
+    async function cancelarEnvio(e, boton) {
+      if (!confirm(`¿Cancelar el envío ${e.guia}?`)) return;
+      boton.disabled = true;
+      try { await api(`/api/envios/${e.id}/cancelar`, { body: {} }); }
+      catch (err) {
+        if (err.status === 409 && err.datos?.requiere_cargo) {
+          if (!confirm(err.message + ' ¿Cancelar de todas formas?')) { boton.disabled = false; return; }
+          try { await api(`/api/envios/${e.id}/cancelar`, { body: { aceptar_cargo: true } }); } catch (e2) { alert(e2.message); boton.disabled = false; return; }
+        } else { alert(err.message); boton.disabled = false; return; }
+      }
+      if ($('dlg').open) $('dlg').close();
+      cargarEnvios(); cargarCargos();
+    }
+
     function tarjetaEnvio(e) {
       const acciones = el('div', { class: 'acciones' },
         el('button', { class: 'boton chico', type: 'button', text: 'Ver en el mapa', onclick: () => verDetalle(e.id) }),
         el('button', { class: 'boton borde chico', type: 'button', text: 'Guía', onclick: () => verGuia(e) }));
       if (e.estado === 'pendiente') {
-        acciones.append(el('button', { class: 'boton peligro chico', type: 'button', text: 'Cancelar envío', onclick: async (ev) => {
-          if (!confirm(`¿Cancelar el envío ${e.guia}?`)) return;
-          ev.target.disabled = true;
-          try { await api(`/api/envios/${e.id}/cancelar`, { body: {} }); cargarEnvios(); }
-          catch (err) { alert(err.message); ev.target.disabled = false; }
-        } }));
+        acciones.append(el('button', { class: 'boton peligro chico', type: 'button', text: 'Cancelar envío', onclick: (ev) => cancelarEnvio(e, ev.target) }));
       }
-      return el('article', { class: 'envio' },
+      return el('article', { class: 'envio e-' + e.estado },
         el('div', {},
           el('div', { class: 'guia' }, e.guia, e.fragil ? el('span', { class: 'etiqueta-pendiente', style: 'margin-left:.4rem', text: 'Frágil' }) : null),
           el('div', { class: 'detalle', text: `${e.vehiculo}, ${e.peso} lb. Para ${e.destino_nombre}, ${e.destino_zona}` }),
           el('div', { class: 'detalle', text: (e.programado_para && e.estado === 'pendiente' ? `Programado: ${fechaProgramada(e.programado_para)}` : fecha(e.creado)) + (e.mensajero_nombre && e.asignacion === 'aceptado' ? `. Piloto: ${e.mensajero_nombre.split(' ')[0]}` : '') })),
         el('div', { class: 'lado' }, chipEstado(e.estado),
           e.estado === 'pendiente' && !e.receptor_listo ? el('span', { class: 'receptor-estado no', text: 'Faltan ubicaciones' }) : null,
-          el('strong', { text: (e.precio_por_confirmar ? 'Desde ' : '') + dinero(e.precio) })),
+          el('strong', { text: (e.precio_por_confirmar ? 'Desde ' : '') + dinero(e.precio) }),
+          e.cargos_extra > 0 ? el('small', { class: 'pista', text: `+ ${dinero(e.cargos_extra)} de cargos` }) : null),
+        e.estado !== 'cancelado' ? barraPasos(e.estado) : null,
+        cajaDecision(e, () => { cargarEnvios(); cargarCargos(); }),
+        e.metodo_pago === 'transferencia' && ['sin_comprobante', 'rechazado'].includes(e.pago_estado) ? el('div', { style: 'grid-column:1/-1' }, cajaComprobante(e, cargarEnvios)) : null,
         acciones);
     }
 
@@ -254,6 +337,7 @@
         envios = (await api('/api/envios')).envios;
         actualizarCompartir();
         $('conteo').textContent = envios.length ? `(${envios.length})` : '';
+        pintarResumenCliente();
         if (!envios.length) {
           lista.replaceChildren(el('div', { class: 'vacio' }, el('p', { text: 'Todavía no has enviado paquetes.' }),
             el('button', { class: 'boton', type: 'button', text: 'Enviar mi primer paquete', onclick: () => abrirTab('nuevo') })));
@@ -460,6 +544,56 @@
         } }));
     }
 
+    // Resumen arriba: envíos en curso, entregados y cargos pendientes
+    let totalCargos = 0;
+    function pintarResumenCliente() {
+      const curso = envios.filter(e => ['pendiente', 'recogido', 'en_camino', 'fallido', 'devolviendo', 'a_sede', 'en_sede'].includes(e.estado)).length;
+      const entregados = envios.filter(e => e.estado === 'entregado').length;
+      const dato = (n, t) => el('div', {}, el('strong', { text: String(n) }), el('span', { text: t }));
+      $('cliente-resumen').replaceChildren(dato(curso, 'En curso'), dato(entregados, 'Entregados'), totalCargos > 0 ? dato(dinero(totalCargos), 'Cargos pendientes') : '');
+    }
+    async function cargarCargos() {
+      let r;
+      try { r = await api('/api/yo/cargos'); } catch { return; }
+      totalCargos = r.total; pintarResumenCliente();
+      $('cargos-pendientes').replaceChildren(r.total > 0 ? el('div', { class: 'cargos-aviso' },
+        el('span', {}, 'Tienes ', el('strong', { text: dinero(r.total) }), ' de cargos pendientes. Se cobran con tu siguiente envío.'),
+        el('button', { class: 'boton borde chico', type: 'button', text: 'Ver detalle', onclick: () => { abrirTab('cuenta'); $('bloque-cargos').scrollIntoView({ behavior: 'smooth' }); } })) : '');
+      const estado = (c) => c.anulado_en ? ['Anulado', 'etiqueta-gris'] : c.pagado_en ? ['Pagado', 'etiqueta-completa'] : c.cobrado_guia ? [`Se cobra con ${c.cobrado_guia}`, 'etiqueta-azul'] : ['Pendiente', 'etiqueta-pendiente'];
+      $('lista-cargos').replaceChildren(r.historial.length ? el('ul', { class: 'movimientos' }, r.historial.map(c => el('li', {},
+        el('span', {}, el('strong', { text: r.tipos[c.tipo] || c.tipo }), el('small', { text: `${c.guia || ''}${c.nota && c.nota !== r.tipos[c.tipo] ? ' · ' + c.nota : ''} · ${fecha(c.creado)}` })),
+        el('span', { style: 'text-align:right' }, el('span', { class: 'monto', text: dinero(c.monto) }), el('br'), el('span', { class: estado(c)[1], text: estado(c)[0] })))))
+        : el('p', { class: 'pista', text: 'No tienes cargos.' }));
+    }
+    // Tiendas en línea (cuentas de empresa)
+    async function cargarTienda() {
+      let t;
+      try { t = await api('/api/yo/tienda'); } catch { return; }
+      $('bloque-tienda').hidden = !t.empresa;
+      if (!t.empresa) return;
+      $('webhook').value = t.webhook_url || '';
+      const pintarClave = (nueva, secreto) => $('tienda-clave').replaceChildren(
+        nueva ? el('div', { class: 'mensaje aviso' }, el('strong', { text: 'Copia tu clave ahora: no la volveremos a mostrar.' }), el('br'),
+          el('code', { class: 'clave-api', text: nueva }), secreto ? [el('br'), 'Secreto para verificar los avisos: ', el('code', { class: 'clave-api', text: secreto })] : '') : '',
+        el('p', {}, t.clave_pista && !nueva ? ['Clave activa: ', el('code', { text: t.clave_pista })] : nueva ? '' : 'Todavía no tienes una clave.'),
+        t.recogida.length ? el('p', { class: 'pista', text: 'Puntos de recogida guardados con ubicación (usa su número como direccion_id): ' + t.recogida.map(d => `${d.id} = ${d.nombre}`).join(', ') }) : '',
+        el('div', { class: 'navegar' },
+          el('button', { class: 'boton chico', type: 'button', text: t.clave_pista ? 'Crear una clave nueva' : 'Crear clave', onclick: async () => {
+            if (t.clave_pista && !confirm('La clave anterior dejará de funcionar. ¿Crear una nueva?')) return;
+            try { const r = await api('/api/yo/tienda', { body: { nueva_clave: true } }); t.clave_pista = 'nueva'; pintarClave(r.clave, r.secreto); } catch (e) { mostrarMensaje($('msg-tienda'), e.message); }
+          } }),
+          t.clave_pista ? el('button', { class: 'boton peligro chico', type: 'button', text: 'Desactivar clave', onclick: async () => {
+            if (!confirm('Tu tienda ya no podrá crear envíos. ¿Desactivar?')) return;
+            await api('/api/yo/tienda', { body: { quitar_clave: true } }); cargarTienda();
+          } }) : null));
+      pintarClave();
+    }
+    $('guardar-webhook').addEventListener('click', async () => {
+      try { const r = await api('/api/yo/tienda', { body: { webhook_url: $('webhook').value } });
+        mostrarMensaje($('msg-tienda'), r.secreto ? `Guardado. Cada aviso llega firmado en la cabecera X-Vaelo-Firma con tu secreto: ${r.secreto}` : 'Guardado.', 'exito'); }
+      catch (e) { mostrarMensaje($('msg-tienda'), e.message); }
+    });
+
     // Avisos de la cuenta: correo sin confirmar y verificación de identidad
     let yoCliente = null, correoActivo = false;
     async function cargarCuenta() {
@@ -504,14 +638,17 @@
       let datos;
       try { datos = await api('/api/envios/' + id); } catch (err) { alert(err.message); return; }
       const { envio: e, eventos, piloto } = datos;
-      const idx = PASOS.indexOf(e.estado);
       const cajaMapa = el('div', { class: 'mapa alto' });
+      const recargar = () => { verDetalle(id); cargarEnvios(); cargarCargos(); };
       $('dlg-cuerpo').replaceChildren(
         el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: cerrarDialogo }),
         el('h2', { style: 'font-size:1.4rem;margin-bottom:.3rem', text: e.guia }), chipEstado(e.estado),
-        e.estado !== 'cancelado' ? el('div', { style: 'margin-top:1rem' },
-          el('div', { class: 'progreso', 'aria-hidden': 'true' }, PASOS.map((_, i) => el('i', { class: i <= idx ? 'lleno' : '' }))),
-          el('div', { class: 'progreso-textos' }, ['Solicitado', 'Recogido', 'En camino', 'Entregado'].map((t, i) => el('span', { class: i === idx ? 'actual' : '', text: t })))) : null,
+        e.estado !== 'cancelado' ? barraPasos(e.estado) : null,
+        cajaDecision(e, recargar),
+        e.tiene_foto_fallo ? el('a', { class: 'prueba-img', href: `/api/envios/${e.id}/entrega/fallo`, target: '_blank', rel: 'noopener', style: 'margin:.5rem 0' },
+          el('img', { src: `/api/envios/${e.id}/entrega/fallo`, alt: 'Foto del intento de entrega' }), el('small', { text: 'Foto del intento de entrega' })) : null,
+        e.reenviado_como ? el('p', { class: 'mensaje exito' }, 'Este paquete salió de nuevo con la guía ', el('a', { href: '#', text: e.reenviado_como.guia, onclick: (ev) => { ev.preventDefault(); verDetalle(e.reenviado_como.id); } }), '.') : null,
+        cajaComprobante(e, recargar),
         cajaEntrega(e),
         cajaReceptor(e),
         cajaCodigo(e),
@@ -529,23 +666,28 @@
             e.precio_por_confirmar ? el('small', { style: 'display:block;color:var(--suave)', text: 'Se calcula por km cuando quien entrega y quien recibe compartan su ubicación.' }) : '',
             e.descuento > 0 ? el('small', { style: 'display:block;color:var(--ok)', text: `Ahorraste ${dinero(e.descuento)}` }) : ''),
           e.programado_para ? el('div', {}, el('span', { text: 'Recogida programada' }), fechaProgramada(e.programado_para)) : '',
-          el('div', {}, el('span', { text: 'Pago' }), PAGOS[e.metodo_pago] || e.metodo_pago),
+          el('div', {}, el('span', { text: 'Pago' }), PAGOS[e.metodo_pago] || e.metodo_pago,
+            e.metodo_pago === 'transferencia' && datos.datos_transferencia && e.pago_estado !== 'verificado' ? el('small', { style: 'display:block;color:var(--suave);white-space:pre-line', text: datos.datos_transferencia }) : ''),
+          e.cargos_extra > 0 ? el('div', {}, el('span', { text: 'Cargos pendientes incluidos' }), dinero(e.cargos_extra)) : null,
+          e.valor_declarado > 0 ? el('div', {}, el('span', { text: 'Valor declarado' }), `${dinero(e.valor_declarado)}${e.seguro > 0 ? ` (asegurado, ${dinero(e.seguro)})` : ' (sin seguro)'}`) : null,
           Number(e.cobro_destinatario) > 0 ? el('div', {}, el('span', { text: 'Cobrar al recibir' }), dinero(e.cobro_destinatario)) : null),
         e.estado === 'entregado' ? pruebaEntrega(e) : '',
+        e.estado === 'devuelto' ? el('p', { class: 'mensaje exito' }, 'Devuelto a ', el('strong', { text: e.devuelto_a || '' }), e.devuelto_en ? ` el ${fecha(e.devuelto_en)}.` : '.') : '',
         e.estado === 'entregado' && piloto ? bloqueCalificar(e) : '',
         el('h3', { text: 'Historial' }),
         el('ol', { class: 'linea-tiempo' }, eventos.slice().reverse().map(ev =>
           el('li', {}, el('strong', { text: ESTADOS[ev.estado] || ev.estado }), ev.nota ? el('div', { text: ev.nota }) : null, el('small', { text: fecha(ev.creado) })))),
         el('div', { style: 'margin-top:1rem;display:flex;gap:.5rem;flex-wrap:wrap' },
           el('button', { class: 'boton borde', type: 'button', text: 'Ver guía', onclick: () => verGuia(e) }),
-          !['entregado', 'cancelado'].includes(e.estado) ? el('button', { class: 'boton borde', type: 'button', text: 'Enlace para quien recibe', onclick: () => compartirSeguimiento(e) }) : '',
+          ['pendiente', 'recogido', 'en_camino'].includes(e.estado) ? el('button', { class: 'boton borde', type: 'button', text: 'Enlace para quien recibe', onclick: () => compartirSeguimiento(e) }) : '',
+          e.estado === 'pendiente' ? el('button', { class: 'boton peligro', type: 'button', text: 'Cancelar envío', onclick: (ev) => cancelarEnvio(e, ev.target) }) : '',
           el('button', { class: 'boton borde', type: 'button', text: 'Cerrar', onclick: cerrarDialogo })));
       if (!$('dlg').open) $('dlg').showModal();
       const mapa = crearMapa(cajaMapa);
       if (mapa) dibujarEnvio(mapa, e);
       // Se actualiza solo cada 30 segundos mientras el envío está activo
       clearInterval(refresco);
-      if (['pendiente', 'recogido', 'en_camino'].includes(e.estado)) refresco = setInterval(() => verDetalle(id), 30000);
+      if (['pendiente', 'recogido', 'en_camino', 'fallido', 'devolviendo', 'a_sede'].includes(e.estado)) refresco = setInterval(() => verDetalle(id), 30000);
     }
 
     $('form-envio').addEventListener('submit', async (ev) => {
@@ -567,6 +709,7 @@
           destino_nombre: f.destino_nombre.value, destino_telefono: f.destino_telefono.value, destino_direccion: f.destino_direccion.value,
           cobro_destinatario: f.cobro_destinatario.value, metodo_pago: f.metodo_pago.value, notas: f.notas.value,
         } });
+        $('valor_declarado').value = ''; $('asegurar').checked = false; cargarCargos();
         ['peso', 'descripcion', 'destino_nombre', 'destino_telefono', 'destino_direccion', 'cobro_destinatario', 'notas'].forEach(k => { f[k].value = ''; });
         $('fragil').checked = false; $('cupon').value = ''; $('cupon-msg').textContent = ''; $('precio-antes').textContent = '';
         if ($('guardar-destino').value) cargarDirecciones();
@@ -618,6 +761,8 @@
       const usuario = await pintarBarra();
       if (!usuario) { location.href = '/entrar?volver=' + encodeURIComponent(location.pathname); return; }
       $('zona-instalar').replaceChildren(bloqueInstalar('Vaelo'));
+      $('zona-avisos-push').replaceChildren(bloqueAvisos('Te avisamos al celular cuando el piloto acepte, recoja y entregue tu paquete, aunque Vaelo esté cerrado.'));
+      cargarCargos(); cargarTienda();
       cargarCuenta();
       $('saludo').textContent = `Hola, ${usuario.nombre.split(' ')[0]}`;
       $('origen_telefono').value = usuario.telefono || '';
@@ -627,7 +772,7 @@
       $('vehiculos').replaceChildren(...cfg.vehiculos.map((v, i) => el('label', { class: 'vehiculo' },
         el('input', { type: 'radio', name: 'vehiculo_id', value: v.id, checked: i === 0 }),
         el('span', { class: 'tarjeta' },
-          el('span', { class: 'icono', 'aria-hidden': 'true' }, icono(v.nombre)),
+          el('span', { class: 'icono', 'aria-hidden': 'true' }, iconoVehiculo(v.nombre)),
           el('strong', { text: v.nombre }),
           el('small', { text: `${v.descripcion}. Hasta ${v.peso_max} lb` }),
           el('span', { class: 'precio-v', text: `${dinero(v.tarifa_zona)} en zonas cubiertas` })))));
@@ -677,10 +822,24 @@
         pintarLote();
       });
       $('recargo-fragil-texto').textContent = cfg.recargo_fragil ? `(+${dinero(cfg.recargo_fragil)})` : '';
+      if (cfg.seguro) {
+        $('texto-seguro').textContent = `(${cfg.seguro.pct}% del valor, mínimo ${dinero(cfg.seguro.minimo)})`;
+        $('ayuda-valor').textContent = `Opcional. Sin seguro, Vaelo responde hasta ${dinero(cfg.seguro.responsabilidad_max)}`;
+      }
+      ['valor_declarado'].forEach(id => $(id).addEventListener('input', actualizarPrecio));
+      $('asegurar').addEventListener('change', () => { if ($('asegurar').checked && !Number($('valor_declarado').value)) { $('valor_declarado').focus(); } actualizarPrecio(); });
+      document.querySelectorAll('input[name="metodo_pago"]').forEach(r => r.addEventListener('change', () => {
+        const t = document.querySelector('input[name="metodo_pago"]:checked').value === 'transferencia';
+        $('datos-transferencia').hidden = !t || !cfg.datos_transferencia;
+        $('datos-transferencia').textContent = cfg.datos_transferencia ? 'Datos para la transferencia: ' + cfg.datos_transferencia + '. Después de enviar, sube la foto del comprobante en el envío.' : '';
+      }));
       $('vehiculos').addEventListener('change', actualizarPrecio);
       actualizarPrecio();
 
       if (location.pathname === '/mi-cuenta') abrirTab('lista'); else cargarEnvios();
+      // Desde un aviso del celular: abre ese envío
+      const abrir = new URLSearchParams(location.search).get('envio');
+      if (abrir) verDetalle(Number(abrir));
     })();
   </script>
 </body>

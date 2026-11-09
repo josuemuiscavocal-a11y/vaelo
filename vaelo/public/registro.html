@@ -23,6 +23,7 @@
       <div class="campo"><label for="telefono">Teléfono o WhatsApp</label><input id="telefono" type="tel" autocomplete="tel" placeholder="0000-0000" required maxlength="30"></div>
       <div class="campo"><label for="email">Correo</label><input id="email" type="email" autocomplete="email" required maxlength="150"></div>
       <div class="campo"><label for="password">Contraseña <span class="ayuda">Mínimo 8 caracteres</span></label><input id="password" type="password" autocomplete="new-password" required minlength="8"></div>
+      <label class="casilla" for="terminos"><input type="checkbox" id="terminos" style="width:auto"><span>Acepto los <a href="/terminos" target="_blank">términos del servicio</a> y el <a href="/privacidad" target="_blank">aviso de privacidad</a></span></label>
       <button class="boton" type="submit">Crear cuenta</button>
       <p class="alterno">¿Ya tienes cuenta? <a href="/entrar" id="a-entrar">Entra aquí</a></p>
     </form>
@@ -40,7 +41,7 @@
       try {
         await api('/api/registro', { body: {
           nombre: form.nombre.value, telefono: form.telefono.value,
-          email: form.email.value, password: form.password.value,
+          email: form.email.value, password: form.password.value, acepto_terminos: form.terminos.checked,
         } });
         const volver = new URLSearchParams(location.search).get('volver') || '';
         location.href = /^\/[a-z-]*$/.test(volver) ? volver : '/enviar';

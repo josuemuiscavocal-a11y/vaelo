@@ -12,21 +12,36 @@
   <link rel="stylesheet" href="/vendor/maplibre/maplibre-gl.css?v=4.7.1">
   <link rel="stylesheet" href="/css/styles.css?v=20261109b">
 </head>
-<body>
-  <header class="barra"><div class="contenedor">
-    <span class="marca"><img src="/img/logo-blanco.png" alt="Vaelo" width="139" height="40"></span>
-    <nav class="nav" aria-label="Sesión"><span class="etiqueta-modo">Panel administrativo</span><button class="enlace" type="button" id="cerrar-sesion">Cerrar sesión</button></nav>
-  </div></header>
-  <main class="area">
-    <div class="contenedor">
-      <div class="area-cabecera">
-        <div><h1>Panel administrativo</h1><p>Pedidos, pilotos, clientes y tarifas.</p></div>
-        <div style="display:flex;gap:.5rem;flex-wrap:wrap">
-          <button class="boton borde chico" type="button" id="boton-avisos" aria-pressed="true">Sonido activado</button>
-          <button class="boton borde chico" type="button" id="refrescar">Actualizar</button>
-        </div>
+<body class="app-panel">
+  <div class="panel-app">
+    <aside class="lateral" id="lateral" aria-label="Secciones del panel">
+      <div class="lateral-marca"><img src="/img/logo-blanco.png" alt="Vaelo" width="118" height="34"><span>Panel</span></div>
+      <nav class="lateral-nav" role="tablist" aria-orientation="vertical">
+        <button role="tab" id="tab-envios" aria-selected="true" aria-controls="panel-envios" data-icono="paquete">Envíos<span class="insignia" id="insignia-envios" hidden></span></button>
+        <button role="tab" id="tab-mensajeros" aria-selected="false" aria-controls="panel-mensajeros" data-icono="piloto">Pilotos<span class="insignia" id="insignia-mensajeros" hidden></span></button>
+        <button role="tab" id="tab-clientes" aria-selected="false" aria-controls="panel-clientes" data-icono="clientes">Clientes<span class="insignia" id="insignia-clientes" hidden></span></button>
+        <button role="tab" id="tab-caja" aria-selected="false" aria-controls="panel-caja" class="solo-admin" data-icono="caja">Caja<span class="insignia" id="insignia-caja" hidden></span></button>
+        <button role="tab" id="tab-descuentos" aria-selected="false" aria-controls="panel-descuentos" class="solo-admin" data-icono="etiqueta">Descuentos</button>
+        <button role="tab" id="tab-reportes" aria-selected="false" aria-controls="panel-reportes" class="solo-admin" data-icono="grafica">Reportes</button>
+        <button role="tab" id="tab-tarifas" aria-selected="false" aria-controls="panel-tarifas" class="solo-admin" data-icono="ajustes">Tarifas y ajustes</button>
+      </nav>
+      <div class="lateral-pie">
+        <div class="usuario-panel"><span class="avatar" id="avatar-usuario">V</span><div><strong id="nombre-usuario">Vaelo</strong><small id="rol-usuario">Administración</small></div></div>
+        <button class="lateral-salir" type="button" id="cerrar-sesion">Cerrar sesión</button>
       </div>
-
+    </aside>
+    <div class="velo-menu" id="velo-menu" hidden></div>
+    <div class="panel-principal">
+      <header class="panel-cabecera">
+        <button class="menu-movil" type="button" id="abrir-menu" aria-label="Abrir menú" aria-controls="lateral" aria-expanded="false"></button>
+        <div class="panel-titulo"><h1 id="titulo-seccion">Envíos</h1><p id="subtitulo-seccion">Pedidos de hoy y su estado</p></div>
+        <div class="cabecera-acciones">
+          <button class="boton-icono" type="button" id="boton-push" title="Avisos en este equipo aunque el panel esté cerrado">Avisos</button>
+          <button class="boton-icono" type="button" id="boton-avisos" aria-pressed="true">Sonido</button>
+          <button class="boton-icono" type="button" id="refrescar">Actualizar</button>
+        </div>
+      </header>
+      <main class="panel-cuerpo">
       <div id="alertas"></div>
       <div id="aviso-nuevos" class="aviso-nuevos" role="status" aria-live="polite" hidden>
         <div class="aviso-texto"><strong id="aviso-titulo"></strong><span id="aviso-detalle"></span></div>
@@ -37,17 +52,7 @@
         </div>
       </div>
 
-      <div class="cifras" id="cifras"></div>
-
-      <div class="pestanas" role="tablist">
-        <button role="tab" id="tab-envios" aria-selected="true" aria-controls="panel-envios">Envíos</button>
-        <button role="tab" id="tab-mensajeros" aria-selected="false" aria-controls="panel-mensajeros">Pilotos</button>
-        <button role="tab" id="tab-clientes" aria-selected="false" aria-controls="panel-clientes">Clientes</button>
-        <button role="tab" id="tab-caja" aria-selected="false" aria-controls="panel-caja" class="solo-admin">Caja</button>
-        <button role="tab" id="tab-descuentos" aria-selected="false" aria-controls="panel-descuentos" class="solo-admin">Descuentos</button>
-        <button role="tab" id="tab-reportes" aria-selected="false" aria-controls="panel-reportes" class="solo-admin">Reportes</button>
-        <button role="tab" id="tab-tarifas" aria-selected="false" aria-controls="panel-tarifas" class="solo-admin">Tarifas y ajustes</button>
-      </div>
+      <div class="franja-cifras" id="cifras"></div>
 
       <section id="panel-envios" role="tabpanel" aria-labelledby="tab-envios">
         <div class="filtros">
@@ -67,7 +72,7 @@
         <div id="msg-mensajeros" class="mensaje" role="alert"></div>
         <div class="bloque">
           <h2>Dónde están ahora</h2>
-          <p style="color:var(--suave)">Se actualiza cada 10 segundos. La línea punteada va hacia donde se dirige cada piloto (recogida o entrega).</p>
+          <p class="bloque-nota">Se actualiza cada 10 segundos. La línea punteada va hacia donde se dirige cada piloto (recogida o entrega).</p>
           <div class="leyenda-flota">
             <span><i style="background:#3ccf7a"></i>En línea, libre</span>
             <span><i style="background:#ffcf2e"></i>Llevando un envío</span>
@@ -78,7 +83,7 @@
         </div>
         <div class="bloque">
           <h2>Pilotos</h2>
-          <p style="color:var(--suave)">Los pilotos nuevos se registran en <strong>vaelomensajeria.com/modomensajero</strong>, suben sus documentos y aparecen aquí "En revisión" para que los apruebes.</p>
+          <p class="bloque-nota">Los pilotos nuevos se registran en <strong>vaelomensajeria.com/modomensajero</strong>, suben sus documentos y aparecen aquí "En revisión" para que los apruebes.</p>
           <div class="tabla-envoltura">
             <table>
               <thead><tr><th>Piloto</th><th>Estado</th><th>Vehículo</th><th>Documentos</th><th>Envíos</th><th>Calificación</th><th></th></tr></thead>
@@ -88,7 +93,7 @@
         </div>
         <form class="bloque solo-admin" id="form-mensajero" novalidate>
           <h2>Crear cuenta de piloto</h2>
-          <p style="color:var(--suave)">Si prefieres registrarlo tú: crea la cuenta y luego completa sus datos y documentos en su ficha.</p>
+          <p class="bloque-nota">Si prefieres registrarlo tú: crea la cuenta y luego completa sus datos y documentos en su ficha.</p>
           <div class="fila">
             <div class="campo"><label for="m-nombre">Nombre completo</label><input id="m-nombre" maxlength="100"></div>
             <div class="campo"><label for="m-telefono">Teléfono</label><input id="m-telefono" type="tel" maxlength="30"></div>
@@ -104,10 +109,10 @@
 
       <section id="panel-clientes" role="tabpanel" aria-labelledby="tab-clientes" hidden>
         <div id="aviso-correo"></div>
-        <p style="color:var(--suave)">Los clientes "En revisión" subieron su DPI y su foto. Ábrelos, compara que el nombre, el DPI y la foto coincidan, y verifícalos.</p>
+        <p class="bloque-nota">Los clientes "En revisión" subieron su DPI y su foto. Ábrelos, compara que el nombre, el DPI y la foto coincidan, y verifícalos.</p>
         <div class="tabla-envoltura">
           <table>
-            <thead><tr><th>Nombre</th><th>Correo</th><th>Teléfono</th><th>Identidad</th><th>Envíos</th><th>Registro</th><th></th></tr></thead>
+            <thead><tr><th>Nombre</th><th>Correo</th><th>Teléfono</th><th>Identidad</th><th>Envíos</th><th>Calificación de pilotos</th><th>Cargos pendientes</th><th>Registro</th><th></th></tr></thead>
             <tbody id="tabla-clientes"></tbody>
           </table>
         </div>
@@ -116,23 +121,33 @@
       <section id="panel-caja" role="tabpanel" aria-labelledby="tab-caja" hidden>
         <div id="msg-caja" class="mensaje" role="alert"></div>
         <div class="bloque">
+          <h2>Transferencias por revisar</h2>
+          <p class="bloque-nota">Envíos pagados por transferencia. Abre el comprobante, revisa que el dinero entró a la cuenta y márcalo verificado.</p>
+          <div id="caja-transferencias"></div>
+        </div>
+        <div class="bloque">
           <h2>Efectivo que deben entregar los pilotos</h2>
-          <p style="color:var(--suave)">Envíos pagados en efectivo más lo cobrado a quien recibe. Cuando el piloto entrega el dinero en la sede, regístralo aquí.</p>
+          <p class="bloque-nota">Envíos pagados en efectivo más lo cobrado a quien recibe. Cuando el piloto entrega el dinero en la sede, regístralo aquí.</p>
           <div id="caja-efectivo"></div>
         </div>
         <div class="bloque">
           <h2>Pago a pilotos</h2>
-          <p style="color:var(--suave)">Lo que ganó cada piloto por sus entregas y todavía no se le ha pagado. Se calcula con la comisión de "Tarifas y ajustes".</p>
+          <p class="bloque-nota">Lo que ganó cada piloto por sus entregas y todavía no se le ha pagado. Se calcula con la comisión de "Tarifas y ajustes".</p>
           <div id="caja-pagos"></div>
         </div>
         <div class="bloque">
           <h2>Cobros contra entrega por devolver a clientes</h2>
-          <p style="color:var(--suave)">Dinero que los pilotos cobraron a quien recibe y que hay que entregar a la tienda o cliente que mandó el paquete.</p>
+          <p class="bloque-nota">Dinero que los pilotos cobraron a quien recibe y que hay que entregar a la tienda o cliente que mandó el paquete.</p>
           <div id="caja-cobros"></div>
         </div>
         <div class="bloque">
           <h2>Crédito de empresas por cobrar</h2>
           <div id="caja-credito"></div>
+        </div>
+        <div class="bloque">
+          <h2>Cargos a clientes</h2>
+          <p class="bloque-nota">Cancelaciones con el piloto en camino, devoluciones, días en la sede y nuevas entregas. Se cobran solos en el siguiente envío del cliente; si pagó de otra forma, márcalo pagado. Si fue un error, anúlalo.</p>
+          <div id="caja-cargos"></div>
         </div>
         <div class="bloque">
           <h2>Historial</h2>
@@ -144,7 +159,7 @@
         <div id="msg-descuentos" class="mensaje" role="alert"></div>
         <div class="bloque">
           <h2>Promociones y cupones</h2>
-          <p style="color:var(--suave)">Sin cupón: se aplica sola a todos los envíos en esas fechas y se anuncia en la página. Con cupón: solo si el cliente lo escribe. Si hay varias, se aplica la que más le conviene al cliente (no se suman).</p>
+          <p class="bloque-nota">Sin cupón: se aplica sola a todos los envíos en esas fechas y se anuncia en la página. Con cupón: solo si el cliente lo escribe. Si hay varias, se aplica la que más le conviene al cliente (no se suman).</p>
           <div class="tabla-envoltura"><table>
             <thead><tr><th>Promoción</th><th>Descuento</th><th>Fechas</th><th>Estado</th><th>Usos</th><th></th></tr></thead>
             <tbody id="tabla-promos"></tbody>
@@ -196,6 +211,7 @@
           <div class="bloque"><h2>Horas con más pedidos</h2><div id="rep-horas"></div></div>
           <div class="bloque"><h2>Pilotos</h2><div id="rep-pilotos"></div></div>
           <div class="bloque"><h2>Promociones usadas</h2><div id="rep-promos"></div></div>
+          <div class="bloque"><h2>Cargos a clientes</h2><div id="rep-cargos"></div></div>
         </div>
       </section>
 
@@ -203,7 +219,7 @@
         <div id="msg-tarifas" class="mensaje" role="alert"></div>
         <div class="bloque">
           <h2>Vehículos y precios</h2>
-          <p style="color:var(--suave)">Dentro de las zonas cubiertas se cobra la tarifa fija. Fuera de ellas: arranque + kilómetros × precio por km (nunca menos que la tarifa fija).</p>
+          <p class="bloque-nota">Dentro de las zonas cubiertas se cobra la tarifa fija. Fuera de ellas: arranque + kilómetros × precio por km (nunca menos que la tarifa fija).</p>
           <div class="tabla-envoltura">
             <table>
               <thead><tr><th>Vehículo</th><th>Descripción</th><th>Peso máx. (lb)</th><th>Tarifa zonas (Q)</th><th>Arranque (Q)</th><th>Por km (Q)</th><th>Activo</th><th></th></tr></thead>
@@ -213,9 +229,11 @@
         </div>
         <div class="bloque">
           <h2>Zonas con tarifa fija</h2>
-          <div class="tabla-envoltura" style="margin-bottom:1rem">
+          <p class="bloque-nota">Dibuja cada zona en el mapa. Con zonas dibujadas, la tarifa fija solo se cobra cuando la recogida y la entrega reales caen dentro de alguna; si no, se cobra por km. Sin ninguna dibujada, la tarifa fija vale hasta el máximo de km de abajo.</p>
+          <div class="mapa" id="mapa-zonas"></div>
+          <div class="tabla-envoltura" style="margin:1rem 0">
             <table>
-              <thead><tr><th>Zona</th><th style="width:110px">Activa</th><th style="width:110px"></th></tr></thead>
+              <thead><tr><th>Zona</th><th>Forma en el mapa</th><th style="width:90px">Activa</th><th style="width:220px"></th></tr></thead>
               <tbody id="tabla-zonas"></tbody>
             </table>
           </div>
@@ -248,9 +266,47 @@
           </div>
           <button class="boton" type="submit">Guardar</button>
         </form>
+        <form class="bloque" id="form-fallidos" novalidate>
+          <h2>Entregas fallidas, sede y cancelaciones</h2>
+          <p class="bloque-nota">Si el piloto no puede entregar, el cliente elige: devolverle el paquete o guardarlo en la sede (se cobra por día hasta que se entregue). Si no elige a tiempo, va a la sede.</p>
+          <div class="fila">
+            <div class="campo"><label for="aj-cargo_devolucion">Devolver al remitente (Q)</label><input id="aj-cargo_devolucion" type="number" min="0" step="0.5"></div>
+            <div class="campo"><label for="aj-cargo_bodega_dia">Sede, por día (Q)</label><input id="aj-cargo_bodega_dia" type="number" min="0" step="0.5"></div>
+            <div class="campo"><label for="aj-cargo_reentrega">Volver a llevarlo desde la sede (Q)</label><input id="aj-cargo_reentrega" type="number" min="0" step="0.5"></div>
+            <div class="campo"><label for="aj-horas_decidir_fallido">Horas para que el cliente elija</label><input id="aj-horas_decidir_fallido" type="number" min="0.25" max="48" step="0.25"></div>
+          </div>
+          <div class="fila">
+            <div class="campo"><label for="aj-cargo_cancelacion">Cancelar con el piloto en camino (Q)</label><input id="aj-cargo_cancelacion" type="number" min="0" step="0.5"></div>
+            <div class="campo"><label for="aj-pct_piloto_cancelacion">Parte para el piloto (%)</label><input id="aj-pct_piloto_cancelacion" type="number" min="0" max="100" step="5"></div>
+          </div>
+          <div class="campo"><label for="aj-sede_direccion">Dirección de la sede</label><input id="aj-sede_direccion" maxlength="200" placeholder="Ej. 5a. avenida 10-20, Zona 9"></div>
+          <label class="etiqueta-campo">Ubicación de la sede <span class="ayuda">El piloto marca "Dejé el paquete en la sede" estando aquí, y las nuevas entregas salen de aquí</span></label>
+          <div id="selector-sede"></div>
+          <button class="boton" type="submit" style="margin-top:1rem">Guardar</button>
+        </form>
+        <form class="bloque" id="form-seguro" novalidate>
+          <h2>Seguro, tarifa fija y pagos</h2>
+          <div class="fila">
+            <div class="campo"><label for="aj-seguro_pct">Seguro: % del valor declarado</label><input id="aj-seguro_pct" type="number" min="0" max="50" step="0.5"></div>
+            <div class="campo"><label for="aj-seguro_minimo">Seguro mínimo (Q)</label><input id="aj-seguro_minimo" type="number" min="0" step="1"></div>
+            <div class="campo"><label for="aj-responsabilidad_max">Sin seguro, Vaelo responde hasta (Q)</label><input id="aj-responsabilidad_max" type="number" min="0" step="50"></div>
+            <div class="campo"><label for="aj-km_max_tarifa_fija">Km máximos con tarifa fija <span class="ayuda">Solo si no hay zonas dibujadas</span></label><input id="aj-km_max_tarifa_fija" type="number" min="1" max="200" step="1"></div>
+          </div>
+          <div class="campo"><label for="aj-datos_transferencia">Datos para pagar por transferencia <span class="ayuda">Los ve el cliente al elegir transferencia</span></label><textarea id="aj-datos_transferencia" maxlength="600" rows="3" placeholder="Banco Industrial, cuenta monetaria 000-000000-0, a nombre de Vaelo, S.A."></textarea></div>
+          <button class="boton" type="submit">Guardar</button>
+        </form>
+        <form class="bloque" id="form-respaldos" novalidate>
+          <h2>Copias de seguridad</h2>
+          <p class="bloque-nota">El servidor guarda una copia cada noche. Si escribes un correo, también se la manda ahí para que exista fuera del servidor (necesita el correo automático de Resend configurado). Si el sistema deja de responder, se reinicia solo y avisa a este mismo correo.</p>
+          <div class="fila" style="align-items:end">
+            <div class="campo"><label for="aj-correo_respaldos">Correo para respaldos y alertas</label><input id="aj-correo_respaldos" type="email" maxlength="150"></div>
+            <div class="campo"><button class="boton" type="submit">Guardar</button></div>
+            <div class="campo"><a class="boton borde" href="/api/admin/respaldo" download>Descargar copia ahora</a></div>
+          </div>
+        </form>
         <div class="bloque">
           <h2>Equipo de oficina</h2>
-          <p style="color:var(--suave)">Empleados que entran por esta misma página con su correo. Pueden ver y asignar envíos, ver pilotos y revisar clientes. No ven la caja, reportes, descuentos ni tarifas.</p>
+          <p class="bloque-nota">Empleados que entran por esta misma página con su correo. Pueden ver y asignar envíos, ver pilotos y revisar clientes. No ven la caja, reportes, descuentos ni tarifas.</p>
           <div id="lista-operadores"></div>
           <form id="form-operador" class="fila" style="align-items:end;margin-top:.75rem" novalidate>
             <div class="campo"><label for="op-nombre">Nombre</label><input id="op-nombre" maxlength="100"></div>
@@ -260,10 +316,11 @@
           </form>
         </div>
       </section>
+      </main>
     </div>
-  </main>
+  </div>
 
-  <dialog id="dlg"><div class="dialogo" id="dlg-cuerpo"></div></dialog>
+  <dialog id="dlg" class="hoja"><div class="dialogo" id="dlg-cuerpo"></div></dialog>
 
   <script src="/vendor/maplibre/maplibre-gl.js?v=4.7.1"></script>
   <script src="/js/comun.js?v=20261109c"></script>
@@ -273,8 +330,14 @@
     const sub = (t) => el('small', { style: 'color:var(--suave)', text: t || '' });
 
     const tabs = ['envios', 'mensajeros', 'clientes', 'caja', 'descuentos', 'reportes', 'tarifas'];
+    const TITULOS = { envios: ['Envíos', 'Pedidos y su estado'], mensajeros: ['Pilotos', 'Flota en vivo, documentos y aprobaciones'], clientes: ['Clientes', 'Identidad, empresas y calificaciones'],
+      caja: ['Caja', 'Efectivo, transferencias, pagos a pilotos y cargos'], descuentos: ['Descuentos', 'Promociones y cupones'], reportes: ['Reportes', 'Cómo va el negocio'],
+      tarifas: ['Tarifas y ajustes', 'Precios, zonas, sede y equipo'] };
     function abrirTab(nombre) {
       tabs.forEach(t => { $('tab-' + t).setAttribute('aria-selected', String(t === nombre)); $('panel-' + t).hidden = t !== nombre; });
+      $('titulo-seccion').textContent = TITULOS[nombre][0]; $('subtitulo-seccion').textContent = TITULOS[nombre][1];
+      $('cifras').hidden = nombre !== 'envios';
+      cerrarMenu();
       if (nombre === 'mensajeros') cargarMensajeros();
       if (nombre === 'clientes') cargarClientes();
       if (nombre === 'tarifas') { cargarTarifas(); cargarOperadores(); }
@@ -286,20 +349,26 @@
 
     async function cargarResumen() {
       const r = await api('/api/admin/resumen');
-      const c = (titulo, valor, destacada) => el('div', { class: 'cifra' + (destacada ? ' destacada' : '') }, el('span', { text: titulo }), el('strong', { text: valor }));
+      const atencion = ['fallido', 'devolviendo', 'a_sede', 'en_sede'].reduce((t, k) => t + (r.porEstado[k] || 0), 0);
+      // Franja tipo etiqueta: cada celda filtra la lista de envíos
+      const c = (titulo, valor, filtro, marcar) => el('button', { type: 'button', class: 'celda-cifra' + (marcar ? ' marcar' : '') + (filtro !== null && filtro === filtroEstado ? ' activa' : ''),
+        disabled: filtro === null, onclick: () => { if (filtro === null) return; filtroEstado = filtro; pintarChips(); cargarEnvios(); cargarResumen(); } },
+        el('span', { text: titulo }), el('strong', { text: String(valor) }));
       $('cifras').replaceChildren(
-        c('Sin piloto', r.sinAsignar, r.sinAsignar > 0),
-        c('Por recoger', r.porEstado.pendiente),
-        c('Recogidos', r.porEstado.recogido),
-        c('En camino', r.porEstado.en_camino),
-        c('Pedidos hoy', r.hoy),
-        c('Entregados este mes', r.entregadosMes),
-        r.ingresosMes != null ? c('Ingresos del mes', dinero(r.ingresosMes)) : '');
+        c('Sin piloto', r.sinAsignar, 'sin_asignar', r.sinAsignar > 0),
+        c('Requieren atención', atencion, 'atencion', atencion > 0),
+        c('Por recoger', r.porEstado.pendiente, 'pendiente'),
+        c('En camino', (r.porEstado.recogido || 0) + (r.porEstado.en_camino || 0), 'en_camino'),
+        c('Pedidos hoy', r.hoy, null),
+        c('Entregados este mes', r.entregadosMes, null),
+        r.ingresosMes != null ? c('Ingresos del mes', dinero(r.ingresosMes), null) : '');
+      const insignia = (id, n) => { const b = $(id); b.textContent = n > 99 ? '99+' : String(n); b.hidden = !n; };
+      insignia('insignia-envios', r.sinAsignar + atencion);
       if (r.rol !== rolPanel) aplicarRol(r.rol);
     }
 
     function pintarChips() {
-      const opciones = [['', 'Todos'], ['sin_asignar', 'Sin piloto'], ...Object.entries(ESTADOS)];
+      const opciones = [['', 'Todos'], ['sin_asignar', 'Sin piloto'], ['atencion', 'Requieren atención'], ...Object.entries(ESTADOS)];
       $('chips').replaceChildren(...opciones.map(([v, t]) => el('button', {
         class: 'chip', type: 'button', 'aria-pressed': String(v === filtroEstado), text: v === 'pendiente' ? 'Por recoger' : t,
         onclick: () => { filtroEstado = v; pintarChips(); cargarEnvios(); },
@@ -323,7 +392,11 @@
           el('td', {}, e.vehiculo, el('br'), sub(e.peso + ' lb')),
           el('td', {}, dinero(e.precio), el('br'), sub(e.tipo_tarifa === 'km' ? `${e.km} km` : 'Tarifa fija')),
           el('td', {}, e.mensajero_nombre ? [e.mensajero_nombre.split(' ')[0], e.asignacion === 'por_aceptar' ? el('br') : null, e.asignacion === 'por_aceptar' ? el('span', { class: 'etiqueta-azul', text: 'Por aceptar' }) : null] : el('span', { class: 'estado pendiente', text: 'Sin asignar' })),
-          el('td', {}, chipEstado(e.estado), e.estado === 'pendiente' && !e.receptor_listo ? [el('br'), el('span', { class: 'receptor-estado no', text: 'Faltan ubicaciones' })] : null))));
+          el('td', {}, chipEstado(e.estado),
+            e.estado === 'pendiente' && !e.receptor_listo ? [el('br'), el('span', { class: 'receptor-estado no', text: 'Faltan ubicaciones' })] : null,
+            e.estado === 'fallido' && e.fallo?.decidir_antes ? [el('br'), sub(`El cliente elige en ${faltaPara(e.fallo.decidir_antes)}`)] : null,
+            e.estado === 'en_sede' && e.sede ? [el('br'), sub(`${e.sede.dias} día(s) · ${dinero(e.sede.cargo)}`)] : null,
+            e.metodo_pago === 'transferencia' && e.pago_estado === 'por_revisar' ? [el('br'), el('span', { class: 'etiqueta-azul', text: 'Comprobante por revisar' })] : null))));
       } catch (e) { cuerpo.replaceChildren(el('tr', {}, el('td', { colspan: 8, class: 'mensaje error', text: e.message }))); }
     }
 
@@ -367,16 +440,58 @@
       pinta('vivo-destino', r || {}); pinta('vivo-origen', o || {});
     }
 
+    // ---------- Entrega fallida, sede y comprobante ----------
+    function bloqueFallidoPanel(e, guardar) {
+      const f = e.fallo;
+      if (!f && !e.sede && e.estado !== 'reenviado') return null;
+      const accion = (texto, body, clase = 'boton chico', pregunta) => el('button', { class: clase, type: 'button', text: texto, onclick: (ev) => {
+        if (pregunta && !confirm(pregunta)) return;
+        guardar(ev.target, () => api(`/api/admin/envios/${e.id}/fallido`, { body }));
+      } });
+      const decision = { devolver: 'Devolver a quien lo envió', sede: 'Guardar en la sede' };
+      return el('div', { class: 'bloque bloque-fallido' },
+        el('h3', {}, icono('alerta'), ' No se pudo entregar'),
+        f ? el('p', {}, el('strong', { text: f.motivo_texto }), f.nota ? '. ' + f.nota : '', el('br'), sub(`Reportado ${fecha(f.en)}`)) : null,
+        f && e.estado === 'fallido' ? el('p', { class: 'mensaje aviso' }, `Esperando que el cliente elija. Si no elige en ${faltaPara(f.decidir_antes)}, va a la sede. Puedes decidir por él si te llamó:`) : null,
+        f && f.decision ? el('p', { class: 'pista', text: `Decisión: ${decision[f.decision]} (${f.decidido_por}, ${fecha(f.decidido_en)})` }) : null,
+        e.sede ? el('p', {}, `En la sede desde ${fecha(e.sede.llegada)}${e.sede.salida ? ' hasta ' + fecha(e.sede.salida) : ''}: `, el('strong', { text: `${e.sede.dias} día(s), ${dinero(e.sede.cargo)}` })) : null,
+        e.reenviado_como ? el('p', {}, 'Sale de nuevo con la guía ', el('a', { href: '#', text: e.reenviado_como.guia, onclick: (ev) => { ev.preventDefault(); abrirEnvio(e.reenviado_como.id); } })) : null,
+        el('div', { class: 'navegar' },
+          e.estado === 'fallido' ? [accion(`Devolver (${dinero(f.cargo_devolucion)})`, { accion: 'devolver' }), accion('Guardar en la sede', { accion: 'sede' }, 'boton borde chico')] : null,
+          e.estado === 'a_sede' ? accion('Ya llegó a la sede', { accion: 'recibido' }) : null,
+          e.estado === 'en_sede' ? [
+            el('button', { class: 'boton chico', type: 'button', text: 'Lo retiraron en la sede', onclick: (ev) => {
+              const recibio = prompt(`¿Quién retiró el paquete? Se cobran ${dinero(e.sede.cargo)} de la sede más los cargos pendientes del cliente.`);
+              if (recibio) guardar(ev.target, () => api(`/api/admin/envios/${e.id}/fallido`, { body: { accion: 'retirar', recibio } }));
+            } }),
+            accion(`Enviar de nuevo (${dinero(f ? f.cargo_reentrega : 0)})`, { accion: 'reenviar' }, 'boton borde chico', 'Se crea un envío nuevo desde la sede hacia quien recibe. ¿Continuar?')] : null));
+    }
+    function bloqueComprobantePanel(e, guardar) {
+      const estado = { sin_comprobante: ['Sin comprobante todavía', 'etiqueta-gris'], por_revisar: ['Por revisar', 'etiqueta-azul'], verificado: ['Verificada', 'etiqueta-completa'], rechazado: ['Rechazado', 'etiqueta-pendiente'] }[e.pago_estado] || ['—', 'etiqueta-gris'];
+      return el('div', { class: 'bloque', style: 'background:var(--gris);border:0' },
+        el('h3', {}, 'Transferencia ', el('span', { class: estado[1], text: estado[0] })),
+        el('p', { class: 'pista', text: `Monto: ${dinero(e.precio + (e.cargos_extra || 0))}${e.pago_nota ? '. Nota: ' + e.pago_nota : ''}` }),
+        e.tiene_comprobante ? el('a', { class: 'prueba-img', href: `/api/admin/envios/${e.id}/comprobante`, target: '_blank', rel: 'noopener' },
+          el('img', { src: `/api/admin/envios/${e.id}/comprobante`, alt: 'Comprobante', onerror: (ev) => ev.target.replaceWith(el('span', { class: 'doc-pdf', text: 'Ver PDF del comprobante' })) })) : null,
+        e.pago_estado !== 'verificado' ? el('div', { class: 'navegar' },
+          el('button', { class: 'boton chico', type: 'button', text: 'El dinero entró: verificar', onclick: (ev) => guardar(ev.target, () => api(`/api/admin/pagos/${e.id}`, { body: { estado: 'verificado' } })) }),
+          e.tiene_comprobante ? el('button', { class: 'boton peligro chico', type: 'button', text: 'Rechazar comprobante', onclick: (ev) => {
+            const nota = prompt('¿Qué está mal? El cliente lo verá. Ej. El monto no coincide.');
+            if (nota) guardar(ev.target, () => api(`/api/admin/pagos/${e.id}`, { body: { estado: 'rechazado', nota } }));
+          } }) : null) : null);
+    }
+
     // ---------- Envío: asignar piloto, recorrido y datos ----------
     async function abrirEnvio(id) {
       const { envio: e, eventos, cliente, piloto } = await api('/api/admin/envios/' + id);
       const msg = el('div', { class: 'mensaje', role: 'alert' });
-      const selEstado = el('select', { id: 'nuevo-estado' }, Object.entries(ESTADOS).map(([v, t]) => el('option', { value: v, text: t, selected: v === e.estado })));
-      const nota = el('input', { id: 'nota-estado', maxlength: 300, placeholder: 'Ej. Recibió la señora de la casa' });
+      const selEstado = el('select', { id: 'nuevo-estado' }, ['pendiente', 'recogido', 'en_camino', 'entregado', 'cancelado'].map(v => el('option', { value: v, text: ESTADOS[v], selected: v === e.estado })));
+      const nota = el('input', { id: 'nota-estado', maxlength: 300, placeholder: 'Ej. El piloto se quedó sin batería y entregó en persona' });
+      const enCurso = ['pendiente', 'recogido', 'en_camino'].includes(e.estado);
       const dato = (t, ...v) => el('div', {}, el('span', { text: t }), ...v);
       const cajaMapa = el('div', { class: 'mapa' });
       const listaCercanos = el('div', { class: 'cercanos' }, el('p', { class: 'pista', text: 'Buscando pilotos…' }));
-      const cerrado = ['entregado', 'cancelado'].includes(e.estado);
+      const cerrado = !enCurso;
       const guardar = async (boton, fn) => {
         boton.disabled = true;
         try { await fn(); $('dlg').close(); cargarEnvios(); cargarResumen(); }
@@ -403,9 +518,16 @@
             e.codigo_entrega && !['entregado', 'cancelado'].includes(e.estado) ? dato('Código de entrega', el('strong', { style: 'letter-spacing:.2em', text: e.codigo_entrega })) : null,
             e.recibio ? dato('Recibió', `${e.recibio}${e.entregado_en ? ' · ' + fecha(e.entregado_en) : ''}`) : null,
             e.notas ? dato('Indicaciones', e.notas) : null,
-            e.calificacion ? dato('Calificación del cliente', `${e.calificacion} de 5${e.calificacion_comentario ? '. ' + e.calificacion_comentario : ''}`) : null),
+            e.calificacion ? dato('El cliente calificó al piloto', `${e.calificacion} de 5${e.calificacion_comentario ? '. ' + e.calificacion_comentario : ''}`) : null,
+            e.valor_declarado > 0 ? dato('Valor declarado', `${dinero(e.valor_declarado)}${e.seguro > 0 ? `, asegurado (${dinero(e.seguro)})` : ', sin seguro'}`) : null,
+            e.cargos_extra > 0 ? dato('Cargos cobrados con este envío', dinero(e.cargos_extra)) : null,
+            e.metodo_pago === 'transferencia' ? dato('Transferencia', { sin_comprobante: 'Sin comprobante', por_revisar: 'Comprobante por revisar', verificado: 'Verificada', rechazado: 'Comprobante rechazado' }[e.pago_estado] || '—') : null,
+            cliente && cliente.calif_cliente ? dato('Calificación de los pilotos a este cliente', `${cliente.calif_cliente} de 5 (${cliente.calif_cliente_n})`) : null,
+            e.reentrega_de ? dato('Nueva entrega de', e.reentrega_de) : null),
           msg,
-          bloqueReceptorPanel(e, msg, guardar),
+          bloqueFallidoPanel(e, guardar),
+          e.metodo_pago === 'transferencia' && rolPanel === 'admin' ? bloqueComprobantePanel(e, guardar) : null,
+          enCurso ? bloqueReceptorPanel(e, msg, guardar) : null,
           el('div', { class: 'bloque', style: 'background:var(--gris);border:0' },
             el('h3', {}, 'Piloto ', estadoPiloto),
             piloto ? el('p', { class: 'pista', text: [piloto.vehiculo, piloto.marca, piloto.modelo, piloto.color, piloto.placa].filter(Boolean).join(' · ') }) : null,
@@ -414,17 +536,20 @@
               listaCercanos,
               e.mensajero_id ? el('button', { class: 'boton borde chico', type: 'button', style: 'margin-top:.6rem', text: 'Quitar piloto', onclick: (ev) =>
                 guardar(ev.target, () => api(`/api/admin/envios/${e.id}/asignar`, { body: { mensajero_id: '' } })) }) : null)),
-          el('div', { class: 'bloque', style: 'background:var(--gris);border:0' },
+          !enCurso ? null : el('div', { class: 'bloque', style: 'background:var(--gris);border:0' },
             el('h3', { text: 'Cambiar estado a mano' }),
-            el('p', { class: 'pista', text: 'Normalmente cambia solo con el GPS del piloto. Úsalo si algo falla.' }),
+            el('p', { class: 'pista', text: 'Normalmente cambia solo con el GPS del piloto. Úsalo si algo falla y escribe el motivo: queda en el historial.' }),
             el('div', { class: 'fila' },
               el('div', { class: 'campo' }, el('label', { for: 'nuevo-estado', text: 'Nuevo estado' }), selEstado),
               el('div', { class: 'campo' }, el('label', { for: 'nota-estado' }, 'Nota ', el('span', { class: 'ayuda', text: 'El cliente la ve en el rastreo' })), nota)),
             el('button', { class: 'boton', type: 'button', text: 'Guardar estado', onclick: (ev) =>
               guardar(ev.target, () => api(`/api/admin/envios/${e.id}/estado`, { body: { estado: selEstado.value, nota: nota.value } })) })),
-          e.tiene_foto_entrega ? el('div', { class: 'prueba-fotos', style: 'margin-top:1rem' },
-            ...['foto', 'firma'].filter(t => t === 'foto' || e.tiene_firma_entrega).map(t => el('a', { class: 'prueba-img', href: `/api/admin/envios/${e.id}/entrega/${t}`, target: '_blank', rel: 'noopener' },
-              el('img', { src: `/api/admin/envios/${e.id}/entrega/${t}`, alt: t }), el('small', { text: t === 'foto' ? 'Foto de entrega' : 'Firma' })))) : null,
+          e.tiene_foto_entrega || e.tiene_foto_fallo ? el('div', { class: 'prueba-fotos', style: 'margin-top:1rem' },
+            ...['foto', 'firma', 'fallo'].filter(t => (t === 'foto' && e.tiene_foto_entrega) || (t === 'firma' && e.tiene_firma_entrega) || (t === 'fallo' && e.tiene_foto_fallo)).map(t => el('a', { class: 'prueba-img', href: `/api/admin/envios/${e.id}/entrega/${t}`, target: '_blank', rel: 'noopener' },
+              el('img', { src: `/api/admin/envios/${e.id}/entrega/${t}`, alt: t }), el('small', { text: { foto: e.estado === 'devuelto' ? 'Foto de la devolución' : 'Foto de entrega', firma: 'Firma', fallo: 'Foto del intento fallido' }[t] })))) : null,
+          e.cargos && e.cargos.length ? el('div', { class: 'ficha-seccion' }, el('h3', { text: 'Cargos' }), el('ul', { class: 'lista-simple' }, e.cargos.map(c =>
+            el('li', {}, `${TIPOS_CARGO[c.tipo] || c.tipo}: ${dinero(c.monto)} `, el('span', { class: c.anulado_en ? 'etiqueta-gris' : c.pagado_en || c.cobrado_envio_id ? 'etiqueta-completa' : 'etiqueta-pendiente',
+              text: c.anulado_en ? 'Anulado' : c.pagado_en ? 'Pagado' : c.cobrado_envio_id ? (c.cobrado_envio_id === e.id ? 'Se cobra con este envío' : 'Se cobra con otro envío') : 'Pendiente' }))))) : null,
           el('h3', { style: 'margin-top:1.25rem', text: 'Historial' }),
           el('ol', { class: 'linea-tiempo' }, eventos.slice().reverse().map(ev =>
             el('li', {}, el('strong', { text: ESTADOS[ev.estado] || ev.estado }), ev.nota ? el('div', { text: ev.nota }) : null, el('small', { text: fecha(ev.creado) })))),
@@ -669,7 +794,9 @@
       const r = await api('/api/admin/clientes');
       clientes = r.clientes;
       $('aviso-correo').replaceChildren(r.correo_activo ? '' : el('div', { class: 'mensaje aviso', text: 'El correo automático de confirmación todavía no está configurado, así que no se exige confirmar el correo. Mira el README para activarlo.' }));
-      if (!clientes.length) { $('tabla-clientes').replaceChildren(el('tr', {}, el('td', { colspan: 7, style: 'text-align:center;color:var(--suave);padding:2rem', text: 'Todavía no hay clientes.' }))); return; }
+      const porRevisar = clientes.filter(c => c.verificacion === 'por_revisar').length;
+      $('insignia-clientes').textContent = String(porRevisar); $('insignia-clientes').hidden = !porRevisar;
+      if (!clientes.length) { $('tabla-clientes').replaceChildren(el('tr', {}, el('td', { colspan: 9, style: 'text-align:center;color:var(--suave);padding:2rem', text: 'Todavía no hay clientes.' }))); return; }
       $('tabla-clientes').replaceChildren(...clientes.map(c => {
         const [txt, clase] = ESTADO_CLIENTE[c.verificacion] || ['', ''];
         return el('tr', { class: 'clic', tabindex: 0, onclick: () => revisarCliente(c.id), onkeydown: (ev) => { if (ev.key === 'Enter') revisarCliente(c.id); } },
@@ -678,6 +805,8 @@
           el('td', {}, c.telefono ? el('a', { href: 'https://wa.me/502' + c.telefono.replace(/\D/g, '').slice(-8), target: '_blank', rel: 'noopener', text: c.telefono, onclick: (ev) => ev.stopPropagation() }) : '—'),
           el('td', {}, el('span', { class: clase, text: txt })),
           el('td', { text: c.envios }),
+          el('td', {}, c.calif_cliente ? el('span', { class: c.calif_cliente < 3 ? 'etiqueta-pendiente' : 'etiqueta-gris', text: `${c.calif_cliente} de 5` }) : '—'),
+          el('td', {}, c.cargos_pendientes > 0 ? el('strong', { text: dinero(c.cargos_pendientes) }) : '—'),
           el('td', { text: fecha(c.creado, false) }),
           el('td', {}, el('button', { class: 'boton chico' + (c.verificacion === 'por_revisar' ? '' : ' borde'), type: 'button', text: 'Revisar', onclick: (ev) => { ev.stopPropagation(); revisarCliente(c.id); } })));
       }));
@@ -756,18 +885,90 @@
       $('tabla-zonas').replaceChildren(...t.zonas.map(z => {
         const nombre = el('input', { value: z.nombre, maxlength: 60, 'aria-label': 'Nombre de la zona' });
         const activa = el('input', { type: 'checkbox', checked: !!z.activa, style: 'width:auto', 'aria-label': 'Zona activa' });
-        return el('tr', {}, el('td', {}, nombre), el('td', {}, activa),
-          el('td', {}, el('button', { class: 'boton borde chico', type: 'button', text: 'Guardar', onclick: async () => {
-            try { await api('/api/admin/zonas/' + z.id, { method: 'PUT', body: { nombre: nombre.value, activa: activa.checked } }); mostrarMensaje($('msg-tarifas'), `${nombre.value} guardada.`, 'exito'); }
-            catch (e) { mostrarMensaje($('msg-tarifas'), e.message); }
-          } })));
+        const puntos = z.poligono ? JSON.parse(z.poligono) : null;
+        return el('tr', {}, el('td', {}, nombre),
+          el('td', {}, puntos ? el('span', { class: 'etiqueta-completa', text: `Dibujada (${puntos.length} puntos)` }) : el('span', { class: 'etiqueta-gris', text: 'Sin dibujar' })),
+          el('td', {}, activa),
+          el('td', {}, el('div', { style: 'display:flex;gap:.4rem;flex-wrap:wrap' },
+            el('button', { class: 'boton chico', type: 'button', text: puntos ? 'Redibujar' : 'Dibujar', onclick: () => dibujarZona(z) }),
+            el('button', { class: 'boton borde chico', type: 'button', text: 'Guardar', onclick: async () => {
+              try { await api('/api/admin/zonas/' + z.id, { method: 'PUT', body: { nombre: nombre.value, activa: activa.checked } }); mostrarMensaje($('msg-tarifas'), `${nombre.value} guardada.`, 'exito'); cargarTarifas(); }
+              catch (e) { mostrarMensaje($('msg-tarifas'), e.message); }
+            } }))));
       }));
+      pintarMapaZonas(t.zonas);
+      for (const k of CAMPOS_AJUSTES) if ($('aj-' + k)) $('aj-' + k).value = t.ajustes[k] ?? '';
+      if (!selectorSede) selectorSede = selectorPunto($('selector-sede'), { letra: 'S', clase: 'recogida', conMiUbicacion: true });
+      if (t.ajustes.sede_lat && t.ajustes.sede_lng) selectorSede.poner(Number(t.ajustes.sede_lat), Number(t.ajustes.sede_lng));
       $('whatsapp').value = t.ajustes.whatsapp || ''; $('horario').value = t.ajustes.horario || '';
       $('recargo-fragil').value = t.ajustes.recargo_fragil ?? 10; $('vigencia').value = t.ajustes.vigencia_antecedentes ?? 6;
       $('mapbox-token').value = t.ajustes.mapbox_token || '';
       $('auto-asignar').checked = t.ajustes.auto_asignar === '1'; $('exigir-receptor').checked = t.ajustes.exigir_receptor !== '0'; $('segundos-aceptar').value = t.ajustes.segundos_aceptar || 60;
       $('comision-tipo').value = t.ajustes.comision_tipo || 'porcentaje'; $('comision-valor').value = t.ajustes.comision_valor ?? 70; pintarAyudaComision();
     }
+
+    // ---------- Zonas dibujadas en el mapa ----------
+    const CAMPOS_AJUSTES = ['cargo_devolucion', 'cargo_bodega_dia', 'cargo_reentrega', 'horas_decidir_fallido', 'cargo_cancelacion', 'pct_piloto_cancelacion', 'sede_direccion',
+      'seguro_pct', 'seguro_minimo', 'responsabilidad_max', 'km_max_tarifa_fija', 'datos_transferencia', 'correo_respaldos'];
+    let mapaZonas = null, capaZonas = [], selectorSede = null;
+    const COLORES_ZONA = ['#1c3faa', '#d9480f', '#17824a', '#7b2cbf', '#0e7490', '#b4261c', '#a16207', '#be185d'];
+    function pintarMapaZonas(zonas) {
+      if (!mapaZonas) mapaZonas = crearMapa($('mapa-zonas'));
+      if (!mapaZonas) return;
+      capaZonas.forEach(x => x.quitar()); capaZonas = [];
+      const todos = [];
+      zonas.filter(z => z.poligono && z.activa).forEach((z, i) => {
+        const pts = JSON.parse(z.poligono).map(([ln, la]) => [la, ln]);
+        capaZonas.push(mapaZonas.poligono(pts, { color: COLORES_ZONA[i % COLORES_ZONA.length] }));
+        const c = pts.reduce((a, p) => [a[0] + p[0] / pts.length, a[1] + p[1] / pts.length], [0, 0]);
+        capaZonas.push(mapaZonas.marcador(c[0], c[1], { html: `<span class="nombre-zona">${z.nombre.replace(/[<>&]/g, '')}</span>`, ancla: 'center' }));
+        todos.push(...pts);
+      });
+      if (todos.length) mapaZonas.encuadrar(todos, { maxZoom: 13 });
+    }
+    function dibujarZona(z) {
+      let puntos = z.poligono ? JSON.parse(z.poligono).map(([ln, la]) => [la, ln]) : [];
+      const msg = el('div', { class: 'mensaje', role: 'alert' });
+      const caja = el('div', { class: 'mapa alto' });
+      const cuenta = el('span', { class: 'pista' });
+      $('dlg-cuerpo').replaceChildren(
+        el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: () => $('dlg').close() }),
+        el('h2', { text: `Dibujar ${z.nombre}` }),
+        el('p', { class: 'pista', text: 'Toca el mapa para poner cada esquina de la zona, siguiendo su borde. Con 3 puntos o más ya queda un área. Puedes deshacer el último punto.' }),
+        caja, cuenta, msg,
+        el('div', { class: 'navegar', style: 'margin-top:.75rem' },
+          el('button', { class: 'boton', type: 'button', text: 'Guardar zona', onclick: async (ev) => {
+            if (puntos.length && puntos.length < 3) { mostrarMensaje(msg, 'Pon al menos 3 puntos.'); return; }
+            ev.target.disabled = true;
+            try { await api('/api/admin/zonas/' + z.id, { method: 'PUT', body: { poligono: puntos.length ? puntos.map(([la, ln]) => [ln, la]) : null } }); $('dlg').close(); mostrarMensaje($('msg-tarifas'), `${z.nombre}: forma guardada.`, 'exito'); cargarTarifas(); }
+            catch (e) { mostrarMensaje(msg, e.message); ev.target.disabled = false; }
+          } }),
+          el('button', { class: 'boton borde', type: 'button', text: 'Deshacer punto', onclick: () => { puntos.pop(); pintar(); } }),
+          el('button', { class: 'boton peligro', type: 'button', text: 'Borrar forma', onclick: () => { puntos = []; pintar(); } })));
+      $('dlg').showModal();
+      const mapa = crearMapa(caja, { cooperativo: false });
+      if (!mapa) return;
+      const area = mapa.poligono(puntos), marcas = [];
+      function pintar() {
+        area.actualizar(puntos);
+        marcas.splice(0).forEach(m => m.quitar());
+        puntos.forEach(([la, ln]) => marcas.push(mapa.marcador(la, ln, { html: '<span class="vertice-zona"></span>', ancla: 'center' })));
+        cuenta.textContent = puntos.length ? `${puntos.length} punto(s)` : 'Sin forma: toca el mapa para empezar.';
+      }
+      mapa.alTocar((la, ln) => { puntos.push([la, ln]); pintar(); });
+      pintar();
+      if (puntos.length) mapa.encuadrar(puntos, { maxZoom: 15 }); else mapa.centrar(14.6349, -90.5069, 12);
+    }
+    const guardarAjustes = (form, claves, extra = {}) => form.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const body = { ...Object.fromEntries(claves.map(k => [k, $('aj-' + k).value])), ...(typeof extra === 'function' ? extra() : extra) };
+      try { await api('/api/admin/ajustes', { method: 'PUT', body }); mostrarMensaje($('msg-tarifas'), 'Guardado.', 'exito'); }
+      catch (e) { mostrarMensaje($('msg-tarifas'), e.message); }
+    });
+    guardarAjustes($('form-fallidos'), ['cargo_devolucion', 'cargo_bodega_dia', 'cargo_reentrega', 'horas_decidir_fallido', 'cargo_cancelacion', 'pct_piloto_cancelacion', 'sede_direccion'],
+      () => { const p = selectorSede && selectorSede.obtener(); return p ? { sede_lat: p.lat, sede_lng: p.lng } : {}; });
+    guardarAjustes($('form-seguro'), ['seguro_pct', 'seguro_minimo', 'responsabilidad_max', 'km_max_tarifa_fija', 'datos_transferencia']);
+    guardarAjustes($('form-respaldos'), ['correo_respaldos']);
 
     $('form-zona').addEventListener('submit', async (ev) => {
       ev.preventDefault();
@@ -783,6 +984,28 @@
       catch (e) { mostrarMensaje($('msg-tarifas'), e.message); }
     });
 
+    // Íconos de la barra lateral y del encabezado
+    document.querySelectorAll('.lateral-nav [data-icono]').forEach(b => b.prepend(icono(b.dataset.icono)));
+    $('boton-push').prepend(icono('campana')); $('boton-avisos').prepend(icono('sonido')); $('refrescar').prepend(icono('recargar'));
+    $('abrir-menu').append(icono('menu')); $('cerrar-sesion').prepend(icono('salir'));
+    // Menú en el celular
+    function cerrarMenu() { document.body.classList.remove('menu-abierto'); $('velo-menu').hidden = true; $('abrir-menu').setAttribute('aria-expanded', 'false'); }
+    $('abrir-menu').addEventListener('click', () => { document.body.classList.add('menu-abierto'); $('velo-menu').hidden = false; $('abrir-menu').setAttribute('aria-expanded', 'true'); });
+    $('velo-menu').addEventListener('click', cerrarMenu);
+    // Avisos push en este equipo (llegan aunque el panel esté cerrado)
+    async function pintarBotonPush() {
+      if (!pushDisponible()) { $('boton-push').hidden = true; return; }
+      let sub = null; try { sub = await suscripcionPush(); } catch { /* nada */ }
+      const activo = !!sub && Notification.permission === 'granted';
+      $('boton-push').classList.toggle('activo', activo);
+      $('boton-push').lastChild.textContent = activo ? 'Avisos activos' : 'Activar avisos';
+    }
+    $('boton-push').append(document.createTextNode(''));
+    $('boton-push').childNodes.forEach(n => { if (n.nodeType === 3 && n.textContent === 'Avisos') n.remove(); });
+    $('boton-push').addEventListener('click', async () => {
+      try { await activarPush(); await api('/api/push/probar', { body: {} }); } catch (e) { alert(e.message); }
+      pintarBotonPush();
+    });
     $('cerrar-sesion').addEventListener('click', async () => { try { await api('/api/logout', { body: {} }); } catch { /* igual */ } location.href = '/familiatecun'; });
     $('buscar').addEventListener('input', () => { clearTimeout(temporizador); temporizador = setTimeout(cargarEnvios, 300); });
     $('refrescar').addEventListener('click', () => { cargarResumen(); cargarEnvios(); revisarNuevos(); });
@@ -819,13 +1042,38 @@
       let c;
       try { c = await api('/api/admin/caja'); } catch (e) { mostrarMensaje($('msg-caja'), e.message); return; }
       const vacio = (t) => el('p', { class: 'pista', text: t });
+      // Transferencias por revisar y cargos a clientes
+      try {
+        const { pagos } = await api('/api/admin/pagos');
+        const porRevisar = pagos.filter(x => x.pago_estado === 'por_revisar').length;
+        $('insignia-caja').textContent = String(porRevisar); $('insignia-caja').hidden = !porRevisar;
+        const ETQ = { sin_comprobante: ['Sin comprobante', 'etiqueta-gris'], por_revisar: ['Por revisar', 'etiqueta-azul'], rechazado: ['Rechazado', 'etiqueta-pendiente'] };
+        $('caja-transferencias').replaceChildren(...(pagos.length ? pagos.map(x => el('div', { class: 'caja-fila' },
+          el('div', {}, el('strong', { text: x.guia }), ' ', el('span', { class: (ETQ[x.pago_estado] || ETQ.sin_comprobante)[1], text: (ETQ[x.pago_estado] || ETQ.sin_comprobante)[0] }), el('br'), sub(`${x.empresa_nombre || x.cliente} · ${fecha(x.creado)}`)),
+          el('strong', { class: 'caja-monto', text: dinero(x.precio + (x.cargos_extra || 0)) }),
+          el('button', { class: 'boton chico' + (x.pago_estado === 'por_revisar' ? '' : ' borde'), type: 'button', text: 'Revisar', onclick: () => abrirEnvio(x.id) }))) : [vacio('No hay transferencias pendientes.')]));
+        const { cargos } = await api('/api/admin/cargos');
+        const abiertos = cargos.filter(x => !x.pagado_en && !x.anulado_en);
+        $('caja-cargos').replaceChildren(...(abiertos.length ? abiertos.map(x => el('div', { class: 'caja-fila' },
+          el('div', {}, el('strong', { text: x.empresa_nombre || x.cliente }), el('br'), sub(`${TIPOS_CARGO[x.tipo] || x.tipo}${x.guia ? ' · ' + x.guia : ''}${x.cobrado_guia ? ' · se cobra con ' + x.cobrado_guia : ''}`)),
+          el('strong', { class: 'caja-monto', text: dinero(x.monto) }),
+          el('div', { style: 'display:flex;gap:.4rem' },
+            x.cobrado_envio_id ? null : el('button', { class: 'boton chico', type: 'button', text: 'Pagado', onclick: async () => {
+              if (!confirm(`¿${x.empresa_nombre || x.cliente} pagó ${dinero(x.monto)}?`)) return;
+              try { await api('/api/admin/cargos/' + x.id, { body: { accion: 'pagado' } }); cargarCaja(); } catch (e) { mostrarMensaje($('msg-caja'), e.message); }
+            } }),
+            el('button', { class: 'boton peligro chico', type: 'button', text: 'Anular', onclick: async () => {
+              const nota = prompt('¿Por qué se anula este cargo?'); if (!nota) return;
+              try { await api('/api/admin/cargos/' + x.id, { body: { accion: 'anular', nota } }); cargarCaja(); } catch (e) { mostrarMensaje($('msg-caja'), e.message); }
+            } })))) : [vacio('No hay cargos pendientes.')]));
+      } catch (e) { mostrarMensaje($('msg-caja'), e.message); }
       const efectivo = c.pilotos.filter(p => p.efectivo > 0);
       $('caja-efectivo').replaceChildren(...(efectivo.length ? efectivo.map(p => {
         const recibido = el('input', { type: 'number', min: 0, step: '0.01', value: p.efectivo.toFixed(2), 'aria-label': 'Efectivo recibido' });
         const nota = el('input', { maxlength: 300, placeholder: 'Nota (opcional)', 'aria-label': 'Nota' });
         return el('div', { class: 'caja-piloto' },
           el('div', { class: 'caja-cab' }, el('div', {}, el('strong', { text: p.nombre }), el('br'), sub(`${p.envios_efectivo} envíos`)), el('strong', { class: 'caja-monto', text: dinero(p.efectivo) })),
-          el('details', {}, el('summary', { text: 'Ver envíos' }), el('ul', {}, p.detalle.map(d => el('li', { text: `${d.guia}: ${dinero(d.efectivo)} (${d.metodo_pago === 'efectivo' ? 'envío ' + dinero(d.precio) : 'transferencia'}${d.cobro_destinatario > 0 ? ' + cobro ' + dinero(d.cobro_destinatario) : ''})` })))),
+          el('details', {}, el('summary', { text: 'Ver envíos' }), el('ul', {}, p.detalle.map(d => el('li', { text: `${d.guia}: ${dinero(d.efectivo)}` })))),
           el('div', { class: 'fila', style: 'align-items:end' }, el('div', { class: 'campo' }, el('label', { text: 'Recibido en la sede (Q)' }), recibido), el('div', { class: 'campo' }, el('label', { text: 'Nota' }), nota),
             el('div', { class: 'campo' }, el('button', { class: 'boton', type: 'button', text: 'Registrar entrega', onclick: async (ev) => {
               if (!confirm(`¿${p.nombre} entregó ${dinero(Number(recibido.value))}?`)) return;
@@ -839,7 +1087,7 @@
       }) : [vacio('Ningún piloto tiene efectivo pendiente.')]));
       const pagos = c.pilotos.filter(p => p.ganancia > 0);
       $('caja-pagos').replaceChildren(...(pagos.length ? pagos.map(p => el('div', { class: 'caja-fila' },
-        el('div', {}, el('strong', { text: p.nombre }), el('br'), sub(`${p.envios_ganancia} entregas`)), el('strong', { class: 'caja-monto', text: dinero(p.ganancia) }),
+        el('div', {}, el('strong', { text: p.nombre }), el('br'), sub(`${p.envios_ganancia} envíos terminados`)), el('strong', { class: 'caja-monto', text: dinero(p.ganancia) }),
         el('button', { class: 'boton chico', type: 'button', text: 'Registrar pago', onclick: async () => {
           if (!confirm(`¿Le pagaste ${dinero(p.ganancia)} a ${p.nombre}?`)) return;
           try { await api('/api/admin/caja/pagar-piloto', { body: { piloto_id: p.id } }); cargarCaja(); } catch (e) { mostrarMensaje($('msg-caja'), e.message); }
@@ -941,7 +1189,7 @@
       $('rep-excel').href = '/api/admin/reportes/csv?' + q;
       const r = await api('/api/admin/reportes?' + q), g = r.general;
       const c = (t, v) => el('div', { class: 'cifra' }, el('span', { text: t }), el('strong', { text: v }));
-      $('rep-cifras').replaceChildren(c('Envíos', String(g.envios)), c('Entregados', String(g.entregados)), c('Cancelados', String(g.cancelados)),
+      $('rep-cifras').replaceChildren(c('Envíos', String(g.envios)), c('Entregados', String(g.entregados)), c('No entregados', String(g.fallidos)), c('Cancelados', String(g.cancelados)),
         c('Ingresos', dinero(g.ingresos)), c('Descuentos dados', dinero(g.descuentos)), c('Pago a pilotos', dinero(g.pagos_pilotos)),
         c('Ticket promedio', dinero(g.ticket)), c('Tiempo de entrega', g.minutos != null ? `${g.minutos} min` : '—'), c('Clientes', String(g.clientes)));
       const diaCorto = (d) => new Date(d + 'T12:00:00').toLocaleDateString('es-GT', { weekday: 'short', day: 'numeric', month: 'short' });
@@ -952,6 +1200,7 @@
       $('rep-pilotos').replaceChildren(tablaSimple(['Piloto', 'Entregas', 'Calificación', 'Minutos promedio', 'Ganó'],
         r.pilotos.map(p => [p.nombre, String(p.entregas), p.calificacion ? `${p.calificacion} de 5` : '—', p.minutos != null ? String(p.minutos) : '—', dinero(p.ganancia)])));
       $('rep-promos').replaceChildren(tablaSimple(['Promoción', 'Usos', 'Descontado'], r.promos.map(p => [p.nombre, String(p.usos), dinero(p.descontado)])));
+      $('rep-cargos').replaceChildren(tablaSimple(['Tipo', 'Cantidad', 'Monto'], (r.cargos || []).map(x => [TIPOS_CARGO[x.tipo] || x.tipo, String(x.n), dinero(x.monto)])));
     }
     $('rep-ver').addEventListener('click', () => { pintarRangos(''); cargarReportes(); });
 
@@ -1088,7 +1337,8 @@
     function marcarVistos() { pendientes.clear(); guardarVisto(); pintarAviso(); cargarEnvios(); }
 
     function pintarBotonSonido() {
-      $('boton-avisos').textContent = sonido ? 'Sonido activado' : 'Sonido apagado';
+      $('boton-avisos').lastChild.textContent = sonido ? 'Sonido activado' : 'Sonido apagado';
+      $('boton-avisos').classList.toggle('apagado', !sonido);
       $('boton-avisos').setAttribute('aria-pressed', String(sonido));
     }
     $('boton-avisos').addEventListener('click', () => {
@@ -1115,6 +1365,9 @@
       try { usuario = (await api('/api/yo')).usuario; } catch { /* sin sesión */ }
       if (!usuario || !['admin', 'operador'].includes(usuario.rol)) { location.href = '/familiatecun'; return; }
       aplicarRol(usuario.rol === 'operador' ? 'operador' : 'admin');
+      $('nombre-usuario').textContent = usuario.nombre; $('avatar-usuario').textContent = (usuario.nombre || 'V').charAt(0).toUpperCase();
+      $('rol-usuario').textContent = usuario.rol === 'operador' ? 'Oficina' : 'Administración';
+      pintarBotonPush();
       pintarChips(); pintarBotonSonido(); pintarAviso(); cargarResumen();
       await revisarNuevos(true); cargarEnvios();
       setInterval(() => revisarNuevos(), 15000);

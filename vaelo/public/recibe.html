@@ -214,6 +214,14 @@
     function pantallaCerrada(r) {
       if (r.rol === 'entrega' && r.estado !== 'cancelado') return [...encabezado(r),
         el('div', { class: 'mensaje exito', text: 'El piloto ya recogió el paquete. Gracias. Ya no se comparte tu ubicación.' })];
+      // El piloto no pudo entregar: quien envía decide si se devuelve o se guarda en la sede
+      if (['fallido', 'devolviendo', 'devuelto', 'a_sede', 'en_sede', 'reenviado'].includes(r.estado)) return [...encabezado(r),
+        el('div', { class: 'mensaje aviso' }, el('strong', { text: 'No pudimos entregarte el paquete' }), el('br'),
+          { fallido: `Le avisamos a ${r.remitente} para que decida qué hacer. Si quieres recibirlo, comunícate con ${r.remitente}.`,
+            devolviendo: `El paquete se está devolviendo a ${r.remitente}.`, devuelto: `El paquete se devolvió a ${r.remitente}.`,
+            a_sede: 'El paquete va a la sede de Vaelo. Comunícate con quien te lo envió para recogerlo o recibirlo de nuevo.',
+            en_sede: 'El paquete está en la sede de Vaelo. Comunícate con quien te lo envió para recogerlo o recibirlo de nuevo.',
+            reenviado: 'El paquete va en camino otra vez. Recarga esta página para seguirlo.' }[r.estado])];
       if (r.estado === 'cancelado') return [el('h1', { text: 'Envío cancelado' }), el('p', { text: `${r.remitente} canceló este envío (guía ${r.guia}). Ya no se comparte tu ubicación.` })];
       return [...encabezado(r),
         el('div', { class: 'mensaje exito' }, r.recibio ? `Lo recibió ${r.recibio}` : 'Tu paquete fue entregado', r.entregado_en ? ` el ${fecha(r.entregado_en)}.` : '.', ' Ya no se comparte tu ubicación.'),

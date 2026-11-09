@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Contraseña nueva · Vaelo</title>
+  <meta name="theme-color" content="#0e2463">
+  <link rel="icon" href="/img/favicon.png" type="image/png">
+  <link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/styles.css?v=20261109b">
+</head>
+<body>
+  <header id="barra" class="barra"><div class="contenedor"><a href="/" class="marca"><img src="/img/logo-blanco.png" alt="Vaelo" width="139" height="40"></a></div></header>
+  <main class="acceso">
+    <form class="tarjeta-acceso" id="pedir" novalidate>
+      <h1>¿Olvidaste tu contraseña?</h1>
+      <p style="color:var(--suave)">Escribe el correo de tu cuenta (de cliente o de piloto). Te mandamos un enlace para crear una contraseña nueva.</p>
+      <div id="msg" class="mensaje" role="alert"></div>
+      <div class="campo"><label for="email">Correo</label><input id="email" type="email" autocomplete="email" required></div>
+      <button class="boton" type="submit">Mandarme el enlace</button>
+      <p class="alterno"><a href="/entrar">Volver a entrar</a></p>
+    </form>
+    <form class="tarjeta-acceso" id="nueva" novalidate hidden>
+      <h1>Crea tu contraseña nueva</h1>
+      <div id="msg2" class="mensaje" role="alert"></div>
+      <div class="campo"><label for="password">Contraseña nueva <span class="ayuda">Mínimo 8 caracteres</span></label><input id="password" type="password" autocomplete="new-password" minlength="8" required></div>
+      <div class="campo"><label for="password2">Escríbela otra vez</label><input id="password2" type="password" autocomplete="new-password" required></div>
+      <button class="boton" type="submit">Guardar contraseña</button>
+    </form>
+  </main>
+  <script src="/js/comun.js?v=20261109c"></script>
+  <script>
+    pintarBarra();
+    const $ = (id) => document.getElementById(id);
+    const token = new URLSearchParams(location.search).get('t') || '';
+    if (/^[a-f0-9]{64}$/.test(token)) { $('pedir').hidden = true; $('nueva').hidden = false; }
+    $('pedir').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const b = ev.target.querySelector('button'); b.disabled = true;
+      try {
+        await api('/api/clave/olvide', { body: { email: $('email').value } });
+        mostrarMensaje($('msg'), 'Si ese correo tiene una cuenta, te llegará un enlace en unos minutos. Revisa también la carpeta de spam.', 'exito');
+      } catch (e) { mostrarMensaje($('msg'), e.message); b.disabled = false; }
+    });
+    $('nueva').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      if ($('password').value !== $('password2').value) { mostrarMensaje($('msg2'), 'Las dos contraseñas no son iguales.'); return; }
+      const b = ev.target.querySelector('button'); b.disabled = true;
+      try {
+        const r = await api('/api/clave/nueva', { body: { token, password: $('password').value } });
+        mostrarMensaje($('msg2'), 'Listo. Ya puedes entrar con tu contraseña nueva.', 'exito');
+        setTimeout(() => { location.href = r.destino; }, 1500);
+      } catch (e) { mostrarMensaje($('msg2'), e.message); b.disabled = false; }
+    });
+  </script>
+</body>
+</html>

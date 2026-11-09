@@ -1,5 +1,5 @@
 // Permite instalar Vaelo como app en el celular. Guarda solo archivos de diseño; los datos siempre se piden en vivo.
-const CACHE = 'vaelo-v10';
+const CACHE = 'vaelo-v11';
 const ARCHIVOS = ['/css/styles.css', '/js/comun.js', '/img/logo-blanco.png', '/img/logo-negro.png', '/img/icono-192.png'];
 
 self.addEventListener('install', (ev) => {
@@ -25,8 +25,19 @@ self.addEventListener('notificationclick', (ev) => {
   ev.notification.close();
   const destino = (ev.notification.data && ev.notification.data.url) || '/familiatecun';
   ev.waitUntil(self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((ventanas) => {
-    const abierta = ventanas.find((v) => new URL(v.url).pathname === destino);
-    if (abierta) return abierta.focus();
-    return self.clients.openWindow(destino);
+    const url = new URL(destino, self.location.origin);
+    const abierta = ventanas.find((v) => new URL(v.url).pathname === url.pathname);
+    if (abierta) return (url.search && abierta.navigate ? abierta.navigate(url.href) : Promise.resolve(abierta)).then((v) => (v || abierta).focus());
+    return self.clients.openWindow(url.href);
+  }));
+});
+
+// Avisos que manda el servidor aunque Vaelo esté cerrado
+self.addEventListener('push', (ev) => {
+  let d = {};
+  try { d = ev.data ? ev.data.json() : {}; } catch { d = { titulo: 'Vaelo', cuerpo: ev.data ? ev.data.text() : '' }; }
+  ev.waitUntil(self.registration.showNotification(d.titulo || 'Vaelo', {
+    body: d.cuerpo || '', icon: '/img/icono-192.png', badge: '/img/icono-192.png', tag: d.etiqueta || 'vaelo', renotify: true,
+    vibrate: d.urgente ? [300, 100, 300, 100, 300] : [200, 100, 200], requireInteraction: !!d.urgente, data: { url: d.url || '/' },
   }));
 });

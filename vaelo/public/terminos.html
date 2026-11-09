@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Términos del servicio · Vaelo</title>
+  <meta name="theme-color" content="#0e2463">
+  <link rel="icon" href="/img/favicon.png" type="image/png">
+  <link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/styles.css?v=20261109b">
+</head>
+<body>
+  <header id="barra" class="barra"><div class="contenedor"><a href="/" class="marca"><img src="/img/logo-blanco.png" alt="Vaelo" width="139" height="40"></a></div></header>
+  <main class="area documento-legal"><div class="contenedor">
+    <h1>Términos del servicio</h1>
+    <p class="pista">Vigentes desde el 9 de noviembre de 2026. Los montos de esta página se toman en vivo de las tarifas actuales de Vaelo.</p>
+
+    <h2>1. El servicio</h2>
+    <p>Vaelo Mensajería recoge paquetes y los entrega dentro de Guatemala en moto o pickup. Para pedir un envío necesitas una cuenta con datos reales. Quien pide el envío (el cliente) es responsable de que los datos de quien entrega y de quien recibe sean correctos.</p>
+
+    <h2>2. Precios</h2>
+    <p>Dentro de las zonas cubiertas se cobra una tarifa fija cuando la recogida y la entrega reales están dentro de esas zonas. Fuera de ellas se cobra un precio de arranque más un monto por kilómetro. Como el punto de entrega es la ubicación que comparte quien recibe, el precio final puede ajustarse si esa ubicación queda fuera de las zonas cubiertas o se mueve más de 1 km; el cambio queda registrado en el historial del envío y se te avisa.</p>
+
+    <h2>3. Qué no transportamos</h2>
+    <ul>
+      <li>Armas, municiones, explosivos o partes de armas.</li>
+      <li>Drogas o sustancias prohibidas, y medicamentos controlados sin receta.</li>
+      <li>Dinero en efectivo, joyas o valores, salvo acuerdo previo por escrito.</li>
+      <li>Animales vivos, alimentos perecederos sin empaque adecuado, materiales inflamables, corrosivos o tóxicos.</li>
+      <li>Cualquier artículo prohibido por la ley de Guatemala.</li>
+    </ul>
+    <p>El piloto puede negarse a recoger un paquete que parezca estar en esta lista o que no esté bien empacado.</p>
+
+    <h2>4. Entrega segura</h2>
+    <p>Cada envío tiene un código de 4 números que solo ve quien recibe. El piloto entrega el paquete cuando recibe ese código, toma una foto y anota quién lo recibió. Con eso el envío queda entregado.</p>
+
+    <h2>5. Si no se puede entregar</h2>
+    <p>Si quien recibe no contesta, no está, la dirección es incorrecta o rechaza el paquete, el piloto lo reporta desde el lugar y te avisamos. Tú eliges:</p>
+    <ul>
+      <li><strong>Devolverte el paquete</strong> en el punto de recogida: se cobran <span data-cargo="devolucion">Q35.00</span>.</li>
+      <li><strong>Guardarlo en nuestra sede</strong>: se cobran <span data-cargo="bodega_dia">Q20.00</span> por cada día o fracción, hasta que se entregue. Desde la sede puedes recogerlo o pedir que lo llevemos de nuevo (<span data-cargo="reentrega">Q35.00</span> más los días en la sede).</li>
+    </ul>
+    <p>Si no eliges en <span data-cargo="horas_decidir">2</span> horas, el paquete va a la sede. El precio del envío original se cobra igual, porque el viaje se hizo.</p>
+
+    <h2>6. Cancelaciones</h2>
+    <p>Puedes cancelar sin costo mientras el paquete no se haya recogido y ningún piloto haya aceptado el envío. Si el piloto ya va en camino a recoger, cancelar cuesta <span data-cargo="cancelacion">Q15.00</span>. Los cargos pendientes se suman a tu siguiente envío.</p>
+
+    <h2>7. Responsabilidad y seguro</h2>
+    <p>Si un paquete se pierde o se daña mientras está a cargo de Vaelo, respondemos hasta <span data-seguro="responsabilidad_max">Q300.00</span> por envío sin seguro. Si declaras el valor del contenido y lo aseguras (<span data-seguro="pct">2</span>% del valor, mínimo <span data-seguro="minimo">Q5.00</span>), respondemos hasta el valor declarado. Los reclamos se presentan dentro de las 72 horas después de la entrega, con fotos del paquete y del contenido. No respondemos por paquetes mal empacados, artículos prohibidos o daños que ya tenía el paquete al recogerlo.</p>
+
+    <h2>8. Pagos</h2>
+    <p>Puedes pagar en efectivo al piloto, por transferencia (subiendo el comprobante) o, en cuentas de empresa autorizadas, a fin de mes. El dinero que el piloto cobra a quien recibe (cobro contra entrega) se entrega a la tienda o cliente que mandó el paquete.</p>
+
+    <h2>9. Ubicación en vivo</h2>
+    <p>Para recoger y entregar, quien entrega y quien recibe comparten su ubicación con el piloto mientras el envío está activo. Ver el <a href="/privacidad">aviso de privacidad</a>.</p>
+
+    <h2>10. Cambios</h2>
+    <p>Podemos actualizar estos términos. Los cambios se publican en esta página y aplican a los envíos que se pidan después.</p>
+    <p>Dudas: escríbenos por WhatsApp desde la <a href="/">página principal</a>.</p>
+  </div></main>
+  <footer class="pie-sitio"><div class="contenedor"><div>Vaelo Mensajería · Guatemala</div><div><a href="/terminos">Términos</a> · <a href="/privacidad">Privacidad</a></div></div></footer>
+  <script src="/js/comun.js?v=20261109c"></script>
+  <script>
+    pintarBarra();
+    api('/api/config').then((c) => {
+      const t = { devolucion: dinero(c.cargos.devolucion), bodega_dia: dinero(c.cargos.bodega_dia), reentrega: dinero(c.cargos.reentrega), cancelacion: dinero(c.cargos.cancelacion), horas_decidir: String(c.cargos.horas_decidir) };
+      document.querySelectorAll('[data-cargo]').forEach(n => { n.textContent = t[n.dataset.cargo]; });
+      const s = { responsabilidad_max: dinero(c.seguro.responsabilidad_max), pct: String(c.seguro.pct), minimo: dinero(c.seguro.minimo) };
+      document.querySelectorAll('[data-seguro]').forEach(n => { n.textContent = s[n.dataset.seguro]; });
+    }).catch(() => {});
+  </script>
+</body>
+</html>
