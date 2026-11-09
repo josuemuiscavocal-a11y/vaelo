@@ -593,12 +593,8 @@ body:has(.boton-emergencia:not([hidden])) main { padding-bottom: 6rem; }
 .persona-piloto { margin-top: .6rem; }
 .persona-piloto .cliente-piloto { align-items: flex-start; }
 .sin-foto-chica { width: 56px; height: 56px; border-radius: 50%; background: #fff; display: grid; place-items: center; font-weight: 800; font-size: 1.3rem; color: var(--azul-hondo); flex: none; }
-.apps-android { display: grid; gap: 1rem; }
-.app-android { background: var(--gris); border-radius: var(--radio); padding: 1rem; }
-.app-android h3 { margin: 0 0 .4rem; }
-.app-android textarea { width: 100%; }
 
-/* Página principal: apps para Android */
+/* Página principal: instalar la app desde Chrome */
 .llamado-apps { background: var(--cinta); padding: 3.5rem 0; }
 .llamado-apps h2 { margin: 0 0 1.5rem; }
 .apps-tarjetas { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 1.25rem; }

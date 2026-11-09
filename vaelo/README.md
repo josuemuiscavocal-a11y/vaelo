@@ -53,12 +53,12 @@ Página web y app (instalable en el celular) de Vaelo, mensajería en moto y pic
 - Hasta tener las dos ubicaciones no se busca piloto ni se puede recoger. En cada envío el panel puede autorizar una excepción con motivo; también se puede apagar en Tarifas y ajustes ("Pedir ubicaciones en vivo antes de recoger").
 - Quien envía no ve la ubicación de quien recibe, ni aparece en el rastreo público. Las ubicaciones se dejan de compartir al recoger y al entregar, y se borran 30 días después.
 
-## App para Android (.apk, se descarga solo desde la página)
+## App en el celular (se instala desde Chrome, sin .apk ni Play Store)
 
-1. En pwabuilder.com escribe `https://vaelomensajeria.com` (app de clientes) o `https://vaelomensajeria.com/modomensajero` (app de pilotos) y genera el paquete de Android. Descarga el zip.
-2. Guarda en un lugar seguro la llave de firma que viene en el zip (signing.keystore y su contraseña): sin ella no podrás publicar actualizaciones de la misma app.
-3. Panel > Tarifas y ajustes > App para Android: sube el `.apk` y pega el contenido de `assetlinks.json`.
-4. La app de clientes aparece en la página principal (`/descargas/vaelo.apk`); la de pilotos solo dentro de /modomensajero (`/descargas/vaelo-piloto.apk`). El servidor publica `/.well-known/assetlinks.json` solo.
+- **Clientes:** en la página principal, el recuadro "Instala la app de Vaelo en tu celular" tiene el botón **Instalar la app**. Chrome abre su ventana para instalar y la app queda en la pantalla de inicio (abre en `/mi-cuenta`).
+- **Pilotos:** el recuadro "¿Buscas trabajo?" lleva a `/modomensajero`, donde aparece el aviso **Instala Vaelo Pilotos en tu celular** (abre en `/modomensajero`).
+- Si el navegador no muestra la ventana para instalar, la página explica los pasos: en Chrome, menú ⋮ → "Instalar app" o "Agregar a pantalla principal"; en iPhone, Safari → Compartir → "Agregar a pantalla de inicio".
+- No hay nada que subir en el panel. Ya no existen `/descargas/vaelo.apk`, `/descargas/vaelo-piloto.apk` ni `/.well-known/assetlinks.json`.
 
 ## Correo de confirmación (Resend)
 

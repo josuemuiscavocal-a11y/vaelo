@@ -123,24 +123,23 @@
         <div class="apps-tarjetas">
           <article class="app-tarjeta">
             <span class="app-icono" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="2.5"></rect><path d="M10.5 18.5h3"></path><path d="M12 7v6m-2.5-2.5L12 13l2.5-2.5"></path></svg></span>
-            <h3>Haz pedidos más rápido con nuestra app para Android</h3>
-            <p>Pide tu envío y síguelo en el mapa desde tu celular, sin abrir el navegador.</p>
+            <h3>Instala la app de Vaelo en tu celular</h3>
+            <p>Pide tu envío y síguelo en el mapa desde tu celular. Se instala directo desde esta página con Chrome, sin Play Store y sin descargar archivos.</p>
             <div class="app-acciones">
-              <a class="boton" id="descargar-apk" href="/descargas/vaelo.apk" hidden>Descargar la app</a>
-              <button class="boton" type="button" id="instalar" hidden>Instalar la app</button>
+              <button class="boton" type="button" id="instalar">Instalar la app</button>
               <a class="boton borde" href="/registro" id="crear">Crear mi cuenta</a>
             </div>
-            <small class="app-nota" id="ayuda-apk" hidden>Al abrir el archivo, tu teléfono te pedirá permitir la instalación desde el navegador. Es normal: la app se descarga desde nuestra página, no desde Play Store.</small>
-            <small class="app-nota" id="ayuda-ios" hidden>En iPhone: abre esta página en Safari, toca Compartir y elige “Agregar a pantalla de inicio”.</small>
+            <small class="app-nota" id="ayuda-instalar" hidden></small>
+            <small class="app-nota" id="ya-instalada" hidden>Ya tienes la app instalada. Búscala en tu pantalla de inicio.</small>
           </article>
-          <article class="app-tarjeta oscura" id="tarjeta-trabajo" hidden>
+          <article class="app-tarjeta oscura" id="tarjeta-trabajo">
             <span class="app-icono" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="16.5" r="3"></circle><circle cx="19" cy="16.5" r="3"></circle><path d="M5 16.5h5l3.5-6H17l2 6"></path><path d="M14.5 6.5h2.5l1.5 4"></path><path d="M7 10.5h5"></path></svg></span>
             <h3>¿Buscas trabajo?</h3>
-            <p>Únete como piloto de Vaelo con tu moto o pickup. Descarga la app de pilotos, regístrate y te avisamos cuando revisemos tus datos.</p>
+            <p>Únete como piloto de Vaelo con tu moto o pickup. Abre la app de pilotos, instálala en tu celular desde Chrome, regístrate y te avisamos cuando revisemos tus datos.</p>
             <div class="app-acciones">
-              <a class="boton cinta" id="descargar-apk-piloto" href="/descargas/vaelo-piloto.apk">Descargar la app de pilotos</a>
+              <a class="boton cinta" href="/modomensajero">Abrir la app de pilotos</a>
             </div>
-            <small class="app-nota">Necesitas DPI, licencia vigente, antecedentes penales y policiacos, y moto o pickup con placa. App para Android.</small>
+            <small class="app-nota">Necesitas DPI, licencia vigente, antecedentes penales y policiacos, y moto o pickup con placa.</small>
           </article>
         </div>
       </div>
@@ -154,30 +153,22 @@
     </div>
   </footer>
 
-  <script src="/js/comun.js?v=20261109b"></script>
+  <script src="/js/comun.js?v=20261109c"></script>
   <script>
     pintarBarra();
 
-    // Botón para instalar la app (Android / Chrome)
-    let avisoInstalar = null;
-    window.addEventListener('beforeinstallprompt', (ev) => { ev.preventDefault(); avisoInstalar = ev; const b = document.getElementById('instalar'); if (b) b.hidden = false; });
-    document.getElementById('instalar').addEventListener('click', async () => { if (avisoInstalar) { avisoInstalar.prompt(); avisoInstalar = null; } });
-    if (/iphone|ipad/i.test(navigator.userAgent) && !navigator.standalone) document.getElementById('ayuda-ios').hidden = false;
+    // Botón para instalar la app desde Chrome (sin .apk)
+    if (yaInstalada()) { document.getElementById('instalar').hidden = true; document.getElementById('ya-instalada').hidden = false; }
+    document.getElementById('instalar').addEventListener('click', async () => {
+      if (await pedirInstalar()) return;
+      const ayuda = document.getElementById('ayuda-instalar');
+      ayuda.textContent = pasosInstalar(); ayuda.hidden = false;
+    });
+    document.addEventListener('vaelo-instalada', () => { document.getElementById('instalar').hidden = true; document.getElementById('ya-instalada').hidden = false; document.getElementById('ayuda-instalar').hidden = true; });
 
     (async () => {
       let cfg;
       try { cfg = await api('/api/config'); } catch { return; }
-      if (cfg.app) {
-        const a = document.getElementById('descargar-apk');
-        a.href = cfg.app.url; a.hidden = false;
-        document.getElementById('ayuda-apk').hidden = false;
-        document.getElementById('instalar').remove();
-      }
-      if (cfg.app_piloto) {
-        const a = document.getElementById('descargar-apk-piloto');
-        a.href = cfg.app_piloto.url;
-        document.getElementById('tarjeta-trabajo').hidden = false;
-      }
       const vehs = document.getElementById('cot-vehiculos');
       vehs.replaceChildren(...cfg.vehiculos.map((v, i) => el('label', { class: 'opcion' },
         el('input', { type: 'radio', name: 'cot-veh', value: v.id, checked: i === 0 }),

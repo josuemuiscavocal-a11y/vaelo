@@ -543,26 +543,39 @@ async function notificacionSistema(titulo, cuerpo, url, etiqueta) {
   } catch { try { new Notification(titulo, op); } catch { /* sin notificación */ } }
 }
 
-// ---------- Instalar como app (celular y computadora) ----------
+// ---------- Instalar como app desde Chrome (celular y computadora, sin .apk ni Play Store) ----------
 let eventoInstalar = null;
 const yaInstalada = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const esIos = () => /iphone|ipad|ipod/i.test(navigator.userAgent);
+const esCelular = () => /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent);
+const pasosInstalar = () => esIos()
+  ? 'En Safari toca el botón Compartir (el cuadro con la flecha) y luego "Agregar a pantalla de inicio".'
+  : 'En Chrome toca el menú ⋮ (arriba a la derecha) y elige "Instalar app" o "Agregar a pantalla principal".';
 window.addEventListener('beforeinstallprompt', (ev) => { ev.preventDefault(); eventoInstalar = ev; document.dispatchEvent(new Event('vaelo-instalable')); });
+window.addEventListener('appinstalled', () => { eventoInstalar = null; document.dispatchEvent(new Event('vaelo-instalada')); });
+// Abre la ventana de Chrome para instalar. Devuelve false si el navegador no la ofrece (entonces se muestran los pasos).
+async function pedirInstalar() {
+  if (!eventoInstalar) return false;
+  const ev = eventoInstalar; eventoInstalar = null;
+  ev.prompt();
+  try { await ev.userChoice; } catch { /* sin respuesta */ }
+  return true;
+}
 function bloqueInstalar(nombreApp) {
   const caja = el('div', { class: 'instalar', hidden: true });
-  const esIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
   const mostrar = () => {
     if (yaInstalada()) { caja.hidden = true; return; }
     if (eventoInstalar) {
-      caja.replaceChildren(el('div', {}, el('strong', { text: `Instala ${nombreApp}` }), el('small', { text: 'Ábrela desde tu pantalla de inicio o escritorio, como cualquier app.' })),
-        el('button', { class: 'boton chico', type: 'button', text: 'Instalar', onclick: async () => { eventoInstalar.prompt(); await eventoInstalar.userChoice; eventoInstalar = null; caja.hidden = true; } }));
+      caja.replaceChildren(el('div', {}, el('strong', { text: `Instala ${nombreApp} en tu celular` }), el('small', { text: 'Queda en tu pantalla de inicio y se abre como cualquier app, sin descargar archivos.' })),
+        el('button', { class: 'boton chico', type: 'button', text: 'Instalar', onclick: async () => { await pedirInstalar(); mostrar(); } }));
       caja.hidden = false;
-    } else if (esIos) {
-      caja.replaceChildren(el('div', {}, el('strong', { text: `Instala ${nombreApp} en tu iPhone` }),
-        el('small', { text: 'En Safari toca el botón Compartir (el cuadro con la flecha) y luego "Agregar a pantalla de inicio".' })));
+    } else if (esCelular()) {
+      caja.replaceChildren(el('div', {}, el('strong', { text: `Instala ${nombreApp} en tu celular` }), el('small', { text: pasosInstalar() })));
       caja.hidden = false;
-    }
+    } else caja.hidden = true;
   };
   document.addEventListener('vaelo-instalable', mostrar);
+  document.addEventListener('vaelo-instalada', () => { caja.hidden = true; });
   setTimeout(mostrar, 0);
   return caja;
 }

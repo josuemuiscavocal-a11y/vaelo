@@ -297,8 +297,6 @@ ruta('GET', '/api/config', () => {
     horario: aj.horario || '',
     recargo_fragil: Number(aj.recargo_fragil) || 0,
     promocion: promocionAnunciada(),
-    app: infoApp('cliente'),
-    app_piloto: infoApp('piloto'),
   };
 });
 
@@ -1583,75 +1581,6 @@ ruta('POST', '/api/admin/envios/:id/receptor', ({ req, params, body }) => {
 });
 
 
-// ---------- App de Android (se descarga solo desde la página) ----------
-// El administrador sube el .apk que arma PWABuilder y pega su assetlinks.json en el panel. Hay dos apps:
-// "cliente" (se ofrece en la página principal) y "piloto" (solo se ofrece dentro de /modomensajero).
-const APPS_DIR = path.join(DATA_DIR, 'apps');
-const APPS = { cliente: { archivo: 'vaelo.apk', nombre: 'Vaelo' }, piloto: { archivo: 'vaelo-piloto.apk', nombre: 'Vaelo Piloto' } };
-function infoApp(cual) {
-  const a = APPS[cual];
-  try {
-    const st = fs.statSync(path.join(APPS_DIR, a.archivo));
-    return { url: `/descargas/${a.archivo}?v=${Math.round(st.mtimeMs / 1000).toString(36)}`, mb: Math.round(st.size / 104857.6) / 10, fecha: st.mtime.toISOString(),
-      version: getAjustes()[`app_${cual}_version`] || '' };
-  } catch { return null; }
-}
-function validarAssetlinks(texto) {
-  let datos;
-  try { datos = JSON.parse(texto); } catch { falla(400, 'El assetlinks.json no es válido. Pega el contenido completo del archivo, desde [ hasta ].'); }
-  if (!Array.isArray(datos) || !datos.length) falla(400, 'El assetlinks.json debe ser una lista, empieza con [ y termina con ].');
-  for (const x of datos) {
-    const t = x && x.target;
-    if (!t || t.namespace !== 'android_app' || !/^[a-zA-Z][\w]*(\.[a-zA-Z][\w]*)+$/.test(String(t.package_name || '')) || !Array.isArray(t.sha256_cert_fingerprints)
-      || !t.sha256_cert_fingerprints.every((f) => /^([0-9A-F]{2}:){31}[0-9A-F]{2}$/i.test(String(f)))) falla(400, 'El assetlinks.json no tiene el formato de Android (package_name y sha256_cert_fingerprints).');
-  }
-  return JSON.stringify(datos);
-}
-ruta('GET', '/api/admin/apps', ({ req }) => {
-  requiereRol(req, 'admin');
-  const a = getAjustes();
-  return { apps: Object.fromEntries(Object.keys(APPS).map((k) => [k, { ...APPS[k], subida: infoApp(k), assetlinks: a[`app_${k}_assetlinks`] || '', version: a[`app_${k}_version`] || '' }])) };
-});
-ruta('POST', '/api/admin/apps/:cual', ({ req, params, body }) => {
-  requiereRol(req, 'admin');
-  const app = APPS[params.cual];
-  if (!app) falla(404, 'App no válida.');
-  const up = db.prepare('INSERT INTO ajustes (clave, valor) VALUES (?, ?) ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor');
-  if (body.assetlinks !== undefined) up.run(`app_${params.cual}_assetlinks`, String(body.assetlinks).trim() ? validarAssetlinks(String(body.assetlinks)) : '');
-  if (body.version !== undefined) up.run(`app_${params.cual}_version`, texto(body.version, 20));
-  if (body.apk) {
-    const m = /^data:[\w./+-]*;base64,([A-Za-z0-9+/=]+)$/.exec(String(body.apk));
-    if (!m) falla(400, 'Sube el archivo .apk.');
-    const datos = Buffer.from(m[1], 'base64');
-    if (datos.length < 10_000 || datos[0] !== 0x50 || datos[1] !== 0x4b) falla(400, 'Ese archivo no es un .apk de Android.');
-    if (datos.length > 25 * 1024 * 1024) falla(413, 'El .apk pesa más de 25 MB.');
-    fs.mkdirSync(APPS_DIR, { recursive: true, mode: 0o750 });
-    const tmp = path.join(APPS_DIR, app.archivo + '.subiendo');
-    fs.writeFileSync(tmp, datos, { mode: 0o640 });
-    fs.renameSync(tmp, path.join(APPS_DIR, app.archivo));
-  }
-  if (body.quitar) { try { fs.unlinkSync(path.join(APPS_DIR, app.archivo)); } catch { /* ya no estaba */ } }
-  return { ok: true, subida: infoApp(params.cual) };
-}, { limite: 36_000_000 });
-// La página principal y el modo mensajero preguntan si hay app para ofrecer
-ruta('GET', '/api/app-piloto', () => ({ app: infoApp('piloto') }));
-function enviarApk(req, res, archivo) {
-  const archivoApk = path.join(APPS_DIR, archivo);
-  fs.stat(archivoApk, (err, st) => {
-    if (err) { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', ...CABECERAS_SEGURIDAD }); return res.end('La app todavía no está disponible.'); }
-    res.writeHead(200, { 'Content-Type': 'application/vnd.android.package-archive', 'Content-Length': st.size,
-      'Content-Disposition': `attachment; filename="${archivo}"`, 'Cache-Control': 'no-cache', ...CABECERAS_SEGURIDAD });
-    if (req.method === 'HEAD') return res.end();
-    fs.createReadStream(archivoApk).pipe(res);
-  });
-}
-function assetlinks() {
-  const a = getAjustes();
-  const lista = [];
-  for (const k of Object.keys(APPS)) { try { lista.push(...JSON.parse(a[`app_${k}_assetlinks`] || '[]')); } catch { /* vacío */ } }
-  return JSON.stringify(lista);
-}
-
 // ---------- Rastreo público con el piloto en vivo ----------
 ruta('GET', '/api/rastreo/:guia', ({ params }) => {
   const guia = decodeURIComponent(params.guia).toUpperCase().replace(/\s+/g, '');
@@ -2215,13 +2144,6 @@ const servidor = http.createServer(async (req, res) => {
       db.prepare('UPDATE usuarios SET email_verificado = 1 WHERE id = ?').run(fila.usuario_id);
       db.prepare('DELETE FROM tokens_correo WHERE usuario_id = ?').run(fila.usuario_id);
       return redirigir(res, usuarioActual(req) ? '/mi-cuenta?correo=confirmado' : '/entrar?correo=confirmado');
-    }
-    // App de Android: descarga y verificación de dominio (Digital Asset Links)
-    if (limpia === '/descargas/vaelo.apk') return enviarApk(req, res, APPS.cliente.archivo);
-    if (limpia === '/descargas/vaelo-piloto.apk') return enviarApk(req, res, APPS.piloto.archivo);
-    if (limpia === '/.well-known/assetlinks.json') {
-      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=300', ...CABECERAS_SEGURIDAD });
-      return res.end(assetlinks());
     }
     // Página para quien recibe: /recibe/<clave>
     if (/^\/(recibe|entrega)\/[a-f0-9]{32}$/.test(limpia)) return servirEstatico(req, res, '/recibe.html');

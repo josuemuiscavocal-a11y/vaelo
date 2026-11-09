@@ -249,11 +249,6 @@
           <button class="boton" type="submit">Guardar</button>
         </form>
         <div class="bloque">
-          <h2>App para Android</h2>
-          <p style="color:var(--suave)">Sube aquí el archivo .apk que arma PWABuilder y pega su assetlinks.json. La app de clientes aparece en la página principal; la de pilotos solo dentro de /modomensajero.</p>
-          <div id="apps-android" class="apps-android"></div>
-        </div>
-        <div class="bloque">
           <h2>Equipo de oficina</h2>
           <p style="color:var(--suave)">Empleados que entran por esta misma página con su correo. Pueden ver y asignar envíos, ver pilotos y revisar clientes. No ven la caja, reportes, descuentos ni tarifas.</p>
           <div id="lista-operadores"></div>
@@ -271,7 +266,7 @@
   <dialog id="dlg"><div class="dialogo" id="dlg-cuerpo"></div></dialog>
 
   <script src="/vendor/maplibre/maplibre-gl.js?v=4.7.1"></script>
-  <script src="/js/comun.js?v=20261109b"></script>
+  <script src="/js/comun.js?v=20261109c"></script>
   <script>
     const $ = (id) => document.getElementById(id);
     let filtroEstado = '', temporizador = null, mensajeros = [], vehiculos = [], mapaFlota = null, capaFlota = null;
@@ -743,48 +738,7 @@
       $('dlg').showModal();
     }
 
-    // ---------- App para Android ----------
-    const leerArchivo = (f) => new Promise((ok, mal) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => mal(new Error('No se pudo leer el archivo.')); r.readAsDataURL(f); });
-    async function cargarApps() {
-      let datos;
-      try { datos = await api('/api/admin/apps'); } catch { return; }
-      $('apps-android').replaceChildren(...Object.entries(datos.apps).map(([cual, a]) => {
-        const msg = el('div', { class: 'mensaje', role: 'alert' });
-        const archivo = el('input', { type: 'file', accept: '.apk,application/vnd.android.package-archive', id: 'apk-' + cual });
-        const version = el('input', { id: 'ver-' + cual, maxlength: 20, value: a.version, placeholder: '1.0.0' });
-        const links = el('textarea', { id: 'al-' + cual, rows: 4, spellcheck: 'false', placeholder: '[{"relation": ["delegate_permission/common.handle_all_urls"], "target": {...}}]', style: 'font-family:monospace;font-size:.82rem' });
-        links.value = a.assetlinks ? JSON.stringify(JSON.parse(a.assetlinks), null, 1) : '';
-        const guardar = el('button', { class: 'boton', type: 'button', text: 'Guardar', onclick: async (ev) => {
-          const b = ev.target; b.disabled = true; b.textContent = archivo.files[0] ? 'Subiendo…' : 'Guardando…'; mostrarMensaje(msg, '');
-          try {
-            const cuerpo = { assetlinks: links.value, version: version.value };
-            if (archivo.files[0]) {
-              if (!/\.apk$/i.test(archivo.files[0].name)) throw new Error('Elige el archivo que termina en .apk.');
-              cuerpo.apk = await leerArchivo(archivo.files[0]);
-            }
-            await api('/api/admin/apps/' + cual, { body: cuerpo });
-            cargarApps();
-          } catch (e) { mostrarMensaje(msg, e.message); b.disabled = false; b.textContent = 'Guardar'; }
-        } });
-        const sub = a.subida;
-        return el('div', { class: 'app-android' },
-          el('h3', {}, a.nombre, ' ', sub ? el('span', { class: 'etiqueta-completa', text: `Publicada · ${sub.mb} MB · ${fecha(sub.fecha)}` }) : el('span', { class: 'etiqueta-gris', text: 'Sin subir' })),
-          sub ? el('p', { class: 'pista' }, 'Enlace de descarga: ', el('a', { href: sub.url.split('?')[0], text: location.origin + sub.url.split('?')[0] })) : null,
-          msg,
-          el('div', { class: 'fila' },
-            el('div', { class: 'campo' }, el('label', { for: 'apk-' + cual }, 'Archivo .apk ', el('span', { class: 'ayuda', text: sub ? 'Sube uno nuevo para actualizarla' : 'Máximo 25 MB' })), archivo),
-            el('div', { class: 'campo' }, el('label', { for: 'ver-' + cual }, 'Versión ', el('span', { class: 'ayuda', text: 'Opcional' })), version)),
-          el('div', { class: 'campo' }, el('label', { for: 'al-' + cual }, 'assetlinks.json ', el('span', { class: 'ayuda', text: 'Viene en el zip de PWABuilder. Quita la barra de dirección de la app' })), links),
-          el('div', { style: 'display:flex;gap:.5rem;flex-wrap:wrap' }, guardar,
-            sub ? el('button', { class: 'boton peligro', type: 'button', text: 'Quitar de la página', onclick: async () => {
-              if (!confirm(`¿Quitar ${a.nombre} de la página? Ya nadie podrá descargarla.`)) return;
-              try { await api('/api/admin/apps/' + cual, { body: { quitar: true } }); cargarApps(); } catch (e) { mostrarMensaje(msg, e.message); }
-            } }) : null));
-      }));
-    }
-
     async function cargarTarifas() {
-      cargarApps();
       const t = await api('/api/admin/tarifas');
       vehiculos = t.vehiculos;
       const num = (v, paso) => el('input', { type: 'number', min: 0, step: paso, value: v, style: 'min-width:90px' });

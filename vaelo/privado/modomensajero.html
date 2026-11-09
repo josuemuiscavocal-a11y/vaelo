@@ -21,7 +21,7 @@
   <button class="boton-emergencia" type="button" id="boton-emergencia" hidden>Emergencia</button>
   <dialog id="dlg-p"><div class="dialogo" id="dlg-p-cuerpo"></div></dialog>
 
-  <script src="/js/comun.js?v=20261109b"></script>
+  <script src="/js/comun.js?v=20261109c"></script>
   <script>
     'use strict';
     const $ = (id) => document.getElementById(id);
@@ -110,7 +110,7 @@
       });
       const verRegistro = () => { panelEntrar.hidden = true; panelRegistro.hidden = false; history.replaceState(null, '', '#registro'); };
       const verEntrar = () => { panelEntrar.hidden = false; panelRegistro.hidden = true; history.replaceState(null, '', location.pathname); };
-      app.replaceChildren(el('div', { class: 'acceso-piloto' }, panelEntrar, panelRegistro));
+      app.replaceChildren(bloqueInstalar('Vaelo Pilotos'), el('div', { class: 'acceso-piloto' }, panelEntrar, panelRegistro));
       if (location.hash === '#registro') verRegistro();
     }
 
@@ -212,24 +212,12 @@
     }
 
     // ---------- Trabajo: en línea, GPS y entregas ----------
-    // App de Android para pilotos (si la administración ya la subió)
-    async function ofrecerAppPiloto() {
-      if (/iphone|ipad/i.test(navigator.userAgent) || /wv\)|; ?wv/.test(navigator.userAgent) || document.referrer.startsWith('android-app://')) return;
-      try {
-        const { app } = await api('/api/app-piloto');
-        const caja = document.getElementById('app-piloto');
-        if (!app || !caja) return;
-        caja.replaceChildren(el('div', { class: 'instalar' },
-          el('div', {}, el('strong', { text: 'App Vaelo Piloto para Android' }), el('small', { text: `Descárgala e instálala (${app.mb} MB). Tu teléfono pedirá permitir la instalación desde el navegador.` })),
-          el('a', { class: 'boton chico', href: app.url, text: 'Descargar' })));
-      } catch { /* sin app */ }
-    }
     function pintarTrabajo() {
       const tabs = el('div', { class: 'pestanas', role: 'tablist' },
         el('button', { role: 'tab', id: 'tab-entregas', 'aria-selected': 'true', text: 'Entregas', onclick: () => verTab('entregas') }),
         el('button', { role: 'tab', id: 'tab-perfil', 'aria-selected': 'false', text: 'Mi perfil', onclick: () => verTab('perfil') }));
       const panelEntregas = el('section', { id: 'panel-entregas' },
-        el('div', { id: 'revision' }), el('div', { id: 'app-piloto' }), bloqueInstalar('Vaelo Pilotos'),
+        el('div', { id: 'revision' }), bloqueInstalar('Vaelo Pilotos'),
         el('div', { id: 'permiso-avisos' }),
         el('div', { class: 'conexion', id: 'conexion' }),
         el('div', { id: 'alerta-gps' }),
@@ -245,7 +233,6 @@
         el('p', {}, `${yo.vehiculo || ''} ${yo.veh_placa ? '· ' + yo.veh_placa : ''}`, yo.calificacion ? ` · ${yo.calificacion} de 5 estrellas` : ''))), tabs, panelEntregas, panelPerfil);
       const r = yo.revision;
       if (r.vencidos.length || r.porVencer.length) $('revision').replaceChildren(cajaRevision());
-      ofrecerAppPiloto();
       pintarPermisoAvisos();
       pintarConexion();
       $('boton-emergencia').hidden = false;
