@@ -1,0 +1,364 @@
+// Funciones compartidas por todas las páginas de Vaelo
+'use strict';
+
+const ESTADOS = {
+  pendiente: 'Pendiente de recoger',
+  recogido: 'Recogido',
+  en_camino: 'En camino',
+  entregado: 'Entregado',
+  cancelado: 'Cancelado',
+};
+const PAGOS = { efectivo: 'Efectivo', transferencia: 'Transferencia' };
+const CENTRO_GUATE = [14.6349, -90.5069];
+
+async function api(ruta, opciones = {}) {
+  const init = { method: opciones.method || 'GET', headers: {}, credentials: 'same-origin' };
+  if (opciones.body !== undefined) {
+    init.method = opciones.method || 'POST';
+    init.headers['Content-Type'] = 'application/json';
+    init.body = JSON.stringify(opciones.body);
+  }
+  let res;
+  try { res = await fetch(ruta, init); }
+  catch { throw new Error('No hay conexión con el servidor. Revisa tu internet e inténtalo de nuevo.'); }
+  let data = {};
+  try { data = await res.json(); } catch { /* sin cuerpo */ }
+  if (!res.ok) {
+    const err = new Error(data.error || 'Algo salió mal. Inténtalo de nuevo.');
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+
+const dinero = (n) => 'Q' + Number(n || 0).toLocaleString('es-GT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// Las fechas se guardan en hora UTC; aquí se muestran en la hora local del teléfono o computadora
+function fecha(texto, conHora = true) {
+  if (!texto) return '';
+  const d = new Date(texto.replace(' ', 'T') + 'Z');
+  const op = conHora ? { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' } : { day: 'numeric', month: 'short', year: 'numeric' };
+  return d.toLocaleString('es-GT', op);
+}
+
+function el(etiqueta, atributos = {}, ...hijos) {
+  const nodo = document.createElement(etiqueta);
+  for (const [k, v] of Object.entries(atributos)) {
+    if (v == null || v === false) continue;
+    if (k === 'class') nodo.className = v;
+    else if (k === 'text') nodo.textContent = v;
+    else if (k.startsWith('on')) nodo.addEventListener(k.slice(2), v);
+    else nodo.setAttribute(k, v === true ? '' : v);
+  }
+  for (const h of hijos.flat()) if (h != null && h !== false) nodo.append(h instanceof Node ? h : document.createTextNode(String(h)));
+  return nodo;
+}
+
+const chipEstado = (estado) => el('span', { class: `estado ${estado}`, text: ESTADOS[estado] || estado });
+
+function mostrarMensaje(nodo, texto, tipo = 'error') {
+  nodo.className = `mensaje ${tipo}`;
+  nodo.textContent = texto || '';
+  if (texto) nodo.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+const telLink = (t) => el('a', { href: 'tel:' + String(t || '').replace(/[^\d+]/g, ''), text: t });
+
+// Si el logo no carga, se muestra el nombre escrito para que la barra nunca quede vacía
+function logoRespaldo(img) {
+  const oscuro = /negro/.test(img.getAttribute('src') || '');
+  img.replaceWith(el('span', { class: 'marca-texto' + (oscuro ? ' oscuro' : ''), text: 'Vaelo' }));
+}
+document.addEventListener('error', (ev) => {
+  const t = ev.target;
+  if (t && t.tagName === 'IMG' && /\/img\/logo-/.test(t.getAttribute('src') || '') && !t.dataset.respaldo) { t.dataset.respaldo = '1'; logoRespaldo(t); }
+}, true);
+// Logos que ya fallaron antes de que este archivo cargara
+document.querySelectorAll('img[src*="/img/logo-"]').forEach((i) => { if (i.complete && !i.naturalWidth && !i.dataset.respaldo) { i.dataset.respaldo = '1'; logoRespaldo(i); } });
+
+// Barra superior: cambia según quién inició sesión
+async function pintarBarra() {
+  const barra = document.getElementById('barra');
+  if (!barra) return null;
+  let usuario = null;
+  try { usuario = (await api('/api/yo')).usuario; } catch { /* sin sesión */ }
+  const nav = el('nav', { class: 'nav', 'aria-label': 'Principal' });
+  if (!usuario || usuario.rol !== 'mensajero') nav.append(el('a', { href: '/rastreo', text: 'Rastrear' }));
+  if (usuario) {
+    if (usuario.rol === 'admin') nav.append(el('a', { href: '/familiatecun', text: 'Panel' }));
+    if (usuario.rol === 'mensajero') nav.append(el('a', { href: '/modomensajero', text: 'Mis entregas' }));
+    if (usuario.rol !== 'mensajero') nav.append(el('a', { href: '/mi-cuenta', text: 'Mis envíos' }));
+    nav.append(el('button', { class: 'enlace', type: 'button', text: 'Salir', onclick: salir }));
+  } else {
+    nav.append(el('a', { href: '/entrar', text: 'Entrar' }));
+    nav.append(el('a', { href: '/registro', class: 'boton cinta chico', text: 'Crear cuenta' }));
+  }
+  const logo = el('img', { src: '/img/logo-blanco.png', alt: 'Vaelo', width: 139, height: 40 });
+  logo.addEventListener('error', () => logoRespaldo(logo));
+  const marca = el('a', { href: '/', class: 'marca' }, logo);
+  barra.replaceChildren(el('div', { class: 'contenedor' }, marca, nav));
+  return usuario;
+}
+
+async function salir() {
+  try { await api('/api/logout', { body: {} }); } catch { /* igual salimos */ }
+  location.href = '/';
+}
+
+const codigoBarras = () => el('div', { class: 'codigo-barras', 'aria-hidden': 'true' });
+
+// Guía imprimible para pegar en el paquete
+function guiaImprimible(e) {
+  return el('div', { class: 'guia-imprimible' },
+    el('div', { class: 'franja' }, el('img', { src: '/img/logo-negro.png', alt: 'Vaelo', height: 24 }), el('span', { text: `${e.vehiculo || ''} · ${e.peso} lb` })),
+    el('div', { class: 'numero', text: e.guia }),
+    e.fragil ? el('div', { class: 'guia-fragil', text: 'FRÁGIL · MANEJAR CON CUIDADO' }) : null,
+    codigoBarras(),
+    el('div', { class: 'partes' },
+      el('div', {}, el('span', { text: 'Envía' }), e.cliente_nombre || '', el('br'), e.origen_telefono || '', el('br'), e.origen_zona || ''),
+      el('div', {}, el('span', { text: 'Recibe' }), el('strong', { text: e.destino_nombre }), el('br'), e.destino_telefono, el('br'), e.destino_direccion, el('br'), e.destino_zona || '')),
+    el('div', { class: 'partes' },
+      Number(e.cobro_destinatario) > 0
+        ? el('div', {}, el('span', { text: 'Cobrar al recibir' }), el('strong', { text: dinero(e.cobro_destinatario) }))
+        : el('div', {}, el('span', { text: 'Fecha' }), fecha(e.creado, false)),
+      el('div', {}, el('span', { text: 'Contenido' }), e.descripcion || 'Sin descripción')));
+}
+
+// ---------- Mapas (Leaflet + OpenStreetMap) ----------
+const hayMapa = () => typeof window.L !== 'undefined';
+
+// Proveedores de mapa: si el primero falla (bloqueado o caído), se cambia solo al siguiente
+const CAPAS_MAPA = [
+  { url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', op: { maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' } },
+  { url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', op: { maxZoom: 19, subdomains: 'abcd', attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>' } },
+];
+let capaPreferida = 0;
+
+function crearMapa(contenedor, centro = CENTRO_GUATE, zoom = 12) {
+  if (!hayMapa()) {
+    contenedor.replaceChildren(el('div', { class: 'mapa-error', text: 'No se pudo cargar el mapa. Revisa tu conexión y recarga la página.' }));
+    return null;
+  }
+  const mapa = L.map(contenedor, { scrollWheelZoom: false, tap: false }).setView(centro, zoom);
+  let indice = capaPreferida, errores = 0, cargadas = 0, capa = null;
+  const poner = () => {
+    if (capa) capa.remove();
+    const c = CAPAS_MAPA[indice];
+    capa = L.tileLayer(c.url, c.op).addTo(mapa);
+    errores = 0; cargadas = 0;
+    capa.on('tileload', () => { cargadas++; });
+    capa.on('tileerror', () => {
+      errores++;
+      if (errores >= 4 && cargadas === 0 && indice < CAPAS_MAPA.length - 1) { indice++; capaPreferida = indice; poner(); }
+    });
+  };
+  poner();
+  // Si el mapa se crea escondido o cambia de tamaño (pestañas, celular girado), se vuelve a acomodar
+  if ('ResizeObserver' in window) new ResizeObserver(() => mapa.invalidateSize()).observe(contenedor);
+  return mapa;
+}
+
+function iconoPin(letra, clase) {
+  return L.divIcon({ className: '', html: `<div class="pin ${clase}"><span>${letra}</span></div>`, iconSize: [34, 42], iconAnchor: [17, 40] });
+}
+const iconoMensajero = () => L.divIcon({ className: '', html: '<div class="pin-mensajero" title="Mensajero"><span></span></div>', iconSize: [28, 28], iconAnchor: [14, 14] });
+
+// Dibuja recogida (A), entrega (B) y la posición del mensajero
+function dibujarEnvio(mapa, e) {
+  if (!mapa) return;
+  const puntos = [];
+  if (e.origen_lat) { L.marker([e.origen_lat, e.origen_lng], { icon: iconoPin('A', 'recogida') }).addTo(mapa).bindPopup('Recogida'); puntos.push([e.origen_lat, e.origen_lng]); }
+  if (e.destino_lat) { L.marker([e.destino_lat, e.destino_lng], { icon: iconoPin('B', e.estado === 'entregado' ? 'entregado' : 'entrega') }).addTo(mapa).bindPopup(e.estado === 'entregado' ? 'Entregado aquí' : 'Entrega'); puntos.push([e.destino_lat, e.destino_lng]); }
+  if (puntos.length === 2) L.polyline(puntos, { color: '#1c3faa', weight: 3, dashArray: '6 8', opacity: .7 }).addTo(mapa);
+  if (e.mensajero_lat) {
+    L.marker([e.mensajero_lat, e.mensajero_lng], { icon: iconoMensajero(), zIndexOffset: 1000 }).addTo(mapa)
+      .bindPopup(`${e.mensajero_nombre || 'Mensajero'}<br>Actualizado ${fecha(e.mensajero_ubic_fecha)}`);
+    puntos.push([e.mensajero_lat, e.mensajero_lng]);
+  }
+  if (puntos.length > 1) mapa.fitBounds(puntos, { padding: [40, 40], maxZoom: 15 });
+  else if (puntos.length === 1) mapa.setView(puntos[0], 15);
+}
+
+// Buscador de direcciones (OpenStreetMap / Nominatim), solo dentro de Guatemala
+async function buscarDireccion(q) {
+  const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=5&countrycodes=gt&accept-language=es&q=' + encodeURIComponent(q);
+  const r = await fetch(url, { headers: { Accept: 'application/json' } });
+  if (!r.ok) throw new Error('El buscador de direcciones no respondió. Marca el punto tocando el mapa.');
+  return (await r.json()).map((x) => ({ nombre: x.display_name, lat: Number(x.lat), lng: Number(x.lon) }));
+}
+
+// Mapa para marcar un punto: tocar el mapa, buscar una dirección o usar la ubicación actual
+function selectorPunto(contenedor, { letra, clase, alCambiar, conMiUbicacion }) {
+  let marcador = null, punto = null;
+  const caja = el('div', { class: 'mapa' });
+  const buscar = el('input', { type: 'search', placeholder: 'Busca un lugar, ej. Centro Comercial Miraflores', 'aria-label': 'Buscar lugar en el mapa' });
+  const resultados = el('div', { class: 'resultados-busqueda' });
+  const estado = el('p', { class: 'pista', text: 'Toca el mapa para marcar el punto exacto.' });
+  const fijar = (lat, lng, centrar) => {
+    punto = { lat, lng };
+    if (!mapa) return;
+    if (marcador) marcador.setLatLng([lat, lng]);
+    else {
+      marcador = L.marker([lat, lng], { icon: iconoPin(letra, clase), draggable: true }).addTo(mapa);
+      marcador.on('dragend', () => { const p = marcador.getLatLng(); punto = { lat: p.lat, lng: p.lng }; alCambiar && alCambiar(punto); });
+    }
+    if (centrar) mapa.setView([lat, lng], 16);
+    estado.textContent = 'Punto marcado. Puedes arrastrar el pin para ajustarlo.';
+    estado.classList.add('ok');
+    alCambiar && alCambiar(punto);
+  };
+  const botonBuscar = el('button', { class: 'boton borde chico', type: 'button', text: 'Buscar', onclick: async () => {
+    const q = buscar.value.trim();
+    if (q.length < 3) return;
+    resultados.replaceChildren(el('p', { class: 'pista', text: 'Buscando…' }));
+    try {
+      const lista = await buscarDireccion(q);
+      if (!lista.length) { resultados.replaceChildren(el('p', { class: 'pista', text: 'No encontramos ese lugar. Prueba con otro nombre o toca el mapa.' })); return; }
+      resultados.replaceChildren(...lista.map((x) => el('button', { type: 'button', class: 'resultado', text: x.nombre, onclick: () => { fijar(x.lat, x.lng, true); resultados.replaceChildren(); } })));
+    } catch (e) { resultados.replaceChildren(el('p', { class: 'pista', text: e.message })); }
+  } });
+  buscar.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); botonBuscar.click(); } });
+  const controles = el('div', { class: 'mapa-controles' }, buscar, botonBuscar);
+  if (conMiUbicacion && navigator.geolocation) {
+    controles.append(el('button', { class: 'boton borde chico', type: 'button', text: 'Usar mi ubicación', onclick: () => {
+      estado.textContent = 'Obteniendo tu ubicación…';
+      navigator.geolocation.getCurrentPosition(
+        (p) => fijar(p.coords.latitude, p.coords.longitude, true),
+        () => { estado.textContent = 'No pudimos obtener tu ubicación. Busca el lugar o toca el mapa.'; },
+        { enableHighAccuracy: true, timeout: 10000 });
+    } }));
+  }
+  contenedor.replaceChildren(controles, resultados, caja, estado);
+  const mapa = crearMapa(caja);
+  if (mapa) mapa.on('click', (ev) => fijar(ev.latlng.lat, ev.latlng.lng, false));
+  return {
+    obtener: () => punto,
+    limpiar: () => { punto = null; if (marcador) { marcador.remove(); marcador = null; } estado.textContent = 'Toca el mapa para marcar el punto exacto.'; estado.classList.remove('ok'); },
+    refrescar: () => mapa && mapa.invalidateSize(),
+  };
+}
+
+// ---------- Documentos: fotos y PDF ----------
+// Achica las fotos en el navegador antes de subirlas (las del celular pesan mucho). Los PDF se suben tal cual (máx. 700 KB).
+async function prepararArchivo(archivo, permitePdf) {
+  if (!archivo) throw new Error('Elige un archivo.');
+  if (archivo.type === 'application/pdf') {
+    if (!permitePdf) throw new Error('Este documento tiene que ser una foto.');
+    if (archivo.size > 700_000) throw new Error('El PDF pesa más de 700 KB. Toma una foto del documento en su lugar.');
+    return new Promise((ok, mal) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => mal(new Error('No se pudo leer el archivo.')); r.readAsDataURL(archivo); });
+  }
+  if (!archivo.type.startsWith('image/')) throw new Error(permitePdf ? 'Sube una foto o un PDF.' : 'Sube una foto.');
+  const url = URL.createObjectURL(archivo);
+  try {
+    const img = await new Promise((ok, mal) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => mal(new Error('No se pudo leer la foto. Prueba con otra.')); i.src = url; });
+    const escala = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+    const lienzo = document.createElement('canvas');
+    lienzo.width = Math.round(img.naturalWidth * escala); lienzo.height = Math.round(img.naturalHeight * escala);
+    const ctx = lienzo.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, lienzo.width, lienzo.height);
+    ctx.drawImage(img, 0, 0, lienzo.width, lienzo.height);
+    for (const calidad of [0.85, 0.75, 0.65, 0.55, 0.45]) {
+      const datos = lienzo.toDataURL('image/jpeg', calidad);
+      if (datos.length * 0.75 < 600_000) return datos;
+    }
+    throw new Error('La foto es demasiado grande. Toma una más cercana al documento.');
+  } finally { URL.revokeObjectURL(url); }
+}
+
+// Casilla para ver y subir un documento. opciones: titulo, tiene, ver (url), subir(dataUrl), pdf, ayuda, camara ('user' o 'environment'), soloVer
+function campoDocumento({ titulo, tiene, ver, subir, pdf, ayuda, camara, soloVer, alCambiar }) {
+  const estado = el('small', { class: 'doc-estado' });
+  const vista = el('div', { class: 'doc-vista' });
+  const pintar = (hay, version) => {
+    if (!hay) { vista.replaceChildren(el('div', { class: 'sin-foto', text: 'Sin archivo' })); return; }
+    const src = ver + (ver.includes('?') ? '&' : '?') + 'v=' + (version || Date.now());
+    const img = el('img', { src, alt: titulo, loading: 'lazy', onclick: () => window.open(src, '_blank') });
+    img.addEventListener('error', () => vista.replaceChildren(el('a', { class: 'doc-pdf', href: src, target: '_blank', rel: 'noopener', text: 'Ver PDF' })), { once: true });
+    vista.replaceChildren(img);
+  };
+  pintar(tiene, 1);
+  const caja = el('div', { class: 'doc' + (tiene ? ' listo' : '') }, el('span', { class: 'doc-titulo', text: titulo }), vista);
+  if (ayuda) caja.append(el('small', { class: 'doc-ayuda', text: ayuda }));
+  if (!soloVer) {
+    const entrada = el('input', { type: 'file', accept: pdf ? 'image/*,application/pdf' : 'image/*', 'aria-label': (tiene ? 'Cambiar ' : 'Subir ') + titulo.toLowerCase() });
+    if (camara) entrada.setAttribute('capture', camara);
+    entrada.addEventListener('change', async () => {
+      const f = entrada.files[0];
+      if (!f) return;
+      entrada.disabled = true; estado.className = 'doc-estado'; estado.textContent = 'Subiendo…';
+      try {
+        await subir(await prepararArchivo(f, pdf));
+        estado.className = 'doc-estado ok'; estado.textContent = 'Guardado';
+        caja.classList.add('listo'); pintar(true);
+        alCambiar && alCambiar();
+      } catch (e) { estado.className = 'doc-estado error'; estado.textContent = e.message; }
+      entrada.disabled = false; entrada.value = '';
+    });
+    caja.append(el('label', { class: 'boton borde chico doc-boton' }, tiene ? 'Cambiar' : 'Subir', entrada));
+  }
+  caja.append(estado);
+  return caja;
+}
+
+// ---------- Sonido de aviso ----------
+let audioAviso = null;
+function prepararAudioAviso() {
+  try {
+    if (!audioAviso) audioAviso = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioAviso.state === 'suspended') audioAviso.resume();
+  } catch { audioAviso = null; }
+}
+document.addEventListener('pointerdown', prepararAudioAviso);
+function sonarAviso(veces = 2) {
+  if (!audioAviso || audioAviso.state !== 'running') return;
+  const t = audioAviso.currentTime;
+  for (let i = 0; i < veces; i++) {
+    [[880, 0], [1175, 0.18]].forEach(([frecuencia, inicio]) => {
+      const o = audioAviso.createOscillator(), g = audioAviso.createGain();
+      const t0 = t + i * 0.5 + inicio;
+      o.type = 'sine'; o.frequency.value = frecuencia;
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(0.35, t0 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.16);
+      o.connect(g).connect(audioAviso.destination);
+      o.start(t0); o.stop(t0 + 0.18);
+    });
+  }
+}
+async function notificacionSistema(titulo, cuerpo, url, etiqueta) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  const op = { body: cuerpo, icon: '/img/icono-192.png', badge: '/img/icono-192.png', tag: etiqueta || 'vaelo', renotify: true, vibrate: [300, 100, 300, 100, 300], data: { url } };
+  try {
+    const reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
+    if (reg) await reg.showNotification(titulo, op); else new Notification(titulo, op);
+  } catch { try { new Notification(titulo, op); } catch { /* sin notificación */ } }
+}
+
+// ---------- Instalar como app (celular y computadora) ----------
+let eventoInstalar = null;
+const yaInstalada = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+window.addEventListener('beforeinstallprompt', (ev) => { ev.preventDefault(); eventoInstalar = ev; document.dispatchEvent(new Event('vaelo-instalable')); });
+function bloqueInstalar(nombreApp) {
+  const caja = el('div', { class: 'instalar', hidden: true });
+  const esIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const mostrar = () => {
+    if (yaInstalada()) { caja.hidden = true; return; }
+    if (eventoInstalar) {
+      caja.replaceChildren(el('div', {}, el('strong', { text: `Instala ${nombreApp}` }), el('small', { text: 'Ábrela desde tu pantalla de inicio o escritorio, como cualquier app.' })),
+        el('button', { class: 'boton chico', type: 'button', text: 'Instalar', onclick: async () => { eventoInstalar.prompt(); await eventoInstalar.userChoice; eventoInstalar = null; caja.hidden = true; } }));
+      caja.hidden = false;
+    } else if (esIos) {
+      caja.replaceChildren(el('div', {}, el('strong', { text: `Instala ${nombreApp} en tu iPhone` }),
+        el('small', { text: 'En Safari toca el botón Compartir (el cuadro con la flecha) y luego "Agregar a pantalla de inicio".' })));
+      caja.hidden = false;
+    }
+  };
+  document.addEventListener('vaelo-instalable', mostrar);
+  setTimeout(mostrar, 0);
+  return caja;
+}
+
+// ---------- App instalable ----------
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+}

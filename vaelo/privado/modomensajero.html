@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Modo mensajero · Vaelo</title>
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#0e2463">
+  <link rel="icon" href="/img/favicon.png" type="image/png">
+  <link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest-piloto.webmanifest">
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body class="modo-piloto">
+  <header class="barra"><div class="contenedor">
+    <a href="/modomensajero" class="marca"><img src="/img/logo-blanco.png" alt="Vaelo" width="139" height="40"></a>
+    <nav class="nav" id="nav"><span class="etiqueta-modo">Modo mensajero</span></nav>
+  </div></header>
+  <main class="area"><div class="contenedor" style="max-width:760px" id="app"><p class="pista">Cargando…</p></div></main>
+
+  <script src="/js/comun.js"></script>
+  <script>
+    'use strict';
+    const $ = (id) => document.getElementById(id);
+    const app = $('app');
+    const CAMPOS_APROBADO = ['telefono', 'direccion', 'emergencia_nombre', 'emergencia_parentesco', 'emergencia_telefono', 'nit',
+      'penales_fecha', 'policiacos_fecha', 'licencia_numero', 'licencia_tipo', 'licencia_vence', 'seguro_aseguradora', 'seguro_vence'];
+    const DOCS_RENOVABLES = ['recibo', 'penales', 'policiacos', 'licencia_frente', 'licencia_reverso'];
+    const REGLAS = [
+      'Mantener la ubicación (GPS) del teléfono encendida mientras estés en línea y durante cada entrega. Vaelo guarda el recorrido para tu seguridad y la del paquete.',
+      'Usar casco y el equipo de Vaelo, y respetar las leyes de tránsito.',
+      'No abrir, cambiar ni dejar los paquetes con personas que no sean el destinatario o quien él indique.',
+      'Cobrar solo los montos que indica la aplicación y entregar el dinero según las indicaciones de la administración.',
+      'Tratar con respeto a clientes y destinatarios.',
+      'Avisar de inmediato a la administración ante un accidente, robo o cualquier problema en la ruta.',
+      'Mantener vigentes tu licencia y tus antecedentes. Con un documento vencido no podrás recibir envíos.',
+    ];
+    let yo = null, vehiculos = [], vigencia = 6;
+    let enLinea = false, vigilante = null, ultimaPos = null, ultimaLectura = 0, ultimoEnvio = 0, gpsError = '';
+    let conocidos = null, bloqueoPantalla = null, temporizador = null, envios = [], ultimaFirma = '', ocupado = 0;
+
+    function barra(conSesion) {
+      $('nav').replaceChildren(el('span', { class: 'etiqueta-modo', text: 'Modo mensajero' }));
+      if (conSesion) $('nav').append(el('button', { class: 'enlace', type: 'button', text: 'Salir', onclick: async () => {
+        if (envios.some(e => e.asignacion === 'aceptado' && e.estado !== 'entregado') && !confirm('Tienes entregas en curso. Si sales, dejarás de compartir tu ubicación. ¿Salir de todas formas?')) return;
+        detenerGps();
+        try { await api('/api/logout', { body: {} }); } catch { /* igual */ }
+        location.reload();
+      } }));
+    }
+
+    async function iniciar() {
+      clearInterval(temporizador);
+      try {
+        const r = await api('/api/piloto/yo');
+        yo = r.piloto; vehiculos = r.vehiculos; vigencia = r.vigencia_antecedentes;
+      } catch (e) {
+        if (e.status === 401 || e.status === 403) return pintarAcceso();
+        app.replaceChildren(el('div', { class: 'mensaje error', text: e.message })); return;
+      }
+      barra(true);
+      if (yo.estado_piloto === 'aprobado') return pintarTrabajo();
+      if (yo.estado_piloto === 'en_revision') return pintarSolicitud();
+      app.replaceChildren(el('div', { class: 'bloque' }, el('h1', { style: 'font-size:1.8rem', text: 'Tu cuenta está suspendida' }),
+        el('p', { text: 'No puedes recibir envíos por ahora. Comunícate con la administración de Vaelo.' })));
+    }
+
+    // ---------- Entrar o registrarse ----------
+    function pintarAcceso() {
+      barra(false);
+      const msg = el('div', { class: 'mensaje', role: 'alert' });
+      const panelEntrar = el('form', { class: 'tarjeta-acceso', novalidate: true },
+        el('h1', { text: 'Entrar' }), el('p', { style: 'color:var(--suave)', text: 'Para pilotos de Vaelo.' }), msg,
+        el('div', { class: 'campo' }, el('label', { for: 'e-email', text: 'Correo' }), el('input', { id: 'e-email', type: 'email', autocomplete: 'username', required: true })),
+        el('div', { class: 'campo' }, el('label', { for: 'e-pass', text: 'Contraseña' }), el('input', { id: 'e-pass', type: 'password', autocomplete: 'current-password', required: true })),
+        el('button', { class: 'boton', type: 'submit', text: 'Entrar' }),
+        el('p', { class: 'alterno' }, '¿Quieres trabajar con nosotros? ', el('a', { href: '#registro', onclick: (ev) => { ev.preventDefault(); verRegistro(); }, text: 'Envía tu solicitud' })));
+      panelEntrar.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const b = panelEntrar.querySelector('button'); b.disabled = true;
+        try { await api('/api/piloto/entrar', { body: { email: $('e-email').value, password: $('e-pass').value } }); iniciar(); }
+        catch (e) { mostrarMensaje(msg, e.message); b.disabled = false; }
+      });
+
+      const msg2 = el('div', { class: 'mensaje', role: 'alert' });
+      const acepto = el('input', { type: 'checkbox', id: 'r-reglas', style: 'width:auto' });
+      const panelRegistro = el('form', { class: 'tarjeta-acceso ancha', novalidate: true, hidden: true },
+        el('h1', { text: 'Quiero ser piloto' }),
+        el('p', { style: 'color:var(--suave)', text: 'Crea tu cuenta y luego sube tus documentos. La administración revisa cada solicitud antes de aprobarla.' }), msg2,
+        el('div', { class: 'campo' }, el('label', { for: 'r-nombre', text: 'Nombre completo (como aparece en tu DPI)' }), el('input', { id: 'r-nombre', autocomplete: 'name', maxlength: 100 })),
+        el('div', { class: 'campo' }, el('label', { for: 'r-tel', text: 'Teléfono o WhatsApp' }), el('input', { id: 'r-tel', type: 'tel', autocomplete: 'tel', placeholder: '5555-5555', maxlength: 30 })),
+        el('div', { class: 'campo' }, el('label', { for: 'r-email', text: 'Correo' }), el('input', { id: 'r-email', type: 'email', autocomplete: 'email', maxlength: 150 })),
+        el('div', { class: 'campo' }, el('label', { for: 'r-pass' }, 'Contraseña ', el('span', { class: 'ayuda', text: 'Mínimo 8 caracteres' })), el('input', { id: 'r-pass', type: 'password', autocomplete: 'new-password' })),
+        el('details', { class: 'reglas' }, el('summary', { text: 'Reglas de Vaelo para pilotos' }), el('ol', {}, REGLAS.map(t => el('li', { text: t })))),
+        el('label', { class: 'casilla', for: 'r-reglas' }, acepto, 'Leí y acepto las reglas de Vaelo para pilotos'),
+        el('button', { class: 'boton', type: 'submit', text: 'Crear mi cuenta' }),
+        el('p', { class: 'alterno' }, '¿Ya tienes cuenta? ', el('a', { href: '#entrar', onclick: (ev) => { ev.preventDefault(); verEntrar(); }, text: 'Entra aquí' })));
+      panelRegistro.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        if (!acepto.checked) { mostrarMensaje(msg2, 'Para continuar tienes que aceptar las reglas.'); return; }
+        const b = panelRegistro.querySelector('button[type=submit]'); b.disabled = true;
+        try {
+          await api('/api/piloto/registro', { body: { nombre: $('r-nombre').value, telefono: $('r-tel').value, email: $('r-email').value, password: $('r-pass').value } });
+          await api('/api/piloto/perfil', { method: 'PUT', body: { acepto_reglas: true } });
+          iniciar();
+        } catch (e) { mostrarMensaje(msg2, e.message); b.disabled = false; }
+      });
+      const verRegistro = () => { panelEntrar.hidden = true; panelRegistro.hidden = false; history.replaceState(null, '', '#registro'); };
+      const verEntrar = () => { panelEntrar.hidden = false; panelRegistro.hidden = true; history.replaceState(null, '', location.pathname); };
+      app.replaceChildren(el('div', { class: 'acceso-piloto' }, panelEntrar, panelRegistro));
+      if (location.hash === '#registro') verRegistro();
+    }
+
+    // ---------- Formulario de perfil (solicitud y "Mi perfil") ----------
+    function formularioPerfil(aprobado, alGuardar) {
+      const msg = el('div', { class: 'mensaje', role: 'alert' });
+      const campos = {};
+      const bloqueado = (k) => aprobado && !CAMPOS_APROBADO.includes(k);
+      const entrada = (k, titulo, attrs = {}, ayuda) => {
+        const id = 'p-' + k;
+        const input = attrs.tag === 'select'
+          ? el('select', { id }, attrs.opciones.map(([v, t]) => el('option', { value: v, text: t, selected: String(yo[k] ?? '') === String(v) })))
+          : attrs.tag === 'textarea' ? el('textarea', { id, maxlength: attrs.maxlength || 800, rows: 3 }) : el('input', { id, ...attrs });
+        if (attrs.tag === 'textarea') input.value = yo[k] || '';
+        else if (attrs.tag !== 'select') input.value = k === 'dpi' && yo[k] ? `${yo[k].slice(0, 4)} ${yo[k].slice(4, 9)} ${yo[k].slice(9)}` : (yo[k] ?? '');
+        if (bloqueado(k)) input.disabled = true;
+        campos[k] = input;
+        return el('div', { class: 'campo' }, el('label', { for: id }, titulo, ayuda ? el('span', { class: 'ayuda', text: ' ' + ayuda }) : null), input);
+      };
+      const doc = (tipo, titulo, op = {}) => campoDocumento({ titulo, tiene: yo.docs[tipo], ver: `/api/piloto/documento/${tipo}`, pdf: op.pdf, ayuda: op.ayuda, camara: op.camara,
+        soloVer: aprobado && !DOCS_RENOVABLES.includes(tipo),
+        subir: (archivo) => api('/api/piloto/documento', { body: { tipo, archivo } }), alCambiar: refrescar });
+      const seccion = (titulo, ...hijos) => el('fieldset', { class: 'bloque' }, el('legend', { text: titulo }), ...hijos);
+      const fila = (...h) => el('div', { class: 'fila' }, ...h);
+      const docs = (...h) => el('div', { class: 'docs' }, ...h);
+      const hoy = new Date().toISOString().slice(0, 10);
+
+      const form = el('form', { novalidate: true },
+        seccion('Tus datos',
+          fila(entrada('nombre', 'Nombre completo', { maxlength: 100 }), entrada('telefono', 'Teléfono', { type: 'tel', maxlength: 30 })),
+          fila(entrada('fecha_nacimiento', 'Fecha de nacimiento', { type: 'date', max: hoy }), entrada('dpi', 'Número de DPI', { inputmode: 'numeric', maxlength: 17, placeholder: '1234 56789 0101' })),
+          entrada('direccion', 'Dirección donde vives', { maxlength: 300, placeholder: 'Calle, número, zona, municipio' }),
+          fila(entrada('nit', 'NIT', { maxlength: 20 }, 'Opcional'), el('div')),
+          entrada('referencias', 'Referencias personales o de trabajo', { tag: 'textarea' }, 'Opcional. Nombre y teléfono'),
+          docs(doc('foto', 'Tu foto', { camara: 'user', ayuda: 'De frente, sin lentes oscuros ni gorra. La ve el cliente.' }),
+            doc('dpi_frente', 'DPI (frente)', { camara: 'environment' }), doc('dpi_reverso', 'DPI (reverso)', { camara: 'environment' }),
+            doc('recibo', 'Recibo de luz o agua', { pdf: true, ayuda: 'Opcional. Comprueba tu dirección' }))),
+        seccion('Contacto de emergencia',
+          fila(entrada('emergencia_nombre', 'Nombre', { maxlength: 100 }), entrada('emergencia_parentesco', 'Parentesco', { maxlength: 50, placeholder: 'Mamá, esposa, hermano…' })),
+          fila(entrada('emergencia_telefono', 'Teléfono', { type: 'tel', maxlength: 30 }), el('div'))),
+        seccion('Antecedentes penales y policiacos',
+          el('p', { class: 'pista', text: `Valen ${vigencia} meses desde su fecha de emisión. Con antecedentes vencidos no podrás recibir envíos.` }),
+          fila(entrada('penales_fecha', 'Emisión de antecedentes penales', { type: 'date', max: hoy }), entrada('policiacos_fecha', 'Emisión de antecedentes policiacos', { type: 'date', max: hoy })),
+          docs(doc('penales', 'Antecedentes penales', { pdf: true }), doc('policiacos', 'Antecedentes policiacos', { pdf: true }))),
+        seccion('Licencia de conducir',
+          fila(entrada('licencia_numero', 'Número de licencia', { maxlength: 30 }),
+            entrada('licencia_tipo', 'Tipo', { tag: 'select', opciones: [['', 'Elige'], ['M', 'M (moto)'], ['C', 'C'], ['B', 'B'], ['A', 'A']] })),
+          fila(entrada('licencia_vence', 'Fecha de vencimiento', { type: 'date' }), el('div')),
+          docs(doc('licencia_frente', 'Licencia (frente)', { camara: 'environment' }), doc('licencia_reverso', 'Licencia (reverso)', { camara: 'environment', ayuda: 'Recomendada' }))),
+        seccion('Tu vehículo',
+          fila(entrada('vehiculo_id', 'Tipo de vehículo', { tag: 'select', opciones: [['', 'Elige'], ...vehiculos.map(v => [v.id, v.nombre])] }),
+            entrada('veh_placa', 'Placa', { maxlength: 12, placeholder: 'M-123ABC', style: 'text-transform:uppercase' })),
+          fila(entrada('veh_marca', 'Marca', { maxlength: 40 }), entrada('veh_modelo', 'Modelo / línea', { maxlength: 40 })),
+          fila(entrada('veh_anio', 'Año', { type: 'number', min: 1980, max: new Date().getFullYear() + 1 }), entrada('veh_color', 'Color', { maxlength: 30 })),
+          entrada('veh_propio', '¿El vehículo es tuyo?', { tag: 'select', opciones: [['1', 'Sí, es mío'], ['0', 'No, es de otra persona']] }),
+          docs(doc('tarjeta', 'Tarjeta de circulación', { camara: 'environment' }), doc('veh_frente', 'Vehículo (frente)', { camara: 'environment' }),
+            doc('veh_lado', 'Vehículo (de lado)', { camara: 'environment', ayuda: 'Recomendada' }), doc('veh_placa', 'Placa', { camara: 'environment', ayuda: 'Recomendada' }),
+            doc('carta', 'Carta del dueño', { pdf: true, ayuda: 'Solo si el vehículo no es tuyo: autorización firmada con copia de su DPI' }))),
+        seccion('Seguro del vehículo',
+          fila(entrada('seguro_aseguradora', 'Aseguradora', { maxlength: 60 }, 'Opcional'), entrada('seguro_vence', 'Vence', { type: 'date' }, 'Opcional'))),
+        msg,
+        el('button', { class: 'boton', type: 'submit', text: 'Guardar mis datos' }));
+      if (aprobado) form.prepend(el('p', { class: 'mensaje aviso', text: 'Ya estás aprobado: puedes actualizar tu contacto y renovar licencia y antecedentes. Para cambiar otros datos (nombre, DPI, vehículo), comunícate con la administración.' }));
+      form.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const b = form.querySelector('button[type=submit]'); b.disabled = true;
+        const body = {};
+        for (const [k, input] of Object.entries(campos)) if (!input.disabled) body[k] = input.value;
+        try { await api('/api/piloto/perfil', { method: 'PUT', body }); mostrarMensaje(msg, 'Datos guardados.', 'exito'); await refrescar(); }
+        catch (e) { mostrarMensaje(msg, e.message); }
+        b.disabled = false;
+      });
+      async function refrescar() { try { yo = (await api('/api/piloto/yo')).piloto; alGuardar && alGuardar(); } catch { /* nada */ } }
+      return form;
+    }
+
+    function cajaRevision() {
+      const r = yo.revision;
+      const caja = el('div', { class: 'bloque revision' });
+      if (yo.estado_piloto === 'en_revision') {
+        caja.append(r.faltan.length
+          ? el('div', {}, el('h2', { text: `Te faltan ${r.faltan.length} ${r.faltan.length === 1 ? 'dato' : 'datos'}` }),
+              el('p', { text: 'Completa todo y la administración revisará tu solicitud. Puedes guardar y volver después.' }),
+              el('ul', { class: 'faltan' }, r.faltan.map(f => el('li', { text: f }))))
+          : el('div', {}, el('h2', { text: 'Solicitud completa' }), el('p', { text: 'La administración está revisando tus datos. Te avisaremos cuando estés aprobado.' })));
+      }
+      if (r.vencidos.length) caja.append(el('div', { class: 'mensaje error', text: 'Vencido: ' + r.vencidos.join(', ') + '. Renueva el documento en Mi perfil para poder trabajar.' }));
+      if (r.porVencer.length) caja.append(el('div', { class: 'mensaje aviso', text: 'Por vencer: ' + r.porVencer.join(', ') + '.' }));
+      return caja;
+    }
+
+    function pintarSolicitud() {
+      const revision = el('div');
+      const pintarRevision = () => revision.replaceChildren(cajaRevision());
+      pintarRevision();
+      app.replaceChildren(
+        el('div', { class: 'area-cabecera' }, el('div', {}, el('h1', { text: `Hola, ${yo.nombre.split(' ')[0]}` }), el('p', { text: 'Tu solicitud para ser piloto de Vaelo.' }))),
+        revision, formularioPerfil(false, pintarRevision));
+    }
+
+    // ---------- Trabajo: en línea, GPS y entregas ----------
+    function pintarTrabajo() {
+      const tabs = el('div', { class: 'pestanas', role: 'tablist' },
+        el('button', { role: 'tab', id: 'tab-entregas', 'aria-selected': 'true', text: 'Entregas', onclick: () => verTab('entregas') }),
+        el('button', { role: 'tab', id: 'tab-perfil', 'aria-selected': 'false', text: 'Mi perfil', onclick: () => verTab('perfil') }));
+      const panelEntregas = el('section', { id: 'panel-entregas' },
+        el('div', { id: 'revision' }), bloqueInstalar('Vaelo Pilotos'),
+        el('div', { id: 'permiso-avisos' }),
+        el('div', { class: 'conexion', id: 'conexion' }),
+        el('div', { id: 'alerta-gps' }),
+        el('div', { id: 'msg', class: 'mensaje', role: 'alert' }),
+        el('div', { id: 'lista', class: 'lista-envios' }));
+      const panelPerfil = el('section', { id: 'panel-perfil', hidden: true });
+      const verTab = (t) => {
+        $('tab-entregas').setAttribute('aria-selected', String(t === 'entregas')); $('tab-perfil').setAttribute('aria-selected', String(t === 'perfil'));
+        panelEntregas.hidden = t !== 'entregas'; panelPerfil.hidden = t !== 'perfil';
+        if (t === 'perfil') panelPerfil.replaceChildren(cajaRevision(), formularioPerfil(true, () => { $('revision').replaceChildren(cajaRevision()); }), formularioClave());
+      };
+      app.replaceChildren(el('div', { class: 'area-cabecera' }, el('div', {}, el('h1', { text: `Hola, ${yo.nombre.split(' ')[0]}` }),
+        el('p', {}, `${yo.vehiculo || ''} ${yo.veh_placa ? '· ' + yo.veh_placa : ''}`, yo.calificacion ? ` · ${yo.calificacion} de 5 estrellas` : ''))), tabs, panelEntregas, panelPerfil);
+      const r = yo.revision;
+      if (r.vencidos.length || r.porVencer.length) $('revision').replaceChildren(cajaRevision());
+      pintarPermisoAvisos();
+      pintarConexion();
+      cargarEnvios(true);
+      temporizador = setInterval(() => cargarEnvios(), 10000);
+    }
+
+    function formularioClave() {
+      const msg = el('div', { class: 'mensaje', role: 'alert' });
+      const actual = el('input', { type: 'password', id: 'c-actual', autocomplete: 'current-password' });
+      const nueva = el('input', { type: 'password', id: 'c-nueva', autocomplete: 'new-password' });
+      return el('form', { class: 'bloque', novalidate: true, onsubmit: async (ev) => {
+        ev.preventDefault();
+        try { await api('/api/cambiar-password', { body: { actual: actual.value, nueva: nueva.value } }); ev.target.reset(); mostrarMensaje(msg, 'Contraseña actualizada.', 'exito'); }
+        catch (e) { mostrarMensaje(msg, e.message); }
+      } }, el('h2', { text: 'Cambiar contraseña' }), msg,
+        el('div', { class: 'fila' }, el('div', { class: 'campo' }, el('label', { for: 'c-actual', text: 'Contraseña actual' }), actual),
+          el('div', { class: 'campo' }, el('label', { for: 'c-nueva', text: 'Nueva contraseña' }), nueva)),
+        el('button', { class: 'boton', type: 'submit', text: 'Guardar contraseña' }));
+    }
+
+    function pintarPermisoAvisos() {
+      const caja = $('permiso-avisos');
+      if (!('Notification' in window) || Notification.permission !== 'default') { caja.replaceChildren(); return; }
+      caja.replaceChildren(el('div', { class: 'mensaje aviso aviso-accion' }, 'Activa las notificaciones para enterarte de cada envío nuevo aunque tengas otra app abierta.',
+        el('button', { class: 'boton chico', type: 'button', text: 'Activar', onclick: async () => { await Notification.requestPermission(); pintarPermisoAvisos(); } })));
+    }
+
+    const hayEntregaActiva = () => envios.some(e => e.asignacion === 'aceptado' && ['pendiente', 'recogido', 'en_camino'].includes(e.estado));
+
+    function pintarConexion() {
+      const caja = $('conexion');
+      if (!caja) return;
+      const puede = yo.puede_trabajar;
+      const hace = ultimaLectura ? Math.round((Date.now() - ultimaLectura) / 1000) : null;
+      const gps = !enLinea && !hayEntregaActiva() ? 'Ubicación apagada'
+        : gpsError ? 'Sin ubicación' : ultimaPos ? `GPS activo${ultimaPos.precision ? `, precisión ${Math.round(ultimaPos.precision)} m` : ''}${hace != null ? `, hace ${hace} s` : ''}` : 'Buscando tu ubicación…';
+      caja.className = 'conexion' + (enLinea ? ' activa' : '');
+      caja.replaceChildren(
+        el('div', {}, el('strong', { text: enLinea ? 'Estás en línea' : 'Estás fuera de línea' }),
+          el('small', { text: enLinea ? `Puedes recibir envíos. ${gps}.` : puede ? 'Conéctate para recibir envíos. Necesitas la ubicación encendida.' : 'No puedes conectarte hasta renovar tus documentos vencidos.' })),
+        el('button', { class: 'boton' + (enLinea ? ' borde' : ' cinta'), type: 'button', disabled: !puede && !enLinea, text: enLinea ? 'Desconectarme' : 'Conectarme', onclick: (ev) => enLinea ? desconectar(ev.target) : conectar(ev.target) }));
+    }
+
+    function posicionFresca() {
+      return new Promise((resolve, reject) => {
+        if (!navigator.geolocation) return reject(new Error('Este teléfono no permite usar la ubicación.'));
+        // Si el GPS dio una ubicación hace menos de 30 segundos, se usa de una vez
+        if (ultimaPos && !gpsError && Date.now() - ultimaLectura < 30000) return resolve(ultimaPos);
+        navigator.geolocation.getCurrentPosition(
+          (p) => { ultimaPos = { lat: p.coords.latitude, lng: p.coords.longitude, precision: p.coords.accuracy }; ultimaLectura = Date.now(); gpsError = ''; resolve(ultimaPos); },
+          (err) => reject(new Error(err.code === 1 ? 'Diste "no permitir" a la ubicación. Actívala en la configuración del navegador para vaelomensajeria.com.' : 'No pudimos leer tu ubicación. Revisa que el GPS esté encendido y vuelve a intentar.')),
+          { enableHighAccuracy: true, timeout: 20000, maximumAge: 10000 });
+      });
+    }
+
+    async function conectar(boton) {
+      boton.disabled = true; boton.textContent = 'Buscando ubicación…';
+      try {
+        const pos = await posicionFresca();
+        await api('/api/piloto/en-linea', { body: { en_linea: true, ...pos } });
+        enLinea = true; iniciarGps(); mantenerPantalla(true);
+        mostrarMensaje($('msg'), '');
+        cargarEnvios();
+      } catch (e) { mostrarMensaje($('msg'), e.message); }
+      pintarConexion();
+    }
+    async function desconectar(boton) {
+      boton.disabled = true;
+      try {
+        await api('/api/piloto/en-linea', { body: { en_linea: false } });
+        enLinea = false;
+        if (!hayEntregaActiva()) { detenerGps(); mantenerPantalla(false); }
+      } catch (e) { mostrarMensaje($('msg'), e.message); }
+      pintarConexion();
+    }
+
+    // GPS: se envía la ubicación cada 15 segundos mientras estás en línea o llevando un envío
+    function iniciarGps() {
+      if (vigilante != null || !navigator.geolocation) return;
+      vigilante = navigator.geolocation.watchPosition((p) => {
+        ultimaPos = { lat: p.coords.latitude, lng: p.coords.longitude, precision: p.coords.accuracy }; ultimaLectura = Date.now(); gpsError = '';
+        pintarAlertaGps();
+        if (Date.now() - ultimoEnvio >= 15000) enviarUbicacion();
+      }, (err) => {
+        gpsError = err.code === 1 ? 'permiso' : 'senal';
+        pintarAlertaGps(); pintarConexion();
+      }, { enableHighAccuracy: true, maximumAge: 10000, timeout: 30000 });
+    }
+    function detenerGps() { if (vigilante != null) navigator.geolocation.clearWatch(vigilante); vigilante = null; }
+    async function enviarUbicacion() {
+      if (!ultimaPos || Date.now() - ultimaLectura > 120000) return;   // no se manda una ubicación vieja
+      ultimoEnvio = Date.now();
+      try { await api('/api/piloto/ubicacion', { body: ultimaPos }); } catch { /* se reintenta en la siguiente lectura */ }
+      pintarConexion();
+    }
+    // Aunque estés quieto, se avisa al servidor cada 20 segundos que la ubicación sigue activa
+    setInterval(() => { if ((enLinea || hayEntregaActiva()) && Date.now() - ultimoEnvio > 20000) enviarUbicacion(); }, 5000);
+
+    function pintarAlertaGps() {
+      const caja = $('alerta-gps');
+      if (!caja) return;
+      const necesaria = enLinea || hayEntregaActiva();
+      if (!necesaria || !gpsError) { caja.replaceChildren(); return; }
+      caja.replaceChildren(el('div', { class: 'alerta-gps' }, el('strong', { text: 'Tu ubicación está apagada' }),
+        el('p', { text: gpsError === 'permiso'
+          ? 'Vaelo necesita tu ubicación mientras estás en línea o llevas un envío. Ve a la configuración del navegador, busca vaelomensajeria.com y permite la ubicación. Luego recarga esta página.'
+          : 'No llega señal de GPS. Revisa que la ubicación del teléfono esté encendida y que estés al aire libre.' }),
+        el('button', { class: 'boton chico cinta', type: 'button', text: 'Reintentar', onclick: () => { detenerGps(); iniciarGps(); } })));
+    }
+
+    // Mantener la pantalla encendida mientras trabajas (el GPS del navegador se detiene con la pantalla apagada)
+    async function mantenerPantalla(si) {
+      try {
+        if (si && 'wakeLock' in navigator && !bloqueoPantalla) { bloqueoPantalla = await navigator.wakeLock.request('screen'); bloqueoPantalla.addEventListener('release', () => { bloqueoPantalla = null; }); }
+        if (!si && bloqueoPantalla) { await bloqueoPantalla.release(); bloqueoPantalla = null; }
+      } catch { /* el teléfono no lo permite */ }
+    }
+    document.addEventListener('visibilitychange', () => { if (!document.hidden && (enLinea || hayEntregaActiva())) { mantenerPantalla(true); enviarUbicacion(); cargarEnvios(); } });
+
+    async function cargarEnvios(primera) {
+      if (!$('lista')) return;
+      let r;
+      try { r = await api('/api/piloto/envios'); } catch (e) { if (e.status === 401 || e.status === 403) return iniciar(); mostrarMensaje($('msg'), e.message); return; }
+      envios = r.envios;
+      if (primera) {
+        enLinea = r.en_linea;
+        if (enLinea || hayEntregaActiva()) { iniciarGps(); mantenerPantalla(true); }
+      }
+      // Aviso de envío nuevo por aceptar
+      const porAceptar = envios.filter(e => e.asignacion === 'por_aceptar');
+      if (conocidos) {
+        const nuevos = porAceptar.filter(e => !conocidos.has(e.id));
+        if (nuevos.length) {
+          sonarAviso(3);
+          if (navigator.vibrate) navigator.vibrate([400, 150, 400, 150, 400]);
+          notificacionSistema('Nuevo envío asignado', `${nuevos[0].guia}: recoger en ${nuevos[0].origen_zona}, entregar en ${nuevos[0].destino_zona}`, '/modomensajero', 'vaelo-piloto');
+        }
+      }
+      conocidos = new Set(porAceptar.map(e => e.id));
+      document.title = porAceptar.length ? `(${porAceptar.length}) Nuevo envío · Vaelo` : 'Modo mensajero · Vaelo';
+      // Solo se redibuja si algo cambió, y nunca mientras escribes o confirmas una acción
+      const firma = JSON.stringify(envios) + enLinea;
+      const escribiendo = document.activeElement && $('lista').contains(document.activeElement) && document.activeElement.tagName === 'INPUT';
+      if (firma !== ultimaFirma && !ocupado && !escribiendo) {
+        ultimaFirma = firma;
+        if (!envios.length) $('lista').replaceChildren(el('div', { class: 'vacio', text: enLinea ? 'Estás en línea. Aquí aparecerán los envíos que te asignen.' : 'No tienes entregas. Conéctate para recibir envíos.' }));
+        else $('lista').replaceChildren(...envios.map(tarjeta));
+      }
+      pintarConexion(); pintarAlertaGps();
+    }
+
+    const linksNavegar = (lat, lng, direccion) => {
+      const destino = lat ? `${lat},${lng}` : encodeURIComponent(direccion + ', Guatemala');
+      return el('div', { class: 'navegar' },
+        el('a', { class: 'boton borde chico', target: '_blank', rel: 'noopener', href: `https://www.google.com/maps/dir/?api=1&destination=${destino}`, text: 'Google Maps' }),
+        el('a', { class: 'boton borde chico', target: '_blank', rel: 'noopener', href: lat ? `https://waze.com/ul?ll=${lat},${lng}&navigate=yes` : `https://waze.com/ul?q=${destino}&navigate=yes`, text: 'Waze' }));
+    };
+    function kmHasta(lat, lng) {
+      if (!ultimaPos || lat == null) return null;
+      const R = 6371, rad = (x) => x * Math.PI / 180;
+      const dLat = rad(lat - ultimaPos.lat), dLng = rad(lng - ultimaPos.lng);
+      const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(ultimaPos.lat)) * Math.cos(rad(lat)) * Math.sin(dLng / 2) ** 2;
+      return 2 * R * Math.asin(Math.sqrt(h));
+    }
+
+    function tarjeta(e) {
+      const fragil = e.fragil ? el('div', { class: 'franja-fragil', text: 'FRÁGIL: manejar con cuidado especial' }) : null;
+      const cobro = Number(e.cobro_destinatario) > 0 ? el('div', { class: 'cobro', text: `Cobrar a quien recibe: ${dinero(e.cobro_destinatario)}` }) : null;
+      const resumen = el('div', { style: 'font-size:.92rem;color:var(--suave)' },
+        `${e.vehiculo}, ${e.peso} lb${e.descripcion ? '. ' + e.descripcion : ''}. Envío ${dinero(e.precio)} (${PAGOS[e.metodo_pago] || e.metodo_pago})`,
+        e.notas ? el('div', { style: 'color:var(--tinta)', text: 'Indicaciones: ' + e.notas }) : null);
+
+      if (e.asignacion === 'por_aceptar') {
+        const km = kmHasta(e.origen_lat, e.origen_lng);
+        return el('article', { class: 'entrega-tarjeta por-aceptar' },
+          el('div', { class: 'cab' }, el('strong', { class: 'guia', text: 'Nuevo envío ' + e.guia }), el('span', { class: 'estado pendiente', text: 'Por aceptar' })),
+          fragil,
+          el('div', { class: 'parada' }, el('span', { text: 'A. Recoger en' }), `${e.origen_direccion} (${e.origen_zona})`, km != null ? el('div', { class: 'pista', text: `A ${km.toFixed(1)} km de ti` }) : null),
+          el('div', { class: 'parada b' }, el('span', { text: 'B. Entregar en' }), `${e.destino_zona}`),
+          resumen, cobro,
+          el('div', { class: 'acciones-aceptar' },
+            el('button', { class: 'boton cinta accion-principal', type: 'button', text: 'Aceptar envío', onclick: async (ev) => {
+              const b = ev.target; b.disabled = true; b.textContent = 'Revisando tu ubicación…'; ocupado++;
+              try {
+                const pos = await posicionFresca();
+                await api(`/api/piloto/envios/${e.id}/aceptar`, { body: pos });
+                enLinea = true; iniciarGps(); mantenerPantalla(true); mostrarMensaje($('msg'), '');
+              } catch (err) { mostrarMensaje($('msg'), err.message); b.disabled = false; b.textContent = 'Aceptar envío'; }
+              ocupado--; cargarEnvios();
+            } }),
+            el('button', { class: 'boton peligro', type: 'button', text: 'No puedo', onclick: async () => {
+              ocupado++;
+              const motivo = prompt('¿Por qué no puedes tomarlo? (opcional)');
+              ocupado--;
+              if (motivo === null) return;
+              try { await api(`/api/piloto/envios/${e.id}/rechazar`, { body: { motivo } }); cargarEnvios(); } catch (err) { mostrarMensaje($('msg'), err.message); }
+            } })));
+      }
+
+      const recoger = e.estado === 'pendiente';
+      const cerrado = e.estado === 'entregado';
+      const nota = el('input', { maxlength: 300, placeholder: '¿Quién recibió? Ej. Ana, la destinataria' });
+      const accion = (estado, texto, clase) => el('button', { class: 'boton accion-principal' + (clase ? ' ' + clase : ''), type: 'button', text: texto, onclick: async (ev) => {
+        if (estado === 'entregado' && !confirm(`¿Confirmas que entregaste ${e.guia}?`)) return;
+        const b = ev.target; b.disabled = true; b.textContent = 'Guardando…'; ocupado++;
+        try {
+          const pos = await posicionFresca();
+          await api(`/api/piloto/envios/${e.id}/estado`, { body: { estado, nota: estado === 'entregado' ? nota.value : '', ...pos } });
+          mostrarMensaje($('msg'), '');
+        } catch (err) { mostrarMensaje($('msg'), err.message); b.disabled = false; b.textContent = texto; }
+        ocupado--; cargarEnvios();
+      } });
+      const cliente = el('div', { class: 'cliente-piloto' },
+        e.cliente_tiene_foto && !cerrado ? el('img', { src: `/api/piloto/envios/${e.id}/foto-cliente`, alt: 'Foto del cliente' }) : null,
+        el('div', {}, el('span', { class: 'mini', text: 'Cliente' }), el('strong', { text: e.cliente_nombre }), ' ',
+          el('span', { class: e.cliente_verificado ? 'etiqueta-completa' : 'etiqueta-pendiente', text: e.cliente_verificado ? 'Identidad verificada' : 'Sin verificar' }),
+          el('br'), telLink(e.origen_telefono)));
+      return el('article', { class: 'entrega-tarjeta' + (!cerrado ? ' activa' : '') },
+        el('div', { class: 'cab' }, el('strong', { class: 'guia', text: e.guia }), chipEstado(e.estado)),
+        fragil, cerrado ? null : cliente,
+        el('div', { class: 'parada', style: recoger ? '' : 'opacity:.55' },
+          el('span', { text: 'A. Recoger en' }), `${e.origen_direccion} (${e.origen_zona})`,
+          recoger ? linksNavegar(e.origen_lat, e.origen_lng, e.origen_direccion) : null),
+        el('div', { class: 'parada b' },
+          el('span', { text: 'B. Entregar a' }), el('strong', { text: e.destino_nombre }), ' · ', telLink(e.destino_telefono), el('br'),
+          `${e.destino_direccion} (${e.destino_zona})`,
+          !recoger && !cerrado ? linksNavegar(e.destino_lat, e.destino_lng, e.destino_direccion) : null),
+        resumen, cobro,
+        cerrado ? el('p', { class: 'pista ok', text: 'Entregado ' + fecha(e.actualizado) })
+          : el('div', {}, el('p', { class: 'pista', text: 'El estado se actualiza solo con tu GPS: al salir del punto de recogida pasa a "En camino".' }),
+              recoger ? accion('recogido', 'Ya recogí el paquete') : [nota, accion('entregado', 'Paquete entregado', 'cinta')]));
+    }
+
+    iniciar();
+  </script>
+</body>
+</html>
