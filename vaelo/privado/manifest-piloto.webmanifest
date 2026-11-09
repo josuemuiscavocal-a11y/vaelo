@@ -1,0 +1,16 @@
+{
+  "name": "Vaelo Pilotos",
+  "short_name": "Vaelo Pilotos",
+  "description": "Recibe y entrega envíos de Vaelo Mensajería.",
+  "lang": "es-GT",
+  "id": "/modomensajero",
+  "start_url": "/modomensajero",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0e2463",
+  "theme_color": "#0e2463",
+  "icons": [
+    { "src": "/img/icono-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/img/icono-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
