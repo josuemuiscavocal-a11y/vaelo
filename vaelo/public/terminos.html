@@ -47,17 +47,22 @@
     <h2>6. Cancelaciones</h2>
     <p>Puedes cancelar sin costo mientras el paquete no se haya recogido y ningún piloto haya aceptado el envío. Si el piloto ya va en camino a recoger, cancelar cuesta <span data-cargo="cancelacion">Q15.00</span>. Los cargos pendientes se suman a tu siguiente envío.</p>
 
-    <h2>7. Responsabilidad y seguro</h2>
-    <p>Si un paquete se pierde o se daña mientras está a cargo de Vaelo, respondemos hasta <span data-seguro="responsabilidad_max">Q300.00</span> por envío sin seguro. Si declaras el valor del contenido y lo aseguras (<span data-seguro="pct">2</span>% del valor, mínimo <span data-seguro="minimo">Q5.00</span>), respondemos hasta el valor declarado. Los reclamos se presentan dentro de las 72 horas después de la entrega, con fotos del paquete y del contenido. No respondemos por paquetes mal empacados, artículos prohibidos o daños que ya tenía el paquete al recogerlo.</p>
+    <h2>7. Foto del paquete y reclamos</h2>
+    <p>Al pedir un envío tomas una foto del paquete: así queda registrado qué lleva antes de recogerlo. También puedes escribir el valor del contenido.</p>
+    <p>Si un paquete se pierde, se daña o llega incompleto mientras está a cargo de Vaelo, repórtalo desde el envío en tu cuenta (dentro de los <span data-cargo="dias_reclamo">3</span> días después de la entrega). Vaelo evalúa cada caso <strong>según lo que llevaba el paquete</strong>, con la foto que tomaste, el valor que declaraste, la foto de entrega y el recorrido del piloto, y si corresponde <strong>te hace una devolución de dinero</strong> por el monto evaluado. No respondemos por paquetes mal empacados, artículos prohibidos o daños que ya tenía el paquete al recogerlo.</p>
 
     <h2>8. Pagos</h2>
-    <p>Puedes pagar en efectivo al piloto, por transferencia (subiendo el comprobante) o, en cuentas de empresa autorizadas, a fin de mes. El dinero que el piloto cobra a quien recibe (cobro contra entrega) se entrega a la tienda o cliente que mandó el paquete.</p>
+    <p>Puedes pagar en efectivo al piloto o por transferencia. Si pagas por transferencia, manda la foto del comprobante al WhatsApp oficial de Vaelo <strong data-cargo="whatsapp">+502 3773 1793</strong> con tu número de guía: el envío se manda al piloto cuando confirmemos el pago. Las cuentas de empresa con contrato pueden pagar a fin de mes o elegir que pague quien recibe. El dinero que el piloto cobra a quien recibe (cobro contra entrega) se entrega a la tienda o cliente que mandó el paquete.</p>
+
+    <h2>Fletes en pickup</h2>
+    <p>Los fletes en pickup se piden por WhatsApp. Primero hablas con servicio al cliente sobre lo que se va a llevar, y el personal de Vaelo te da el precio. No tienen tarifa fija.</p>
 
     <h2>9. Ubicación en vivo</h2>
     <p>Para recoger y entregar, quien entrega y quien recibe comparten su ubicación con el piloto mientras el envío está activo. Ver el <a href="/privacidad">aviso de privacidad</a>.</p>
 
     <h2>10. Cambios</h2>
     <p>Podemos actualizar estos términos. Los cambios se publican en esta página y aplican a los envíos que se pidan después.</p>
+    <p>Pilotos: ver la <a href="/politica-pilotos">política para pilotos</a>. Empresas: ver las <a href="/politicas-empresas">políticas para empresas</a>.</p>
     <p>Dudas: escríbenos por WhatsApp desde la <a href="/">página principal</a>.</p>
   </div></main>
   <footer class="pie-sitio"><div class="contenedor"><div>Vaelo Mensajería · Guatemala</div><div><a href="/terminos">Términos</a> · <a href="/privacidad">Privacidad</a></div></div></footer>
@@ -65,10 +70,8 @@
   <script>
     pintarBarra();
     api('/api/config').then((c) => {
-      const t = { devolucion: dinero(c.cargos.devolucion), bodega_dia: dinero(c.cargos.bodega_dia), reentrega: dinero(c.cargos.reentrega), cancelacion: dinero(c.cargos.cancelacion), horas_decidir: String(c.cargos.horas_decidir) };
+      const t = { dias_reclamo: String(c.dias_reclamo ?? 3), whatsapp: '+' + (c.whatsapp_pagos || '50237731793').replace(/^(\d{3})(\d{4})(\d{4})$/, '$1 $2 $3'), devolucion: dinero(c.cargos.devolucion), bodega_dia: dinero(c.cargos.bodega_dia), reentrega: dinero(c.cargos.reentrega), cancelacion: dinero(c.cargos.cancelacion), horas_decidir: String(c.cargos.horas_decidir) };
       document.querySelectorAll('[data-cargo]').forEach(n => { n.textContent = t[n.dataset.cargo]; });
-      const s = { responsabilidad_max: dinero(c.seguro.responsabilidad_max), pct: String(c.seguro.pct), minimo: dinero(c.seguro.minimo) };
-      document.querySelectorAll('[data-seguro]').forEach(n => { n.textContent = s[n.dataset.seguro]; });
     }).catch(() => {});
   </script>
 </body>

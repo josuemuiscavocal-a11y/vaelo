@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Políticas para empresas · Vaelo</title>
+  <meta name="theme-color" content="#0e2463">
+  <link rel="icon" href="/img/favicon.png" type="image/png">
+  <link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/styles.css?v=20261109b">
+</head>
+<body>
+  <header id="barra" class="barra"><div class="contenedor"><a href="/" class="marca"><img src="/img/logo-blanco.png" alt="Vaelo" width="139" height="40"></a></div></header>
+  <main class="area documento-legal"><div class="contenedor">
+    <h1>Políticas y condiciones para empresas</h1>
+    <p class="pista">Vigentes desde el 9 de noviembre de 2026.</p>
+
+    <h2>1. Qué ofrece Vaelo</h2>
+    <p>Vaelo presta su servicio de pilotos para que tu empresa mejore sus entregas sin contratar ni mantener su propia flotilla de motos. Tu empresa usa los pilotos de Vaelo <strong>sin costo de flotilla</strong>: el envío lo paga tu cliente al recibir, o tu empresa si así lo eliges.</p>
+    <p>Es una relación de servicio: tu empresa <strong>no gana comisiones ni ingresos de Vaelo</strong>, y Vaelo no gana sobre tus ventas. Vaelo cobra solo por sus envíos y, cuando aplica, por guardar tus paquetes en la sede.</p>
+
+    <h2>2. Cómo se obtiene el acceso</h2>
+    <ol>
+      <li>Envías la solicitud con los datos de la empresa, fotos de tu sede, datos y DPI del representante y la patente de comercio.</li>
+      <li>Vaelo revisa la información y coordina una cita para firmar el contrato.</li>
+      <li>Al firmar, se activa el apartado de empresa en tu cuenta.</li>
+    </ol>
+    <p>Vaelo puede rechazar una solicitud con datos incompletos o que no se puedan verificar.</p>
+
+    <h2>3. Precios</h2>
+    <ul>
+      <li>Cada envío cuesta la tarifa vigente de Vaelo (por ejemplo Q35.00 o Q45.00 según la zona). De cada envío, Vaelo toma siempre <strong data-v="comision">Q5.00</strong> y el resto es para el piloto.</li>
+      <li>Varios paquetes para la misma dirección y la misma persona se cobran como un solo envío.</li>
+      <li>Si eliges que pague quien recibe, el piloto cobra el envío al entregar.</li>
+      <li>Los cobros contra entrega de tus productos se te entregan cuando el piloto liquida en la sede.</li>
+    </ul>
+
+    <h2>4. Envíos a la sede de Vaelo</h2>
+    <p>Puedes mandar un envío de al menos <strong data-v="min_paquetes">10</strong> paquetes a la sede para que Vaelo coordine la entrega de cada uno.</p>
+    <ul>
+      <li>Si los paquetes salen a entregarse <strong>el mismo día</strong> que llegan, no pagas nada por tenerlos: solo el envío de cada uno.</li>
+      <li>Si se quedan en la sede, se cobran <strong data-v="bodega_empresa">Q10.00</strong> por paquete por cada día, hasta que salgan.</li>
+      <li>Cada paquete lleva su etiqueta con el nombre, teléfono y zona de quien recibe, igual que en la lista que subiste.</li>
+    </ul>
+
+    <h2>5. Entregas fallidas, cancelaciones y reclamos</h2>
+    <p>Aplican las mismas reglas que a cualquier cliente (ver <a href="/terminos">términos del servicio</a>): devolución <span data-v="devolucion">Q35.00</span>, sede <span data-v="bodega_dia">Q20.00</span> por día y cancelación con el piloto en camino <span data-v="cancelacion">Q15.00</span>. Los reclamos se evalúan según lo que llevaba el paquete y, si corresponde, se hace la devolución del dinero.</p>
+
+    <h2>6. Obligaciones de la empresa</h2>
+    <ul>
+      <li>Empacar bien cada paquete y no mandar artículos prohibidos (ver términos).</li>
+      <li>Dar datos reales de quien recibe y mandarle su enlace para que comparta su ubicación.</li>
+      <li>Pagar a tiempo los cargos de sede, devoluciones y, si tiene crédito, la factura del mes.</li>
+      <li>Mantener actualizados los datos de la empresa y del representante.</li>
+    </ul>
+
+    <h2>7. Suspensión</h2>
+    <p>Vaelo puede suspender el apartado de empresa por cargos sin pagar, artículos prohibidos, datos falsos o incumplimiento del contrato firmado.</p>
+  </div></main>
+  <footer class="pie-sitio"><div class="contenedor"><div>Vaelo Mensajería · Guatemala</div><div><a href="/terminos">Términos</a> · <a href="/privacidad">Privacidad</a> · <a href="/politica-pilotos">Pilotos</a> · <a href="/politicas-empresas">Empresas</a></div></div></footer>
+  <script src="/js/comun.js?v=20261109c"></script>
+  <script>
+    pintarBarra();
+    api('/api/config').then((c) => {
+      const v = { comision: dinero(c.vaelo_por_envio ?? 5), dias_liquidar: String(c.dias_liquidar ?? 3), bodega_empresa: dinero(c.cargo_bodega_empresa ?? 10), min_paquetes: String(c.min_paquetes_sede ?? 10),
+        devolucion: dinero(c.cargos.devolucion), bodega_dia: dinero(c.cargos.bodega_dia), reentrega: dinero(c.cargos.reentrega), cancelacion: dinero(c.cargos.cancelacion),
+        horas_decidir: String(c.cargos.horas_decidir), dias_reclamo: String(c.dias_reclamo ?? 3), whatsapp: '+' + (c.whatsapp_pagos || '50237731793').replace(/^(\d{3})(\d{4})(\d{4})$/, '$1 $2 $3') };
+      document.querySelectorAll('[data-v]').forEach(n => { if (v[n.dataset.v] != null) n.textContent = v[n.dataset.v]; });
+    }).catch(() => {});
+  </script>
+</body>
+</html>

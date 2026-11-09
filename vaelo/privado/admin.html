@@ -20,6 +20,7 @@
         <button role="tab" id="tab-envios" aria-selected="true" aria-controls="panel-envios" data-icono="paquete">Envíos<span class="insignia" id="insignia-envios" hidden></span></button>
         <button role="tab" id="tab-mensajeros" aria-selected="false" aria-controls="panel-mensajeros" data-icono="piloto">Pilotos<span class="insignia" id="insignia-mensajeros" hidden></span></button>
         <button role="tab" id="tab-clientes" aria-selected="false" aria-controls="panel-clientes" data-icono="clientes">Clientes<span class="insignia" id="insignia-clientes" hidden></span></button>
+        <button role="tab" id="tab-empresas" aria-selected="false" aria-controls="panel-empresas" data-icono="tienda">Empresas<span class="insignia" id="insignia-empresas" hidden></span></button>
         <button role="tab" id="tab-caja" aria-selected="false" aria-controls="panel-caja" class="solo-admin" data-icono="caja">Caja<span class="insignia" id="insignia-caja" hidden></span></button>
         <button role="tab" id="tab-descuentos" aria-selected="false" aria-controls="panel-descuentos" class="solo-admin" data-icono="etiqueta">Descuentos</button>
         <button role="tab" id="tab-reportes" aria-selected="false" aria-controls="panel-reportes" class="solo-admin" data-icono="grafica">Reportes</button>
@@ -59,6 +60,7 @@
           <label class="oculto" for="buscar">Buscar</label>
           <input id="buscar" type="search" placeholder="Buscar por guía, nombre o teléfono">
           <div id="chips" style="display:flex;gap:.4rem;flex-wrap:wrap"></div>
+          <button class="boton cinta chico" type="button" id="nuevo-flete" style="margin-left:auto">Nuevo flete en pickup</button>
         </div>
         <div class="tabla-envoltura">
           <table>
@@ -118,11 +120,30 @@
         </div>
       </section>
 
+      <section id="panel-empresas" role="tabpanel" aria-labelledby="tab-empresas" hidden>
+        <div id="msg-empresas" class="mensaje" role="alert"></div>
+        <div class="bloque solo-admin">
+          <h2>Solicitudes de contrato</h2>
+          <p class="bloque-nota">Empresas que quieren usar los pilotos de Vaelo. Revisa sus datos y fotos, pon la cita para firmar el contrato y, ya firmado, activa su apartado de empresa.</p>
+          <div id="lista-solicitudes"></div>
+        </div>
+        <div class="bloque">
+          <h2>Paquetes de empresas que llegan a la sede</h2>
+          <p class="bloque-nota">Cuando la empresa deja los paquetes en la sede, márcalo recibido: desde ese momento se pueden asignar a pilotos. Los que salen el mismo día no pagan bodega; después se cobran por paquete por día.</p>
+          <div id="lista-lotes"></div>
+        </div>
+      </section>
+
       <section id="panel-caja" role="tabpanel" aria-labelledby="tab-caja" hidden>
         <div id="msg-caja" class="mensaje" role="alert"></div>
         <div class="bloque">
-          <h2>Transferencias por revisar</h2>
-          <p class="bloque-nota">Envíos pagados por transferencia. Abre el comprobante, revisa que el dinero entró a la cuenta y márcalo verificado.</p>
+          <h2>Reclamos y devoluciones a clientes</h2>
+          <p class="bloque-nota">Reportes de paquetes perdidos, dañados o incompletos. Evalúa según lo que llevaba el paquete (foto del cliente, valor declarado, foto de entrega y recorrido) y decide cuánto se le devuelve y cuánto paga el piloto.</p>
+          <div id="caja-reclamos"></div>
+        </div>
+        <div class="bloque">
+          <h2>Transferencias por confirmar</h2>
+          <p class="bloque-nota">El cliente manda el comprobante al WhatsApp de Vaelo. Revisa que el dinero entró a la cuenta y márcalo recibido: hasta entonces el envío no se manda a ningún piloto.</p>
           <div id="caja-transferencias"></div>
         </div>
         <div class="bloque">
@@ -222,7 +243,7 @@
           <p class="bloque-nota">Dentro de las zonas cubiertas se cobra la tarifa fija. Fuera de ellas: arranque + kilómetros × precio por km (nunca menos que la tarifa fija).</p>
           <div class="tabla-envoltura">
             <table>
-              <thead><tr><th>Vehículo</th><th>Descripción</th><th>Peso máx. (lb)</th><th>Tarifa zonas (Q)</th><th>Arranque (Q)</th><th>Por km (Q)</th><th>Activo</th><th></th></tr></thead>
+              <thead><tr><th>Vehículo</th><th>Descripción</th><th>Peso máx. (lb)</th><th>Tarifa zonas (Q)</th><th>Arranque (Q)</th><th>Por km (Q)</th><th>Solo flete <span class="ayuda">Por WhatsApp, precio a mano</span></th><th>Activo</th><th></th></tr></thead>
               <tbody id="tabla-vehiculos"></tbody>
             </table>
           </div>
@@ -261,7 +282,7 @@
           <label class="casilla"><input type="checkbox" id="auto-asignar" style="width:auto"> <span><strong>Asignar solo al piloto más cercano</strong><br><small style="color:var(--suave)">Cada pedido nuevo se ofrece al piloto libre más cercano con el vehículo correcto. Si no acepta a tiempo, pasa al siguiente. Siempre puedes asignar a mano.</small></span></label>
           <div class="fila">
             <div class="campo"><label for="segundos-aceptar">Segundos para aceptar</label><input id="segundos-aceptar" type="number" min="20" max="600" step="5"></div>
-            <div class="campo"><label for="comision-tipo">El piloto gana por entrega</label><select id="comision-tipo"><option value="porcentaje">Porcentaje del envío</option><option value="fijo">Monto fijo por entrega</option></select></div>
+            <div class="campo"><label for="comision-tipo">El piloto gana por entrega</label><select id="comision-tipo"><option value="vaelo_fijo">Todo menos lo de Vaelo (Vaelo cobra un monto fijo)</option><option value="porcentaje">Porcentaje del envío</option><option value="fijo">Monto fijo por entrega</option></select></div>
             <div class="campo"><label for="comision-valor">Valor <span class="ayuda" id="comision-ayuda">%</span></label><input id="comision-valor" type="number" min="0" step="0.5"></div>
           </div>
           <button class="boton" type="submit">Guardar</button>
@@ -285,14 +306,18 @@
           <button class="boton" type="submit" style="margin-top:1rem">Guardar</button>
         </form>
         <form class="bloque" id="form-seguro" novalidate>
-          <h2>Seguro, tarifa fija y pagos</h2>
+          <h2>Pagos, pilotos, reclamos y empresas</h2>
           <div class="fila">
-            <div class="campo"><label for="aj-seguro_pct">Seguro: % del valor declarado</label><input id="aj-seguro_pct" type="number" min="0" max="50" step="0.5"></div>
-            <div class="campo"><label for="aj-seguro_minimo">Seguro mínimo (Q)</label><input id="aj-seguro_minimo" type="number" min="0" step="1"></div>
-            <div class="campo"><label for="aj-responsabilidad_max">Sin seguro, Vaelo responde hasta (Q)</label><input id="aj-responsabilidad_max" type="number" min="0" step="50"></div>
+            <div class="campo"><label for="aj-whatsapp_pagos">WhatsApp para comprobantes <span class="ayuda">Con 502, ej. 50237731793</span></label><input id="aj-whatsapp_pagos" type="tel" maxlength="15"></div>
+            <div class="campo"><label for="aj-dias_liquidar">Días para que el piloto entregue el efectivo <span class="ayuda">Después no puede conectarse</span></label><input id="aj-dias_liquidar" type="number" min="1" max="60" step="1"></div>
+            <div class="campo"><label for="aj-dias_reclamo">Días para reportar un problema</label><input id="aj-dias_reclamo" type="number" min="1" max="60" step="1"></div>
             <div class="campo"><label for="aj-km_max_tarifa_fija">Km máximos con tarifa fija <span class="ayuda">Solo si no hay zonas dibujadas</span></label><input id="aj-km_max_tarifa_fija" type="number" min="1" max="200" step="1"></div>
           </div>
-          <div class="campo"><label for="aj-datos_transferencia">Datos para pagar por transferencia <span class="ayuda">Los ve el cliente al elegir transferencia</span></label><textarea id="aj-datos_transferencia" maxlength="600" rows="3" placeholder="Banco Industrial, cuenta monetaria 000-000000-0, a nombre de Vaelo, S.A."></textarea></div>
+          <div class="fila">
+            <div class="campo"><label for="aj-cargo_bodega_empresa">Empresas: bodega por paquete por día (Q)</label><input id="aj-cargo_bodega_empresa" type="number" min="0" step="0.5"></div>
+            <div class="campo"><label for="aj-min_paquetes_sede">Empresas: mínimo de paquetes a la sede</label><input id="aj-min_paquetes_sede" type="number" min="1" step="1"></div>
+          </div>
+          <div class="campo"><label for="aj-datos_transferencia">Datos de la cuenta para transferencias <span class="ayuda">Los ve el cliente al elegir transferencia</span></label><textarea id="aj-datos_transferencia" maxlength="600" rows="3" placeholder="Banco Industrial, cuenta monetaria 000-000000-0, a nombre de Vaelo, S.A."></textarea></div>
           <button class="boton" type="submit">Guardar</button>
         </form>
         <form class="bloque" id="form-respaldos" novalidate>
@@ -329,9 +354,9 @@
     let filtroEstado = '', temporizador = null, mensajeros = [], vehiculos = [], mapaFlota = null, capaFlota = null;
     const sub = (t) => el('small', { style: 'color:var(--suave)', text: t || '' });
 
-    const tabs = ['envios', 'mensajeros', 'clientes', 'caja', 'descuentos', 'reportes', 'tarifas'];
+    const tabs = ['envios', 'mensajeros', 'clientes', 'empresas', 'caja', 'descuentos', 'reportes', 'tarifas'];
     const TITULOS = { envios: ['Envíos', 'Pedidos y su estado'], mensajeros: ['Pilotos', 'Flota en vivo, documentos y aprobaciones'], clientes: ['Clientes', 'Identidad, empresas y calificaciones'],
-      caja: ['Caja', 'Efectivo, transferencias, pagos a pilotos y cargos'], descuentos: ['Descuentos', 'Promociones y cupones'], reportes: ['Reportes', 'Cómo va el negocio'],
+      caja: ['Caja', 'Efectivo, transferencias, pagos a pilotos, reembolsos y cargos'], empresas: ['Empresas', 'Contratos y paquetes en la sede'], descuentos: ['Descuentos', 'Promociones y cupones'], reportes: ['Reportes', 'Cómo va el negocio'],
       tarifas: ['Tarifas y ajustes', 'Precios, zonas, sede y equipo'] };
     function abrirTab(nombre) {
       tabs.forEach(t => { $('tab-' + t).setAttribute('aria-selected', String(t === nombre)); $('panel-' + t).hidden = t !== nombre; });
@@ -342,6 +367,7 @@
       if (nombre === 'clientes') cargarClientes();
       if (nombre === 'tarifas') { cargarTarifas(); cargarOperadores(); }
       if (nombre === 'caja') cargarCaja();
+      if (nombre === 'empresas') cargarEmpresas();
       if (nombre === 'descuentos') cargarDescuentos();
       if (nombre === 'reportes') cargarReportes();
     }
@@ -469,16 +495,160 @@
     function bloqueComprobantePanel(e, guardar) {
       const estado = { sin_comprobante: ['Sin comprobante todavía', 'etiqueta-gris'], por_revisar: ['Por revisar', 'etiqueta-azul'], verificado: ['Verificada', 'etiqueta-completa'], rechazado: ['Rechazado', 'etiqueta-pendiente'] }[e.pago_estado] || ['—', 'etiqueta-gris'];
       return el('div', { class: 'bloque', style: 'background:var(--gris);border:0' },
-        el('h3', {}, 'Transferencia ', el('span', { class: estado[1], text: estado[0] })),
+        el('h3', {}, 'Transferencia ', el('span', { class: estado[1], text: e.pago_estado === 'verificado' ? 'Pago recibido' : 'Esperando comprobante por WhatsApp' })),
         el('p', { class: 'pista', text: `Monto: ${dinero(e.precio + (e.cargos_extra || 0))}${e.pago_nota ? '. Nota: ' + e.pago_nota : ''}` }),
         e.tiene_comprobante ? el('a', { class: 'prueba-img', href: `/api/admin/envios/${e.id}/comprobante`, target: '_blank', rel: 'noopener' },
           el('img', { src: `/api/admin/envios/${e.id}/comprobante`, alt: 'Comprobante', onerror: (ev) => ev.target.replaceWith(el('span', { class: 'doc-pdf', text: 'Ver PDF del comprobante' })) })) : null,
         e.pago_estado !== 'verificado' ? el('div', { class: 'navegar' },
-          el('button', { class: 'boton chico', type: 'button', text: 'El dinero entró: verificar', onclick: (ev) => guardar(ev.target, () => api(`/api/admin/pagos/${e.id}`, { body: { estado: 'verificado' } })) }),
+          el('button', { class: 'boton chico', type: 'button', text: 'Pago recibido: mandar al piloto', onclick: (ev) => guardar(ev.target, () => api(`/api/admin/pagos/${e.id}`, { body: { estado: 'verificado' } })) }),
           e.tiene_comprobante ? el('button', { class: 'boton peligro chico', type: 'button', text: 'Rechazar comprobante', onclick: (ev) => {
             const nota = prompt('¿Qué está mal? El cliente lo verá. Ej. El monto no coincide.');
             if (nota) guardar(ev.target, () => api(`/api/admin/pagos/${e.id}`, { body: { estado: 'rechazado', nota } }));
           } }) : null) : null);
+    }
+
+    // ---------- Reclamos del cliente ----------
+    function bloqueReclamosPanel(e, guardar) {
+      if (!e.reclamos || !e.reclamos.length) return null;
+      return el('div', { class: 'bloque bloque-fallido' }, el('h3', {}, icono('alerta'), ' Reclamo del cliente'),
+        ...e.reclamos.map(r => formReclamo({ ...r, guia: e.guia, valor_declarado: e.valor_declarado, piloto: r.piloto }, () => abrirEnvio(e.id))));
+    }
+    function formReclamo(r, alListo) {
+      const msg = el('div', { class: 'mensaje', role: 'alert' });
+      const caja = el('div', { class: 'reclamo' },
+        el('p', {}, el('strong', { text: r.tipo_texto }), ` · ${r.guia} · ${fecha(r.creado)}`, el('br'), r.descripcion),
+        r.valor_declarado > 0 ? el('p', { class: 'pista', text: `Valor declarado al pedir: ${dinero(r.valor_declarado)}` }) : null,
+        r.tiene_foto ? el('a', { class: 'prueba-img', href: `/api/admin/reclamos/${r.id}/foto`, target: '_blank', rel: 'noopener' }, el('img', { src: `/api/admin/reclamos/${r.id}/foto`, alt: 'Foto del reclamo' }), el('small', { text: 'Foto del cliente' })) : null);
+      if (r.estado !== 'abierto') {
+        caja.append(el('p', { class: r.estado === 'aprobado' ? 'mensaje exito' : 'mensaje error' }, `${r.estado === 'aprobado' ? 'Aprobado' : 'Rechazado'} por ${r.resuelto_por}: ${r.resolucion}`,
+          r.estado === 'aprobado' ? ` Devolución al cliente ${dinero(r.monto_cliente)}${r.devuelto_en ? ' (pagada)' : ' (pendiente)'}${r.monto_piloto ? `; paga el piloto ${dinero(r.monto_piloto)}` : ''}.` : ''));
+        if (r.estado === 'aprobado' && r.monto_cliente > 0 && !r.devuelto_en && rolPanel === 'admin') caja.append(el('button', { class: 'boton chico', type: 'button', text: 'Ya se le devolvió el dinero', onclick: async () => {
+          try { await api(`/api/admin/reclamos/${r.id}`, { body: { accion: 'devuelto' } }); alListo(); } catch (e) { mostrarMensaje(msg, e.message); } } }), msg);
+        return caja;
+      }
+      if (rolPanel !== 'admin') { caja.append(el('p', { class: 'pista', text: 'La administración lo está evaluando.' })); return caja; }
+      const mc = el('input', { type: 'number', min: 0, step: '0.01', placeholder: '0.00' }), mp = el('input', { type: 'number', min: 0, step: '0.01', placeholder: '0.00' });
+      const res = el('textarea', { rows: 2, maxlength: 500, placeholder: 'Qué se evaluó y qué se decidió. Lo ve el cliente.' });
+      caja.append(el('div', { class: 'fila' },
+        el('div', { class: 'campo' }, el('label', { text: 'Devolver al cliente (Q)' }), mc),
+        el('div', { class: 'campo' }, el('label', {}, 'Paga el piloto (Q) ', el('span', { class: 'ayuda', text: r.piloto ? r.piloto + ', se descuenta de su pago' : 'Sin piloto' })), mp)),
+        el('div', { class: 'campo' }, el('label', { text: 'Resolución' }), res), msg,
+        el('div', { class: 'navegar' },
+          el('button', { class: 'boton chico', type: 'button', text: 'Aprobar devolución', onclick: async () => {
+            try { await api(`/api/admin/reclamos/${r.id}`, { body: { accion: 'aprobar', monto_cliente: mc.value, monto_piloto: mp.value, resolucion: res.value } }); alListo(); } catch (e) { mostrarMensaje(msg, e.message); } } }),
+          el('button', { class: 'boton peligro chico', type: 'button', text: 'Rechazar', onclick: async () => {
+            try { await api(`/api/admin/reclamos/${r.id}`, { body: { accion: 'rechazar', resolucion: res.value } }); alListo(); } catch (e) { mostrarMensaje(msg, e.message); } } })));
+      return caja;
+    }
+
+    // ---------- Nuevo flete en pickup (se coordina por WhatsApp; el precio lo pone la oficina) ----------
+    async function nuevoFlete() {
+      const [t, c, m] = await Promise.all([api('/api/admin/tarifas').catch(() => null), api('/api/admin/clientes').catch(() => ({ clientes: [] })), api('/api/admin/mensajeros')]);
+      const vehs = t ? t.vehiculos.filter(v => v.activo) : vehiculos;
+      const msg = el('div', { class: 'mensaje', role: 'alert' });
+      const f = {};
+      const campo = (k, titulo, input, ayuda) => { f[k] = input; return el('div', { class: 'campo' }, el('label', {}, titulo, ayuda ? el('span', { class: 'ayuda', text: ' ' + ayuda }) : null), input); };
+      const selVeh = el('select', {}, vehs.map(v => el('option', { value: v.id, text: v.nombre + (v.solo_oficina ? ' (flete)' : ''), selected: !!v.solo_oficina })));
+      const pilotosDe = () => m.mensajeros.filter(p => p.puede_trabajar).sort((a, b) => (b.vehiculo_id === Number(selVeh.value)) - (a.vehiculo_id === Number(selVeh.value)) || b.en_linea_real - a.en_linea_real);
+      const selPil = el('select', {});
+      const pintarPilotos = () => selPil.replaceChildren(...pilotosDe().map(p => el('option', { value: p.id, text: `${p.nombre} · ${p.vehiculo || 'sin vehículo'}${p.en_linea_real ? ' · en línea' : ''}` })));
+      selVeh.addEventListener('change', pintarPilotos); pintarPilotos();
+      const selCli = el('select', {}, el('option', { value: '', text: 'Cliente por WhatsApp (sin cuenta)' }), c.clientes.map(x => el('option', { value: x.id, text: `${x.empresa_nombre || x.nombre} · ${x.telefono}` })));
+      const caja = el('div', { class: 'mapa' });
+      $('dlg-cuerpo').replaceChildren(
+        el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: () => $('dlg').close() }),
+        el('h2', { text: 'Nuevo flete' }),
+        el('p', { class: 'pista', text: 'Para fletes que ya se coordinaron con el cliente por WhatsApp: qué se lleva, de dónde, a dónde y el precio. El piloto recibe el aviso y el flete queda en el sistema.' }),
+        el('div', { class: 'fila' }, campo('cliente_id', 'Cliente', selCli), campo('cliente_nombre', 'Nombre del cliente', el('input', { maxlength: 100 }), 'Si no tiene cuenta'), campo('cliente_telefono', 'Teléfono del cliente', el('input', { type: 'tel', maxlength: 30 }))),
+        el('div', { class: 'fila' }, campo('descripcion', '¿Qué se lleva?', el('input', { maxlength: 200, placeholder: 'Refrigeradora, 10 cajas de mercadería…' })), campo('peso', 'Peso aprox. (lb)', el('input', { type: 'number', min: 0 }))),
+        el('div', { class: 'fila' }, campo('origen_direccion', 'Sale de', el('input', { maxlength: 300 })), campo('origen_zona', 'Zona de salida', el('input', { maxlength: 60 }))),
+        el('div', { class: 'fila' }, campo('destino_nombre', 'Se entrega a', el('input', { maxlength: 100 })), campo('destino_telefono', 'Teléfono', el('input', { type: 'tel', maxlength: 30 }))),
+        el('div', { class: 'fila' }, campo('destino_direccion', 'Dirección de entrega', el('input', { maxlength: 300 })), campo('destino_zona', 'Zona de entrega', el('input', { maxlength: 60 }))),
+        el('label', { class: 'etiqueta-campo', text: 'Punto de entrega en el mapa (opcional, ayuda al piloto a navegar)' }), caja,
+        el('div', { class: 'fila', style: 'margin-top:1rem' }, campo('precio', 'Precio acordado (Q)', el('input', { type: 'number', min: 1, step: '0.01' })),
+          campo('metodo_pago', 'Pago', el('select', {}, el('option', { value: 'efectivo', text: 'Efectivo al piloto' }), el('option', { value: 'transferencia', text: 'Transferencia (ya recibida)' }), el('option', { value: 'credito', text: 'Crédito de empresa' }))),
+          campo('cobro_destinatario', 'Cobrar al recibir (Q)', el('input', { type: 'number', min: 0, step: '0.01' }), 'Opcional')),
+        el('div', { class: 'fila' }, campo('vehiculo_id', 'Vehículo', selVeh), campo('mensajero_id', 'Piloto', selPil),
+          campo('estado', '¿Ya salió?', el('select', {}, el('option', { value: 'recogido', text: 'Sí, ya salió con la carga' }), el('option', { value: 'pendiente', text: 'Todavía va a recoger' })))),
+        campo('notas', 'Indicaciones', el('input', { maxlength: 300 })),
+        msg,
+        el('button', { class: 'boton', type: 'button', text: 'Crear flete y avisar al piloto', onclick: async (ev) => {
+          const body = Object.fromEntries(Object.entries(f).map(([k, i]) => [k, i.value]));
+          const p = sel && sel.obtener(); if (p) { body.destino_lat = p.lat; body.destino_lng = p.lng; }
+          ev.target.disabled = true;
+          try { const r = await api('/api/admin/fletes', { body }); $('dlg').close(); cargarEnvios(); cargarResumen(); abrirEnvio(r.id); }
+          catch (e) { mostrarMensaje(msg, e.message); ev.target.disabled = false; }
+        } }));
+      $('dlg').showModal();
+      const sel = selectorPunto(caja, { letra: 'B', clase: 'entrega', alDireccion: (t, usar) => { if (usar || !f.destino_direccion.value) f.destino_direccion.value = t; } });
+    }
+    $('nuevo-flete').addEventListener('click', () => nuevoFlete().catch(e => alert(e.message)));
+
+    // ---------- Empresas: solicitudes de contrato y paquetes en la sede ----------
+    async function cargarEmpresas() {
+      let pendientes = 0;
+      if (rolPanel === 'admin') {
+        try {
+          const r = await api('/api/admin/empresas');
+          const ETQ = { enviada: 'etiqueta-azul', cita: 'etiqueta-pendiente', aprobada: 'etiqueta-completa', rechazada: 'etiqueta-gris' };
+          pendientes += r.solicitudes.filter(x => x.estado === 'enviada').length;
+          $('lista-solicitudes').replaceChildren(...(r.solicitudes.length ? r.solicitudes.map(x => el('div', { class: 'caja-fila' },
+            el('div', {}, el('strong', { text: x.empresa_nombre }), ' ', el('span', { class: ETQ[x.estado], text: x.estado_texto }), el('br'),
+              sub(`${x.giro || ''} · ${x.paquetes_mes || '?'} paquetes al mes · ${x.rep_nombre} · ${x.cita_fecha ? 'cita ' + x.cita_fecha.replace('T', ' ') : fecha(x.enviada_en)}`)),
+            el('button', { class: 'boton chico' + (x.estado === 'enviada' ? '' : ' borde'), type: 'button', text: 'Revisar', onclick: () => verSolicitud(x, r.documentos) }))) : [el('p', { class: 'pista', text: 'Todavía no hay solicitudes.' })]));
+        } catch (e) { mostrarMensaje($('msg-empresas'), e.message); }
+      }
+      try {
+        const { lotes } = await api('/api/admin/lotes-sede');
+        const EST = { esperando: ['Esperando que lleguen', 'etiqueta-azul'], recibido: ['En la sede', 'etiqueta-completa'], cancelado: ['Cancelado', 'etiqueta-gris'] };
+        pendientes += lotes.filter(l => l.estado === 'esperando').length;
+        $('lista-lotes').replaceChildren(...(lotes.length ? lotes.map(l => el('div', { class: 'caja-fila' },
+          el('div', {}, el('strong', { text: `${l.empresa}: ${l.paquetes} paquetes` }), ' ', el('span', { class: EST[l.estado][1], text: EST[l.estado][0] }), el('br'),
+            sub(`${l.entregas} entregas · ${l.entregados} entregadas · ${l.en_sede} en la sede${l.dias_en_sede ? ` · ${l.dias_en_sede} día(s), ${dinero(l.costo_hoy)} de bodega` : ''}${l.entregar_desde ? ' · repartir desde ' + l.entregar_desde : ''}`)),
+          l.estado === 'esperando' ? el('div', { style: 'display:flex;gap:.4rem' },
+            el('button', { class: 'boton chico', type: 'button', text: 'Llegaron a la sede', onclick: async () => {
+              if (!confirm(`¿Llegaron los ${l.paquetes} paquetes de ${l.empresa}?`)) return;
+              try { await api(`/api/admin/lotes-sede/${l.id}`, { body: { accion: 'recibido' } }); cargarEmpresas(); } catch (e) { mostrarMensaje($('msg-empresas'), e.message); } } }),
+            el('button', { class: 'boton peligro chico', type: 'button', text: 'Cancelar', onclick: async () => {
+              if (!confirm('Se cancelan todas las entregas de este envío. ¿Continuar?')) return;
+              try { await api(`/api/admin/lotes-sede/${l.id}`, { body: { accion: 'cancelar' } }); cargarEmpresas(); } catch (e) { mostrarMensaje($('msg-empresas'), e.message); } } })) : null)) : [el('p', { class: 'pista', text: 'No hay envíos de empresas a la sede.' })]));
+      } catch (e) { mostrarMensaje($('msg-empresas'), e.message); }
+      $('insignia-empresas').textContent = String(pendientes); $('insignia-empresas').hidden = !pendientes;
+    }
+    function verSolicitud(x, docs) {
+      const msg = el('div', { class: 'mensaje', role: 'alert' });
+      const dato = (t, v) => el('div', {}, el('span', { text: t }), v || '—');
+      const fechaCita = el('input', { type: 'datetime-local', value: x.cita_fecha || '' });
+      const lugar = el('input', { maxlength: 200, value: x.cita_lugar || '', placeholder: 'Sede de Vaelo' });
+      const nota = el('input', { maxlength: 500, placeholder: 'Ej. Traer copia de la patente' });
+      const credito = el('input', { type: 'checkbox', style: 'width:auto' });
+      const accion = (body, pregunta) => async (ev) => {
+        if (pregunta && !confirm(pregunta)) return;
+        ev.target.disabled = true;
+        try { await api(`/api/admin/empresas/${x.id}`, { body }); $('dlg').close(); cargarEmpresas(); cargarClientes().catch(() => {}); }
+        catch (e) { mostrarMensaje(msg, e.message); ev.target.disabled = false; }
+      };
+      const abierta = ['enviada', 'cita'].includes(x.estado);
+      $('dlg-cuerpo').replaceChildren(
+        el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: () => $('dlg').close() }),
+        el('h2', { text: x.empresa_nombre }), el('span', { class: 'etiqueta-azul', text: x.estado_texto }),
+        el('div', { class: 'datos' }, dato('Razón social', x.razon_social), dato('NIT', x.nit), dato('Giro', x.giro), dato('Paquetes al mes', String(x.paquetes_mes || '')),
+          dato('Sede', [x.direccion, x.zona].filter(Boolean).join(', ')), dato('Contacto', [x.telefono, x.correo].filter(Boolean).join(' · ')), dato('Web o redes', x.sitio_web),
+          dato('Representante', `${x.rep_nombre}, ${x.rep_cargo}`), dato('DPI del representante', x.rep_dpi), dato('Teléfono del representante', x.rep_telefono),
+          dato('Cuenta en Vaelo', `${x.usuario} (${x.usuario_email})`), dato('Aceptó las políticas', x.acepto_politica ? fecha(x.acepto_politica) : 'No')),
+        el('div', { class: 'docs' }, Object.entries(docs).filter(([k]) => x.docs[k]).map(([k, d]) => campoDocumento({ titulo: d.nombre, tiene: true, ver: `/api/admin/empresas/${x.id}/documento/${k}`, soloVer: true }))),
+        msg,
+        abierta ? el('div', { class: 'bloque', style: 'background:var(--gris);border:0' }, el('h3', { text: '1. Cita para firmar el contrato' }),
+          el('div', { class: 'fila' }, el('div', { class: 'campo' }, el('label', { text: 'Fecha y hora' }), fechaCita), el('div', { class: 'campo' }, el('label', { text: 'Lugar' }), lugar)),
+          el('div', { class: 'campo' }, el('label', { text: 'Nota para la empresa' }), nota),
+          el('button', { class: 'boton chico', type: 'button', text: x.estado === 'cita' ? 'Cambiar la cita' : 'Poner cita y avisar', onclick: (ev) => accion({ accion: 'cita', fecha: fechaCita.value, lugar: lugar.value, nota: nota.value })(ev) })) : null,
+        abierta ? el('div', { class: 'bloque', style: 'background:var(--gris);border:0' }, el('h3', { text: '2. Contrato firmado' }),
+          el('label', { class: 'casilla' }, credito, 'Puede pagar a fin de mes (crédito)'),
+          el('div', { class: 'navegar' },
+            el('button', { class: 'boton', type: 'button', text: 'Contrato firmado: activar empresa', onclick: (ev) => accion({ accion: 'aprobar', credito: credito.checked }, `¿${x.empresa_nombre} ya firmó el contrato?`)(ev) }),
+            el('button', { class: 'boton peligro', type: 'button', text: 'Rechazar', onclick: (ev) => { const motivo = prompt('¿Qué tiene que corregir la empresa?'); if (motivo) accion({ accion: 'rechazar', motivo })(ev); } }))) : null,
+        x.motivo_rechazo ? el('p', { class: 'mensaje error', text: 'Motivo del rechazo: ' + x.motivo_rechazo }) : null);
+      $('dlg').showModal();
     }
 
     // ---------- Envío: asignar piloto, recorrido y datos ----------
@@ -504,10 +674,11 @@
       $('dlg-cuerpo').replaceChildren(
         el('button', { class: 'cerrar no-imprimir', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: () => $('dlg').close() }),
         el('div', { class: 'no-imprimir' },
-          el('h2', { style: 'font-size:1.4rem;margin-bottom:.3rem' }, e.guia, e.fragil ? el('span', { class: 'etiqueta-pendiente', style: 'margin-left:.5rem;vertical-align:middle', text: 'Frágil' }) : null), chipEstado(e.estado),
+          el('h2', { style: 'font-size:1.4rem;margin-bottom:.3rem' }, e.guia, e.flete ? el('span', { class: 'etiqueta-flete', style: 'margin-left:.5rem;vertical-align:middle', text: 'Flete' }) : null, e.fragil ? el('span', { class: 'etiqueta-pendiente', style: 'margin-left:.5rem;vertical-align:middle', text: 'Frágil' }) : null), chipEstado(e.estado),
           el('div', { style: 'margin-top:1rem' }, cajaMapa),
           el('div', { class: 'datos' },
-            dato('Cliente', `${e.cliente_nombre} `, telLink(e.cliente_telefono)),
+            dato('Cliente', e.flete ? `${e.flete_cliente} (por WhatsApp) ` : `${e.cliente_nombre} `, telLink(e.flete ? e.flete_telefono : e.cliente_telefono)),
+            e.paquetes > 1 ? dato('Paquetes', `${e.paquetes} para la misma dirección`) : null,
             dato('Precio', `${e.precio_por_confirmar ? 'Desde ' : ''}${dinero(e.precio)}, ${PAGOS[e.metodo_pago] || e.metodo_pago}${e.km ? `. ${e.km} km` : ''}${e.fragil ? `. Incluye ${dinero(e.recargo_fragil)} por frágil` : ''}`),
             dato('Recoger', [e.origen_quien === 'tercero' ? (e.origen && e.origen.nombre) : 'El cliente', e.origen_zona, e.origen_direccion].filter(Boolean).join('. ')),
             dato('Entregar a', [e.destino_nombre, e.destino_zona, e.destino_direccion].filter(Boolean).join('. ')),
@@ -524,7 +695,11 @@
             e.metodo_pago === 'transferencia' ? dato('Transferencia', { sin_comprobante: 'Sin comprobante', por_revisar: 'Comprobante por revisar', verificado: 'Verificada', rechazado: 'Comprobante rechazado' }[e.pago_estado] || '—') : null,
             cliente && cliente.calif_cliente ? dato('Calificación de los pilotos a este cliente', `${cliente.calif_cliente} de 5 (${cliente.calif_cliente_n})`) : null,
             e.reentrega_de ? dato('Nueva entrega de', e.reentrega_de) : null),
+          e.tiene_foto_paquete ? el('div', { class: 'foto-lleva' }, el('a', { href: `/api/admin/envios/${e.id}/entrega/paquete`, target: '_blank', rel: 'noopener' },
+            el('img', { src: `/api/admin/envios/${e.id}/entrega/paquete`, alt: 'Foto del paquete' })), el('div', {}, el('strong', { text: 'Foto del paquete' }), el('br'), sub('La tomó el cliente al pedir: muestra qué lleva.'))) : null,
+          enCurso && !e.listo_para_piloto ? el('div', { class: 'mensaje aviso', text: e.motivo_no_listo }) : null,
           msg,
+          bloqueReclamosPanel(e, guardar),
           bloqueFallidoPanel(e, guardar),
           e.metodo_pago === 'transferencia' && rolPanel === 'admin' ? bloqueComprobantePanel(e, guardar) : null,
           enCurso ? bloqueReceptorPanel(e, msg, guardar) : null,
@@ -613,13 +788,15 @@
       if (!mensajeros.length) cuerpo.replaceChildren(el('tr', {}, el('td', { colspan: 7, style: 'text-align:center;color:var(--suave);padding:2rem', text: 'Todavía no hay pilotos. Comparte vaelomensajeria.com/modomensajero con quienes quieran trabajar con ustedes.' })));
       else cuerpo.replaceChildren(...mensajeros.map(p => {
         const rv = p.revision;
+        const extras = [p.deuda ? el('span', { class: 'etiqueta-pendiente', text: `Debe liquidar ${dinero(p.deuda.monto)}` }) : null,
+          p.estado_piloto === 'aprobado' && !p.politica_al_dia ? el('span', { class: 'etiqueta-azul', text: 'Falta aceptar la política' }) : null].filter(Boolean);
         const docs = rv.vencidos.length ? el('span', { class: 'etiqueta-pendiente', text: `${rv.vencidos.length} vencido${rv.vencidos.length > 1 ? 's' : ''}` })
           : rv.faltan.length ? el('span', { class: 'etiqueta-pendiente', text: `Faltan ${rv.faltan.length}` })
           : rv.porVencer.length ? el('span', { class: 'etiqueta-azul', text: 'Por vencer' }) : el('span', { class: 'etiqueta-completa', text: 'Completos' });
         const ficha = rolPanel === 'admin';
         return el('tr', { class: ficha ? 'clic' : '', tabindex: 0, onclick: () => ficha && abrirFicha(p.id), onkeydown: (ev) => { if (ficha && ev.key === 'Enter') abrirFicha(p.id); } },
           el('td', {}, el('span', { class: 'punto-linea' + (p.en_linea_real ? ' si' : ''), title: p.en_linea_real ? 'En línea' : 'Fuera de línea' }), el('strong', { text: p.nombre }), el('br'), sub(p.telefono)),
-          el('td', {}, etiquetaEstado(p)),
+          el('td', {}, etiquetaEstado(p), ...extras.map(x => [el('br'), x])),
           el('td', {}, p.vehiculo || '—', el('br'), sub(p.veh_placa || '')),
           el('td', {}, docs),
           el('td', {}, `${p.activos} activos`, el('br'), sub(`${p.entregados} entregados`)),
@@ -874,10 +1051,10 @@
       $('tabla-vehiculos').replaceChildren(...t.vehiculos.map(v => {
         const f = { nombre: el('input', { value: v.nombre, maxlength: 40, style: 'min-width:90px' }), descripcion: el('input', { value: v.descripcion, maxlength: 120, style: 'min-width:180px' }),
           peso_max: num(v.peso_max, 1), tarifa_zona: num(v.tarifa_zona.toFixed(2), 0.5), tarifa_base: num(v.tarifa_base.toFixed(2), 0.5), precio_km: num(v.precio_km.toFixed(2), 0.25),
-          activo: el('input', { type: 'checkbox', checked: !!v.activo, style: 'width:auto' }) };
-        return el('tr', {}, ...['nombre', 'descripcion', 'peso_max', 'tarifa_zona', 'tarifa_base', 'precio_km', 'activo'].map(k => el('td', {}, f[k])),
+          solo_oficina: el('input', { type: 'checkbox', checked: !!v.solo_oficina, style: 'width:auto' }), activo: el('input', { type: 'checkbox', checked: !!v.activo, style: 'width:auto' }) };
+        return el('tr', {}, ...['nombre', 'descripcion', 'peso_max', 'tarifa_zona', 'tarifa_base', 'precio_km', 'solo_oficina', 'activo'].map(k => el('td', {}, f[k])),
           el('td', {}, el('button', { class: 'boton borde chico', type: 'button', text: 'Guardar', onclick: async () => {
-            const body = {}; for (const k in f) body[k] = k === 'activo' ? f[k].checked : f[k].value;
+            const body = {}; for (const k in f) body[k] = ['activo', 'solo_oficina'].includes(k) ? f[k].checked : f[k].value;
             try { await api('/api/admin/vehiculos/' + v.id, { method: 'PUT', body }); mostrarMensaje($('msg-tarifas'), `${body.nombre} guardado.`, 'exito'); }
             catch (e) { mostrarMensaje($('msg-tarifas'), e.message); }
           } })));
@@ -909,7 +1086,7 @@
 
     // ---------- Zonas dibujadas en el mapa ----------
     const CAMPOS_AJUSTES = ['cargo_devolucion', 'cargo_bodega_dia', 'cargo_reentrega', 'horas_decidir_fallido', 'cargo_cancelacion', 'pct_piloto_cancelacion', 'sede_direccion',
-      'seguro_pct', 'seguro_minimo', 'responsabilidad_max', 'km_max_tarifa_fija', 'datos_transferencia', 'correo_respaldos'];
+      'whatsapp_pagos', 'dias_liquidar', 'dias_reclamo', 'cargo_bodega_empresa', 'min_paquetes_sede', 'km_max_tarifa_fija', 'datos_transferencia', 'correo_respaldos'];
     let mapaZonas = null, capaZonas = [], selectorSede = null;
     const COLORES_ZONA = ['#1c3faa', '#d9480f', '#17824a', '#7b2cbf', '#0e7490', '#b4261c', '#a16207', '#be185d'];
     function pintarMapaZonas(zonas) {
@@ -967,7 +1144,7 @@
     });
     guardarAjustes($('form-fallidos'), ['cargo_devolucion', 'cargo_bodega_dia', 'cargo_reentrega', 'horas_decidir_fallido', 'cargo_cancelacion', 'pct_piloto_cancelacion', 'sede_direccion'],
       () => { const p = selectorSede && selectorSede.obtener(); return p ? { sede_lat: p.lat, sede_lng: p.lng } : {}; });
-    guardarAjustes($('form-seguro'), ['seguro_pct', 'seguro_minimo', 'responsabilidad_max', 'km_max_tarifa_fija', 'datos_transferencia']);
+    guardarAjustes($('form-seguro'), ['whatsapp_pagos', 'dias_liquidar', 'dias_reclamo', 'km_max_tarifa_fija', 'cargo_bodega_empresa', 'min_paquetes_sede', 'datos_transferencia']);
     guardarAjustes($('form-respaldos'), ['correo_respaldos']);
 
     $('form-zona').addEventListener('submit', async (ev) => {
@@ -1042,6 +1219,15 @@
       let c;
       try { c = await api('/api/admin/caja'); } catch (e) { mostrarMensaje($('msg-caja'), e.message); return; }
       const vacio = (t) => el('p', { class: 'pista', text: t });
+      // Reclamos: abiertos para evaluar y devoluciones pendientes de pagar al cliente
+      try {
+        const { reclamos } = await api('/api/admin/reclamos');
+        const abiertos = reclamos.filter(r => r.estado === 'abierto' || (r.estado === 'aprobado' && r.monto_cliente > 0 && !r.devuelto_en));
+        $('caja-reclamos').replaceChildren(...(abiertos.length ? abiertos.map(r => el('div', { class: 'caja-piloto' },
+          el('div', { class: 'caja-cab' }, el('div', {}, el('strong', { text: `${r.empresa_nombre || r.cliente} · ${r.guia}` }), el('br'), sub(r.piloto ? 'Piloto: ' + r.piloto : 'Sin piloto')),
+            el('span', { class: r.estado === 'abierto' ? 'etiqueta-pendiente' : 'etiqueta-azul', text: r.estado === 'abierto' ? 'Por evaluar' : `Devolver ${dinero(r.monto_cliente)}` })),
+          formReclamo(r, cargarCaja))) : [vacio('No hay reclamos pendientes.')]));
+      } catch (e) { mostrarMensaje($('msg-caja'), e.message); }
       // Transferencias por revisar y cargos a clientes
       try {
         const { pagos } = await api('/api/admin/pagos');
@@ -1072,7 +1258,7 @@
         const recibido = el('input', { type: 'number', min: 0, step: '0.01', value: p.efectivo.toFixed(2), 'aria-label': 'Efectivo recibido' });
         const nota = el('input', { maxlength: 300, placeholder: 'Nota (opcional)', 'aria-label': 'Nota' });
         return el('div', { class: 'caja-piloto' },
-          el('div', { class: 'caja-cab' }, el('div', {}, el('strong', { text: p.nombre }), el('br'), sub(`${p.envios_efectivo} envíos`)), el('strong', { class: 'caja-monto', text: dinero(p.efectivo) })),
+          el('div', { class: 'caja-cab' }, el('div', {}, el('strong', { text: p.nombre }), p.deuda_vencida ? el('span', { class: 'etiqueta-pendiente', style: 'margin-left:.4rem', text: `Pasó el plazo: no puede trabajar` }) : null, el('br'), sub(`${p.envios_efectivo} envíos`)), el('strong', { class: 'caja-monto', text: dinero(p.efectivo) })),
           el('details', {}, el('summary', { text: 'Ver envíos' }), el('ul', {}, p.detalle.map(d => el('li', { text: `${d.guia}: ${dinero(d.efectivo)}` })))),
           el('div', { class: 'fila', style: 'align-items:end' }, el('div', { class: 'campo' }, el('label', { text: 'Recibido en la sede (Q)' }), recibido), el('div', { class: 'campo' }, el('label', { text: 'Nota' }), nota),
             el('div', { class: 'campo' }, el('button', { class: 'boton', type: 'button', text: 'Registrar entrega', onclick: async (ev) => {
@@ -1087,9 +1273,10 @@
       }) : [vacio('Ningún piloto tiene efectivo pendiente.')]));
       const pagos = c.pilotos.filter(p => p.ganancia > 0);
       $('caja-pagos').replaceChildren(...(pagos.length ? pagos.map(p => el('div', { class: 'caja-fila' },
-        el('div', {}, el('strong', { text: p.nombre }), el('br'), sub(`${p.envios_ganancia} envíos terminados`)), el('strong', { class: 'caja-monto', text: dinero(p.ganancia) }),
+        el('div', {}, el('strong', { text: p.nombre }), el('br'), sub(`${p.envios_ganancia} envíos terminados${p.descuentos ? ` · ganó ${dinero(p.ganancia)}, menos ${dinero(p.descuentos)} por reclamos` : ''}`)),
+        el('strong', { class: 'caja-monto', text: dinero(p.a_pagar) }),
         el('button', { class: 'boton chico', type: 'button', text: 'Registrar pago', onclick: async () => {
-          if (!confirm(`¿Le pagaste ${dinero(p.ganancia)} a ${p.nombre}?`)) return;
+          if (!confirm(`¿Le pagaste ${dinero(p.a_pagar)} a ${p.nombre}?${p.descuentos ? ` (ya con ${dinero(p.descuentos)} descontados por reclamos)` : ''}`)) return;
           try { await api('/api/admin/caja/pagar-piloto', { body: { piloto_id: p.id } }); cargarCaja(); } catch (e) { mostrarMensaje($('msg-caja'), e.message); }
         } }))) : [vacio('No hay pagos pendientes a pilotos.')]));
       const lista = (filas, boton, ruta, pregunta) => filas.length ? filas.map(x => el('div', { class: 'caja-fila' },
@@ -1205,7 +1392,7 @@
     $('rep-ver').addEventListener('click', () => { pintarRangos(''); cargarReportes(); });
 
     // ---------- Ajustes de operación y equipo de oficina ----------
-    function pintarAyudaComision() { $('comision-ayuda').textContent = $('comision-tipo').value === 'fijo' ? 'Q por entrega' : '% del precio'; }
+    function pintarAyudaComision() { $('comision-ayuda').textContent = { fijo: 'Q por entrega', vaelo_fijo: 'Q que cobra Vaelo por envío', porcentaje: '% del precio' }[$('comision-tipo').value]; }
     $('comision-tipo').addEventListener('change', pintarAyudaComision);
     $('form-operacion').addEventListener('submit', async (ev) => {
       ev.preventDefault();

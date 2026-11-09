@@ -371,4 +371,74 @@ insAj.run('km_max_tarifa_fija', '15');        // sin zonas dibujadas: más km qu
 insAj.run('datos_transferencia', '');
 insAj.run('correo_respaldos', '');
 
+// ---------- Versión 4: políticas, reclamos, fletes, empresas con contrato y bodega ----------
+agregarColumnas('usuarios', [
+  ['politica_piloto', 'TEXT'],           // fecha en que el piloto aceptó la versión vigente de la política
+  ['politica_piloto_version', 'INTEGER'],
+  ['politica_empresa', 'TEXT'],
+]);
+agregarColumnas('vehiculos', [['solo_oficina', 'INTEGER NOT NULL DEFAULT 0']]);   // pickup: solo como flete por WhatsApp
+agregarColumnas('envios', [
+  ['foto_paquete', 'TEXT'],              // foto que toma el cliente al pedir: muestra qué lleva
+  ['paquetes', 'INTEGER NOT NULL DEFAULT 1'],   // varios paquetes a la misma dirección, mismo precio
+  ['flete', 'INTEGER NOT NULL DEFAULT 0'],      // flete en pickup creado por la oficina (precio a mano)
+  ['flete_cliente', 'TEXT'], ['flete_telefono', 'TEXT'],
+  ['lote_sede_id', 'INTEGER'],           // paquete de un envío de empresa a la sede de Vaelo
+]);
+db.exec(`
+  -- Reclamos por paquete perdido, dañado o incompleto: se evalúa y se devuelve dinero al cliente
+  CREATE TABLE IF NOT EXISTS reclamos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    envio_id INTEGER NOT NULL REFERENCES envios(id),
+    usuario_id INTEGER NOT NULL REFERENCES usuarios(id),
+    tipo TEXT NOT NULL, descripcion TEXT NOT NULL, foto TEXT,
+    estado TEXT NOT NULL DEFAULT 'abierto',          -- abierto, aprobado, rechazado
+    monto_cliente REAL NOT NULL DEFAULT 0,           -- devolución al cliente
+    monto_piloto REAL NOT NULL DEFAULT 0,            -- lo que paga el piloto responsable
+    piloto_id INTEGER, resolucion TEXT, resuelto_por TEXT, resuelto_en TEXT,
+    devuelto_en TEXT,                                -- cuándo se le pagó al cliente
+    descontado_pago_id INTEGER,                      -- pago al piloto donde se descontó
+    creado TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  -- Solicitud de contrato de empresa: datos, fotos de la sede y del representante, cita y firma
+  CREATE TABLE IF NOT EXISTS solicitudes_empresa (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_id INTEGER NOT NULL UNIQUE REFERENCES usuarios(id) ON DELETE CASCADE,
+    estado TEXT NOT NULL DEFAULT 'borrador',         -- borrador, enviada, cita, aprobada, rechazada
+    empresa_nombre TEXT, razon_social TEXT, nit TEXT, giro TEXT, sitio_web TEXT,
+    direccion TEXT, zona TEXT, telefono TEXT, correo TEXT, paquetes_mes INTEGER,
+    rep_nombre TEXT, rep_cargo TEXT, rep_dpi TEXT, rep_telefono TEXT, rep_correo TEXT,
+    foto_sede_frente TEXT, foto_sede_interior TEXT, foto_rep TEXT, dpi_rep_frente TEXT, dpi_rep_reverso TEXT, patente TEXT, rtu TEXT,
+    acepto_politica TEXT,
+    cita_fecha TEXT, cita_lugar TEXT, nota_admin TEXT, motivo_rechazo TEXT,
+    enviada_en TEXT, aprobada_en TEXT,
+    creado TEXT NOT NULL DEFAULT (datetime('now')), actualizado TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  -- Envío de una empresa a la sede de Vaelo (10 paquetes o más) para repartirlos desde ahí
+  CREATE TABLE IF NOT EXISTS lotes_sede (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_id INTEGER NOT NULL REFERENCES usuarios(id),
+    paquetes INTEGER NOT NULL,
+    estado TEXT NOT NULL DEFAULT 'esperando',        -- esperando (la empresa los lleva), recibido, cancelado
+    entregar_desde TEXT,                             -- fecha en que la empresa quiere que salgan
+    nota TEXT, recibido_en TEXT, recibido_por TEXT,
+    creado TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_envios_lote_sede ON envios(lote_sede_id);
+`);
+// Pickup: solo como flete pedido por WhatsApp (se marca una sola vez; desde el panel se puede cambiar)
+if (!db.prepare("SELECT 1 FROM ajustes WHERE clave = 'v4_migrado'").get()) {
+  db.exec("UPDATE vehiculos SET solo_oficina = 1 WHERE lower(nombre) LIKE '%pick%'");
+  // Vaelo cobra Q5 fijos de cada envío; el resto es para el piloto
+  db.exec("INSERT INTO ajustes (clave, valor) VALUES ('comision_tipo', 'vaelo_fijo') ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor");
+  db.exec("INSERT INTO ajustes (clave, valor) VALUES ('comision_valor', '5') ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor");
+  db.exec("UPDATE ajustes SET valor = '50237731793' WHERE clave = 'whatsapp' AND valor = ''");
+  db.exec("INSERT INTO ajustes (clave, valor) VALUES ('v4_migrado', datetime('now'))");
+}
+insAj.run('whatsapp_pagos', '50237731793');   // WhatsApp oficial donde se mandan los comprobantes de transferencia
+insAj.run('dias_liquidar', '3');              // días que puede pasar un piloto sin entregar el efectivo en la sede
+insAj.run('cargo_bodega_empresa', '10');      // Q por paquete por día en la sede (envíos de empresa)
+insAj.run('min_paquetes_sede', '10');         // mínimo de paquetes para un envío de empresa a la sede
+insAj.run('dias_reclamo', '3');               // días después de la entrega para reportar un problema
+
 module.exports = { db, DB_PATH, DATA_DIR };

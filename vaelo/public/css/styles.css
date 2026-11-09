@@ -817,3 +817,88 @@ body.app-piloto main { padding-bottom: 7rem; }
 .documento-legal li { margin-bottom: .35rem; }
 .codigo { background: var(--azul-hondo); color: #e6ebff; border-radius: var(--radio); padding: 1rem 1.1rem; overflow-x: auto; font-size: .85rem; line-height: 1.5; }
 .documento-legal code { background: var(--gris); border-radius: 4px; padding: .05rem .3rem; font-size: .9em; }
+
+/* ---------- v4: foto del paquete, empresas, reclamos ---------- */
+.foto-paquete { margin: .25rem 0 1rem; }
+.foto-paquete-boton { position: relative; display: grid; place-items: center; min-height: 150px; border: 2px dashed var(--azul); border-radius: var(--radio); background: #f5f7fd; cursor: pointer; overflow: hidden; margin: 0; font-weight: 400; }
+.foto-paquete-boton:hover { background: #eef2ff; }
+.foto-paquete-boton input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.foto-paquete-boton img { width: 100%; max-height: 260px; object-fit: contain; background: #fff; }
+.foto-paquete-vacio { display: grid; gap: .2rem; text-align: center; padding: 1.25rem; }
+.foto-paquete-vacio strong { color: var(--azul-hondo); font-size: 1.05rem; }
+.foto-paquete-vacio small { color: var(--suave); }
+.foto-paquete-vacio::before { content: ''; justify-self: center; width: 44px; height: 44px; margin-bottom: .3rem; border-radius: 50%; background: var(--azul) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 8h3l2-3h6l2 3h3v11H4z'/%3E%3Ccircle cx='12' cy='13' r='3.5'/%3E%3C/svg%3E") center/24px no-repeat; }
+.reclamo { margin: 1rem 0; } .reclamo h3 { margin-top: 0; }
+
+.empresa-intro { display: grid; grid-template-columns: 1.2fr 1fr; gap: 1.5rem; align-items: center; background: #fff; border: 1px solid var(--linea-suave); border-radius: var(--radio); padding: 1.5rem; margin-bottom: 1rem; box-shadow: var(--sombra-1); }
+.empresa-intro h2 { font-stretch: 125%; font-size: 1.6rem; }
+.lista-beneficios { list-style: none; padding: 0; margin: .5rem 0 0; display: grid; gap: .55rem; }
+.lista-beneficios li { display: flex; gap: .6rem; align-items: center; }
+.lista-beneficios .icono-l { width: 1.4rem; height: 1.4rem; color: var(--azul); }
+.pasos-empresa { list-style: none; margin: 0; padding: 0; display: grid; gap: .1rem; }
+.pasos-empresa li { display: flex; align-items: center; gap: .7rem; padding: .55rem .75rem; border-radius: 8px; color: var(--suave); font-weight: 600; }
+.pasos-empresa .num { width: 1.8rem; height: 1.8rem; border-radius: 50%; display: grid; place-items: center; border: 2px solid var(--linea); font-size: .85rem; flex: none; }
+.pasos-empresa li.hecho { color: var(--ok); } .pasos-empresa li.hecho .num { background: var(--ok); border-color: var(--ok); color: #fff; }
+.pasos-empresa li.actual { background: #eef2ff; color: var(--azul-hondo); } .pasos-empresa li.actual .num { background: var(--azul); border-color: var(--azul); color: #fff; }
+.seccion-cab { display: flex; gap: .85rem; align-items: flex-start; margin-bottom: 1rem; }
+.seccion-cab .num { width: 2.2rem; height: 2.2rem; border-radius: 8px; background: var(--azul-hondo); color: var(--cinta); display: grid; place-items: center; font-weight: 800; flex: none; }
+.seccion-cab .num .icono-l { width: 1.3rem; height: 1.3rem; }
+.seccion-cab h2 { margin: 0; font-size: 1.2rem; } .seccion-cab p { margin: .15rem 0 0; }
+.seccion-paso + .seccion-paso { margin-top: 1rem; }
+.progreso-solicitud { margin-bottom: 1rem; }
+.progreso-barra { height: 10px; border-radius: 5px; background: var(--linea-suave); overflow: hidden; margin-bottom: .35rem; }
+.progreso-barra i { display: block; height: 100%; background: var(--azul); border-radius: 5px; transition: width .4s ease; }
+.cita-empresa { display: flex; gap: 1rem; align-items: flex-start; background: var(--cinta); border-radius: var(--radio); padding: 1rem 1.2rem; margin-bottom: 1rem; }
+.cita-empresa .icono-l { width: 2rem; height: 2rem; } .cita-empresa p { margin: .2rem 0 0; } .cita-empresa strong { font-size: 1.1rem; }
+.cita-empresa > div > p:first-of-type { font-size: 1.2rem; font-weight: 700; text-transform: capitalize; }
+.empresa-cabecera { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
+.empresa-cabecera h2 { font-stretch: 125%; font-size: 1.7rem; margin: .35rem 0 .2rem; }
+.graficas-empresa { display: grid; grid-template-columns: 1.4fr 1fr; gap: 1rem; margin-bottom: 1rem; }
+.graficas-empresa .bloque { margin: 0; }
+.barras { display: flex; align-items: flex-end; gap: 3px; height: 160px; padding-top: .5rem; border-bottom: 1px solid var(--linea); }
+.barra { flex: 1; height: 100%; display: flex; align-items: flex-end; min-width: 3px; }
+.barra i { display: flex; align-items: flex-end; width: 100%; background: #c9d3f5; border-radius: 3px 3px 0 0; min-height: 0; }
+.barra b { display: block; width: 100%; background: var(--azul); border-radius: 3px 3px 0 0; }
+.barras-h { display: grid; gap: .45rem; }
+.barras-h div { display: grid; grid-template-columns: 7rem 1fr 2.5rem; gap: .5rem; align-items: center; font-size: .9rem; }
+.barras-h i { display: block; height: 12px; border-radius: 6px; background: var(--azul); }
+.barras-h b { text-align: right; font-variant-numeric: tabular-nums; }
+@media (max-width: 760px) { .empresa-intro, .graficas-empresa { grid-template-columns: 1fr; } }
+.error-texto { color: var(--alerta); }
+
+/* Política del piloto: hay que aceptarla antes de trabajar */
+.politica-piloto { background: #fff; border: 2px solid var(--azul-hondo); border-radius: var(--radio); padding: 1.25rem; margin-bottom: 1rem; }
+.politica-piloto h2 { font-stretch: 112%; }
+.politica-piloto ul { padding-left: 1.1rem; display: grid; gap: .45rem; margin: .5rem 0 1rem; }
+.deuda-piloto { background: var(--alerta); color: #fff; border-radius: var(--radio); padding: 1rem 1.1rem; margin-bottom: 1rem; }
+.deuda-piloto strong { font-size: 1.15rem; }
+.etiqueta-flete { display: inline-block; padding: .05rem .5rem; border-radius: 999px; background: var(--azul-hondo); color: var(--cinta); font-size: .75rem; font-weight: 800; }
+.foto-lleva { display: flex; gap: .7rem; align-items: center; background: var(--gris); border-radius: 8px; padding: .5rem; }
+.foto-lleva img { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; cursor: zoom-in; }
+
+/* Perfil del piloto por pasos */
+.perfil-pasos { position: sticky; top: 0; z-index: 5; display: flex; gap: .35rem; overflow-x: auto; background: var(--fondo-panel); padding: .6rem 0; margin-bottom: .5rem; scrollbar-width: none; }
+.perfil-pasos button { flex: none; display: flex; align-items: center; gap: .4rem; font: inherit; font-size: .85rem; font-weight: 600; background: #fff; border: 1.5px solid var(--linea); border-radius: 999px; padding: .4rem .75rem; cursor: pointer; color: var(--tinta); }
+.perfil-pasos button .marca-paso { width: 1.1rem; height: 1.1rem; border-radius: 50%; border: 2px solid var(--linea); display: grid; place-items: center; }
+.perfil-pasos button.completo .marca-paso { background: var(--ok); border-color: var(--ok); }
+.perfil-pasos button.completo .marca-paso::after { content: ''; width: .45rem; height: .25rem; border-left: 2px solid #fff; border-bottom: 2px solid #fff; transform: rotate(-45deg) translate(1px, -1px); }
+.perfil-avance { background: var(--azul-hondo); color: #fff; border-radius: var(--radio); padding: 1rem 1.15rem; margin-bottom: 1rem; display: flex; align-items: center; gap: 1rem; }
+.perfil-avance .anillo { --p: 0; width: 64px; height: 64px; flex: none; border-radius: 50%; display: grid; place-items: center; background: conic-gradient(var(--cinta) calc(var(--p) * 1%), rgba(255,255,255,.15) 0); }
+.perfil-avance .anillo span { width: 50px; height: 50px; border-radius: 50%; background: var(--azul-hondo); display: grid; place-items: center; font-weight: 800; font-stretch: 75%; font-size: 1.1rem; }
+.perfil-avance strong { display: block; font-size: 1.1rem; } .perfil-avance small { color: #c9d3f5; }
+.perfil-seccion { background: #fff; border: 1px solid var(--linea-suave); border-radius: var(--radio); box-shadow: var(--sombra-1); padding: 1.1rem 1.15rem; margin-bottom: 1rem; scroll-margin-top: 4rem; }
+.perfil-seccion .seccion-cab { margin-bottom: .85rem; }
+.perfil-seccion .estado-seccion { margin-left: auto; }
+.licencia-tarjeta { position: relative; border-radius: 12px; padding: 1rem 1.1rem; margin-bottom: 1rem; color: #fff; background: linear-gradient(135deg, #0e2463 0%, #1c3faa 100%); overflow: hidden; }
+.licencia-tarjeta::after { content: ''; position: absolute; right: -30px; top: -30px; width: 120px; height: 120px; border-radius: 50%; background: rgba(255,207,46,.18); }
+.licencia-tarjeta small { color: #c9d3f5; display: block; font-size: .72rem; }
+.licencia-tarjeta .lic-num { font-size: 1.35rem; font-weight: 800; letter-spacing: .06em; font-stretch: 112%; }
+.licencia-tarjeta .lic-fila { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; margin-top: .6rem; }
+.licencia-tarjeta .lic-fila strong { display: block; }
+.vence-chip { display: inline-block; padding: .05rem .45rem; border-radius: 999px; font-size: .72rem; font-weight: 800; background: rgba(255,255,255,.18); }
+.vence-chip.mal { background: var(--alerta); } .vence-chip.pronto { background: var(--cinta); color: var(--tinta); }
+.guardar-flotante { position: sticky; bottom: calc(4.8rem + env(safe-area-inset-bottom)); z-index: 6; background: rgba(242,244,249,.95); padding: .6rem 0; }
+.guardar-flotante .boton { width: 100%; }
+/* Líneas parejas aunque las casillas ocupen varias filas */
+.celda-cifra { border-right: 0 !important; border-bottom: 0 !important; box-shadow: 2px 0 0 var(--tinta), 0 2px 0 var(--tinta); }
+.celda-cifra.activa { box-shadow: 2px 0 0 var(--tinta), 0 2px 0 var(--tinta), inset 0 -4px 0 var(--azul); }

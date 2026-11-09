@@ -53,6 +53,33 @@ Página web y app (instalable en el celular) de Vaelo, mensajería en moto y pic
 - Hasta tener las dos ubicaciones no se busca piloto ni se puede recoger. En cada envío el panel puede autorizar una excepción con motivo; también se puede apagar en Tarifas y ajustes ("Pedir ubicaciones en vivo antes de recoger").
 - Quien envía no ve la ubicación de quien recibe, ni aparece en el rastreo público. Las ubicaciones se dejan de compartir al recoger y al entregar, y se borran 30 días después.
 
+## Políticas
+
+- **Clientes:** `/terminos` y `/privacidad`. Sin tope fijo de responsabilidad: cada reclamo se evalúa según lo que llevaba el paquete y, si corresponde, se devuelve el dinero.
+- **Pilotos:** `/politica-pilotos`. Se acepta al registrarse; los pilotos ya aprobados la aceptan al entrar antes de poder conectarse. Si cambia, sube `POLITICA_PILOTO_VERSION` en `server.js` y todos la vuelven a aceptar.
+- **Empresas:** `/politicas-empresas`. Se acepta al enviar la solicitud de contrato.
+
+## Cómo se cobra
+
+- De cada envío **Vaelo cobra Q5** y el resto es para el piloto (Tarifas y ajustes > Asignación y pago de pilotos).
+- **Foto del paquete obligatoria** al pedir: la ven el piloto, la oficina y el cliente.
+- **Transferencias:** el cliente manda el comprobante al WhatsApp oficial (+502 3773 1793, editable). El envío **no se manda a ningún piloto** hasta que la oficina marca «Pago recibido» (en el envío o en Caja).
+- **Efectivo de los pilotos:** si un piloto no entrega el efectivo en la sede en 3 días (editable), no puede conectarse hasta liquidar.
+- **Reclamos:** el cliente reporta desde el envío (3 días después de la entrega, editable). En Caja > Reclamos se decide cuánto se le devuelve al cliente y cuánto paga el piloto; eso se descuenta solo de su próximo pago.
+
+## Fletes en pickup
+
+- El pickup ya no aparece para los clientes: se pide por WhatsApp y servicio al cliente acuerda qué se lleva y el precio.
+- En el panel, **Envíos > Nuevo flete en pickup**: cliente (con o sin cuenta), qué se lleva, de dónde a dónde, precio acordado y piloto. Se puede marcar que el piloto ya salió con la carga. El piloto recibe el aviso y entrega con foto y nombre de quien recibe.
+- Cualquier vehículo se puede marcar «Solo flete» en Tarifas y ajustes.
+
+## Empresas
+
+1. El cliente entra a **Mis envíos > Empresa** y llena la solicitud: datos de la empresa, representante, fotos de la sede, DPI del representante y patente de comercio.
+2. La oficina la revisa en el panel (**Empresas**), pone la **cita para firmar** (la empresa recibe aviso y correo) y, ya firmado, **activa la empresa**.
+3. La empresa tiene su panel con estadísticas (envíos, éxito de entrega, zonas, motivos de fallo, cobros contra entrega, cargos), puede elegir **«Paga quien recibe»** y mandar **varios paquetes a la misma dirección por un solo precio**.
+4. **Envío a la sede:** sube una lista de 10 paquetes o más y los lleva a la sede. La oficina marca «Llegaron a la sede» y desde ahí se reparten. Si salen el mismo día no pagan bodega; si se quedan, cuesta Q10 por paquete por día.
+
 ## Entregas fallidas, sede y cargos
 
 - Si el piloto no puede entregar (no contestan, no hay nadie, dirección incorrecta, rechazo o no pagaron el cobro), toca **No pude entregar** estando en el lugar.
@@ -84,9 +111,8 @@ Página web y app (instalable en el celular) de Vaelo, mensajería en moto y pic
 ## Otras funciones
 
 - **Olvidé mi contraseña** para clientes y pilotos (`/recuperar`, necesita Resend). La administración cambia la suya con `actualizar.sh --clave-admin`.
-- **Transferencias:** el cliente sube el comprobante; se verifica en **Caja > Transferencias por revisar**. Los datos de la cuenta se escriben en Tarifas y ajustes.
 - **Mis ganancias** del piloto: por cobrar, hoy, semana, mes, efectivo que debe entregar y pagos anteriores.
-- **Valor declarado y seguro opcional** (2 % del valor, mínimo Q5). Sin seguro, Vaelo responde hasta Q300.
+- **Valor declarado:** opcional; sirve para evaluar un reclamo.
 - **Calificación del cliente:** el piloto califica al cliente al terminar; la oficina ve el promedio.
 - **Varias entregas en un viaje:** los envíos por archivo se ofrecen juntos al mismo piloto.
 - **Tiendas en línea:** las cuentas de empresa crean una clave y crean envíos por API, con avisos de estado firmados. Instrucciones en `/tiendas`.

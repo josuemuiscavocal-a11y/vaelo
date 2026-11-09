@@ -31,7 +31,8 @@ const SQL_PILOTO_ACTIVO = `('pendiente','recogido','en_camino','fallido','devolv
 const ESTADOS_MENSAJERO = ['recogido', 'en_camino', 'entregado', 'devuelto', 'en_sede'];
 // El viaje se hizo (se cobra el envío): todo lo que ya no está activo ni cancelado
 const SQL_VIAJE_HECHO = `e.estado NOT IN ('pendiente','recogido','en_camino','cancelado')`;
-const METODOS_PAGO = ['efectivo', 'transferencia', 'credito'];
+const METODOS_PAGO = ['efectivo', 'transferencia', 'credito', 'recibe'];   // recibe: paga quien recibe (solo empresas)
+const POLITICA_PILOTO_VERSION = 1;   // si cambia la política, los pilotos la vuelven a aceptar antes de trabajar
 const OTRA_ZONA = 'Otra zona o municipio';
 
 // ---------- Utilidades ----------
@@ -94,6 +95,17 @@ function getAjustes() {
   for (const r of db.prepare('SELECT clave, valor FROM ajustes').all()) out[r.clave] = r.valor;
   return out;
 }
+// Un envío se puede mandar al piloto cuando el pago por transferencia ya se confirmó y, si es de un envío de empresa
+// a la sede, cuando los paquetes ya llegaron a la sede
+function listoParaPiloto(e) {
+  if (e.flete) return true;
+  if (e.metodo_pago === 'transferencia' && e.pago_estado !== 'verificado') return false;
+  if (e.lote_sede_id && db.prepare('SELECT estado FROM lotes_sede WHERE id = ?').get(e.lote_sede_id)?.estado !== 'recibido') return false;
+  return true;
+}
+const motivoNoListo = (e) => e.metodo_pago === 'transferencia' && e.pago_estado !== 'verificado'
+  ? 'Falta confirmar la transferencia: el cliente manda el comprobante al WhatsApp de Vaelo y la oficina lo marca recibido.'
+  : 'Los paquetes de este envío todavía no llegan a la sede de Vaelo.';
 const zonasFijas = () => db.prepare('SELECT id, nombre FROM zonas_fijas WHERE activa = 1 ORDER BY id').all();
 
 function distanciaRecta(a, b) {
@@ -164,6 +176,7 @@ function aplicaTarifaFija(oz, dz, origen, destino, km) {
 async function cotizar(body) {
   const vehiculo = db.prepare('SELECT * FROM vehiculos WHERE id = ? AND activo = 1').get(numero(body.vehiculo_id));
   if (!vehiculo) falla(400, 'Elige el vehículo para tu envío.');
+  if (vehiculo.solo_oficina) falla(400, `El ${vehiculo.nombre.toLowerCase()} es solo para fletes: escríbenos por WhatsApp para coordinar qué llevas y el precio.`);
   const peso = numero(body.peso);
   if (!(peso > 0)) falla(400, 'Escribe el peso aproximado del paquete en libras.');
   if (peso > vehiculo.peso_max) falla(400, `Ese peso supera lo que lleva una ${vehiculo.nombre.toLowerCase()} (máximo ${vehiculo.peso_max} lb). Elige otro vehículo.`);
@@ -194,8 +207,8 @@ function conExtras(c, body) {
   const recargo = fragil ? redondear(Number(aj.recargo_fragil) || 0) : 0;
   const valor = body.valor_declarado === '' || body.valor_declarado == null ? 0 : numero(body.valor_declarado);
   if (!Number.isFinite(valor) || valor < 0 || valor > 100000) falla(400, 'Revisa el valor declarado del paquete.');
-  const asegurar = (body.asegurar === true || body.asegurar === 'si' || body.asegurar === 1) && valor > 0;
-  const seguro = asegurar ? redondear(Math.max(Number(aj.seguro_minimo) || 0, (valor * (Number(aj.seguro_pct) || 0)) / 100)) : 0;
+  // El valor declarado sirve para evaluar un reclamo; ya no hay seguro con costo extra
+  const seguro = 0;
   let detalle = c.detalle + (recargo ? ` + Q${recargo.toFixed(2)} por frágil` : '') + (seguro ? ` + Q${seguro.toFixed(2)} de seguro` : '');
   return { ...c, fragil, recargo_fragil: recargo, valor_declarado: redondear(valor), seguro, precio: redondear(c.precio + recargo + seguro), detalle };
 }
@@ -347,6 +360,8 @@ function cambiarEstado(envioId, estado, nota, lat, lng) {
   }
   // Cancelado: los cargos pendientes que iban a cobrarse con este envío vuelven a quedar pendientes
   if (estado === 'cancelado') liberarCargos(envioId);
+  // Paquete de empresa guardado en la sede: al salir (o cancelarse) se cobran los días en la sede. El mismo día no se cobra.
+  if (antes.lote_sede_id && ['recogido', 'cancelado'].includes(estado) && antes.estado === 'pendiente') cobrarBodegaEmpresa(antes);
   db.prepare('INSERT INTO eventos (envio_id, estado, nota, lat, lng) VALUES (?, ?, ?, ?, ?)')
     .run(envioId, estado, nota, c ? c.lat : null, c ? c.lng : null);
   if (antes.estado !== estado) avisarEnvio(envioId, estado);
@@ -364,7 +379,9 @@ function ruta(metodo, patron, fn, opciones = {}) {
 ruta('GET', '/api/config', () => {
   const aj = getAjustes();
   return {
-    vehiculos: db.prepare('SELECT id, nombre, descripcion, peso_max, tarifa_zona, tarifa_base, precio_km FROM vehiculos WHERE activo = 1 ORDER BY orden, id').all(),
+    vehiculos: db.prepare('SELECT id, nombre, descripcion, peso_max, tarifa_zona, tarifa_base, precio_km FROM vehiculos WHERE activo = 1 AND solo_oficina = 0 ORDER BY orden, id').all(),
+    fletes: db.prepare('SELECT nombre FROM vehiculos WHERE activo = 1 AND solo_oficina = 1 ORDER BY orden, id').all().map((v) => v.nombre),
+    whatsapp_pagos: aj.whatsapp_pagos || '50237731793',
     zonas: zonasFijas().map((z) => z.nombre),
     otraZona: OTRA_ZONA,
     whatsapp: aj.whatsapp || '',
@@ -373,6 +390,8 @@ ruta('GET', '/api/config', () => {
     promocion: promocionAnunciada(),
     seguro: { pct: Number(aj.seguro_pct) || 0, minimo: Number(aj.seguro_minimo) || 0, responsabilidad_max: Number(aj.responsabilidad_max) || 0 },
     datos_transferencia: aj.datos_transferencia || '',
+    vaelo_por_envio: aj.comision_tipo === 'vaelo_fijo' ? Number(aj.comision_valor) || 0 : null, dias_liquidar: Number(aj.dias_liquidar) || 3,
+    cargo_bodega_empresa: Number(aj.cargo_bodega_empresa) || 0, min_paquetes_sede: Number(aj.min_paquetes_sede) || 10, dias_reclamo: Number(aj.dias_reclamo) || 3,
     cargos: { devolucion: Number(aj.cargo_devolucion) || 0, bodega_dia: Number(aj.cargo_bodega_dia) || 0, reentrega: Number(aj.cargo_reentrega) || 0,
       cancelacion: Number(aj.cargo_cancelacion) || 0, horas_decidir: Number(aj.horas_decidir_fallido) || 2 },
   };
@@ -389,11 +408,11 @@ ruta('POST', '/api/cotizar', async ({ req, body }) => {
 });
 
 // Datos de entrega fallida, sede, cargos y pago que ven el cliente y el panel
-const CAMPOS_INTERNOS = ['foto_entrega', 'firma_entrega', 'liquidado_id', 'pago_piloto_id', 'ganancia_piloto', 'excluidos', 'intentos_codigo', 'fallo_foto', 'comprobante',
+const CAMPOS_INTERNOS = ['foto_paquete', 'foto_entrega', 'firma_entrega', 'liquidado_id', 'pago_piloto_id', 'ganancia_piloto', 'excluidos', 'intentos_codigo', 'fallo_foto', 'comprobante',
   'calif_cliente', 'calif_cliente_comentario', 'precio_o_lat', 'precio_o_lng', 'precio_d_lat', 'precio_d_lng'];
 function infoExtra(e) {
   const aj = getAjustes();
-  const out = { tiene_comprobante: !!e.comprobante };
+  const out = { tiene_comprobante: !!e.comprobante, tiene_foto_paquete: !!e.foto_paquete };
   if (e.fallo_en) {
     out.fallo = { motivo: e.fallo_motivo, motivo_texto: MOTIVOS_FALLO[e.fallo_motivo] || '', nota: e.fallo_nota, en: e.fallo_en, tiene_foto: !!e.fallo_foto,
       decision: e.fallo_decision, decidido_por: e.fallo_decidido_por,
@@ -540,7 +559,10 @@ ruta('GET', '/api/envios/:id', ({ req, params }) => {
   // Quien envía no ve dónde está quien recibe
   out.destino_lat = null; out.destino_lng = null;
   sinCamposReceptor(out);
-  return { envio: out, eventos: eventosDe(e.id), piloto: aceptado ? pilotoParaCliente(e.mensajero_id) : null, datos_transferencia: getAjustes().datos_transferencia || '' };
+  const aj = getAjustes();
+  return { envio: out, eventos: eventosDe(e.id), piloto: aceptado ? pilotoParaCliente(e.mensajero_id) : null, datos_transferencia: aj.datos_transferencia || '',
+    whatsapp_pagos: aj.whatsapp_pagos || '50237731793', dias_reclamo: Number(aj.dias_reclamo) || 3,
+    reclamos: reclamosDe(e.id).map(({ monto_piloto, piloto, piloto_id, descontado_pago_id, ...r }) => r) };
 });
 
 
@@ -734,7 +756,16 @@ function revisarPiloto(u) {
   return { faltan, vencidos, porVencer, avisos };
 }
 const enLineaReal = (u) => !!u.en_linea && !!u.ubic_fecha && Date.now() - fechaMs(u.ubic_fecha) < MIN_UBIC_VIVA * 60_000;
-const puedeTrabajar = (u, r = revisarPiloto(u)) => u.rol === 'mensajero' && u.estado_piloto === 'aprobado' && !!u.activo && !r.vencidos.length;
+const politicaAlDia = (u) => (u.politica_piloto_version || 0) >= POLITICA_PILOTO_VERSION;
+// Efectivo que el piloto no ha entregado en la sede después del plazo (Tarifas y ajustes > días para liquidar)
+function deudaVencida(pilotoId) {
+  const dias = Number(getAjustes().dias_liquidar) || 3;
+  const r = db.prepare(`SELECT COALESCE(SUM(${SQL_EFECTIVO}), 0) AS monto, MIN(e.piloto_cerro_en) AS desde FROM envios e
+    WHERE e.mensajero_id = ? AND e.piloto_cerro_en IS NOT NULL AND e.liquidado_id IS NULL AND ${SQL_EFECTIVO} > 0`).get(pilotoId);
+  if (!(r.monto > 0) || fechaMs(r.desde) > Date.now() - dias * 86400_000) return null;
+  return { monto: redondear(r.monto), desde: r.desde, dias };
+}
+const puedeTrabajar = (u, r = revisarPiloto(u)) => u.rol === 'mensajero' && u.estado_piloto === 'aprobado' && !!u.activo && !r.vencidos.length && politicaAlDia(u) && !deudaVencida(u.id);
 const SQL_PILOTO = `SELECT u.*, v.nombre AS vehiculo,
     (SELECT ROUND(AVG(calificacion), 1) FROM envios WHERE mensajero_id = u.id AND calificacion IS NOT NULL) AS calificacion,
     (SELECT COUNT(*) FROM envios WHERE mensajero_id = u.id AND calificacion IS NOT NULL) AS calificaciones,
@@ -749,7 +780,8 @@ function pilotoSalida(u) {
   let equipo = {};
   try { equipo = JSON.parse(u.equipo || '{}') || {}; } catch { /* vacío */ }
   const r = revisarPiloto(u);
-  return { ...out, equipo, docs: docsDe(u), revision: r, puede_trabajar: puedeTrabajar(u, r), en_linea_real: enLineaReal(u) };
+  return { ...out, equipo, docs: docsDe(u), revision: r, puede_trabajar: puedeTrabajar(u, r), en_linea_real: enLineaReal(u),
+    politica_al_dia: politicaAlDia(u), deuda: deudaVencida(u.id) };
 }
 
 // Datos del piloto que ve el cliente (solo cuando ya aceptó su envío)
@@ -869,6 +901,9 @@ function requierePilotoTrabajando(req) {
   const r = revisarPiloto(p);
   if (p.estado_piloto !== 'aprobado') falla(403, 'Tu cuenta todavía no está aprobada.');
   if (r.vencidos.length) falla(403, `No puedes trabajar: ${r.vencidos.join(', ')}. Renueva el documento en tu perfil.`);
+  if (!politicaAlDia(p)) falla(403, 'Antes de trabajar, lee y acepta la política para pilotos de Vaelo.');
+  const deuda = deudaVencida(p.id);
+  if (deuda) falla(403, `Tienes Q${deuda.monto.toFixed(2)} en efectivo sin entregar desde hace más de ${deuda.dias} días. Pasa a la sede a liquidar para seguir trabajando.`);
   return p;
 }
 function leerPosicion(body, obligatoria) {
@@ -917,6 +952,7 @@ ruta('PUT', '/api/piloto/perfil', ({ req, body }) => {
   const libre = p.estado_piloto === 'en_revision';
   const datos = leerDatosPiloto(body, p.id, libre ? null : CAMPOS_PILOTO_APROBADO);
   if (body.acepto_reglas === true && !p.reglas_aceptadas) datos.reglas_aceptadas = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  if (body.acepto_politica === true) { datos.politica_piloto = new Date().toISOString().slice(0, 19).replace('T', ' '); datos.politica_piloto_version = POLITICA_PILOTO_VERSION; }
   guardarCampos(p.id, datos);
   return { ok: true, piloto: pilotoSalida(pilotoPorId(p.id)) };
 });
@@ -965,6 +1001,7 @@ ruta('GET', '/api/piloto/envios', ({ req }) => {
     if (extra.fallo) out.fallo = extra.fallo;
     if (e.estado === 'a_sede') { const sede = sedeUbicacion(); out.sede = { lat: sede?.lat ?? null, lng: sede?.lng ?? null, direccion: getAjustes().sede_direccion || '' }; }
     out.ya_califique_cliente = !!e.calif_cliente;
+    out.tiene_foto_paquete = !!e.foto_paquete;
     for (const k of ['codigo_entrega', 'intentos_codigo', 'foto_entrega', 'firma_entrega', 'precio_base', 'descuento', 'promocion_id', 'liquidado_id', 'pago_piloto_id', 'excluidos', ...CAMPOS_INTERNOS]) delete out[k];
     out.ganancia_piloto = e.ganancia_piloto;
     out.grupo_total = e.grupo ? db.prepare('SELECT COUNT(*) AS n FROM envios WHERE grupo = ? AND mensajero_id = ?').get(e.grupo, p.id).n : 1;
@@ -984,6 +1021,7 @@ ruta('POST', '/api/piloto/envios/:id/aceptar', ({ req, params, body }) => {
   const e = db.prepare("SELECT * FROM envios WHERE id = ? AND mensajero_id = ? AND asignacion = 'por_aceptar'").get(Number(params.id), p.id);
   if (!e) falla(404, 'Este envío ya no está esperando tu respuesta.');
   if (e.estado === 'cancelado') falla(400, 'El cliente canceló este envío.');
+  if (!listoParaPiloto(e)) falla(400, motivoNoListo(e));
   // Varias entregas en un solo viaje: se aceptan todas las del grupo
   const lista = e.grupo ? db.prepare("SELECT * FROM envios WHERE grupo = ? AND mensajero_id = ? AND asignacion = 'por_aceptar' AND estado = 'pendiente'").all(e.grupo, p.id) : [e];
   for (const x of lista) {
@@ -1117,7 +1155,8 @@ ruta('GET', '/api/piloto/ganancias', ({ req }) => {
   const efectivo = db.prepare(`SELECT COALESCE(SUM(${SQL_EFECTIVO}), 0) AS t, COUNT(*) AS n FROM envios e WHERE e.mensajero_id = ? AND e.piloto_cerro_en IS NOT NULL AND e.liquidado_id IS NULL AND ${SQL_EFECTIVO} > 0`).get(p.id);
   const hoy = hoyGT();
   return {
-    por_cobrar: suma('e.pago_piloto_id IS NULL'),
+    por_cobrar: redondear(Math.max(0, suma('e.pago_piloto_id IS NULL') - descuentosPiloto(p.id).reduce((t, x) => t + x.monto_piloto, 0))),
+    descuentos: descuentosPiloto(p.id), deuda: deudaVencida(p.id), dias_liquidar: Number(getAjustes().dias_liquidar) || 3,
     efectivo_por_entregar: redondear(efectivo.t), envios_efectivo: efectivo.n,
     hoy: suma(`date(e.piloto_cerro_en, '-6 hours') = '${hoy}'`),
     semana: suma(`date(e.piloto_cerro_en, '-6 hours') >= '${sumarDias(hoy, -6)}'`),
@@ -1131,6 +1170,12 @@ ruta('GET', '/api/piloto/ganancias', ({ req }) => {
   };
 });
 
+ruta('GET', '/api/piloto/envios/:id/foto-paquete', ({ req, res, params }) => {
+  const p = requierePiloto(req);
+  const e = db.prepare('SELECT * FROM envios WHERE id = ? AND mensajero_id = ?').get(Number(params.id), p.id);
+  if (!e) falla(404, 'No hay foto.');
+  return enviarArchivoEnvio(res, e, 'paquete');
+});
 ruta('GET', '/api/piloto/envios/:id/foto-cliente', ({ req, res, params }) => {
   const p = requierePiloto(req);
   const e = db.prepare(`SELECT usuario_id FROM envios WHERE id = ? AND mensajero_id = ? AND estado IN ${SQL_PILOTO_ACTIVO}`).get(Number(params.id), p.id);
@@ -1370,8 +1415,8 @@ ruta('POST', '/api/admin/clientes/:id/activo', ({ req, params, body }) => {
 // =====================================================================
 
 // ---------- Entrega segura: foto y firma ----------
-const ARCHIVOS_ENTREGA = { foto: 'foto_entrega', firma: 'firma_entrega', receptor: 'receptor_foto', origen: 'origen_foto', fallo: 'fallo_foto', comprobante: 'comprobante' };
-const FALTA_ARCHIVO = { foto: 'Toma la foto del paquete.', firma: 'La firma no es válida.', receptor: 'La foto no es válida. Elige otra.', origen: 'La foto no es válida. Elige otra.', fallo: 'La foto no es válida.', comprobante: 'Sube una foto o PDF del comprobante.' };
+const ARCHIVOS_ENTREGA = { foto: 'foto_entrega', firma: 'firma_entrega', receptor: 'receptor_foto', origen: 'origen_foto', fallo: 'fallo_foto', comprobante: 'comprobante', paquete: 'foto_paquete' };
+const FALTA_ARCHIVO = { foto: 'Toma la foto del paquete.', firma: 'La firma no es válida.', receptor: 'La foto no es válida. Elige otra.', origen: 'La foto no es válida. Elige otra.', fallo: 'La foto no es válida.', comprobante: 'Sube una foto o PDF del comprobante.', paquete: 'La foto del paquete no es válida. Toma otra.' };
 function guardarArchivoEnvio(envioId, tipo, dataUrl) {
   const col = ARCHIVOS_ENTREGA[tipo];
   const m = /^data:(?:image\/(jpeg|png|webp)|application\/(pdf));base64,([A-Za-z0-9+/=]+)$/.exec(String(dataUrl || ''));
@@ -1399,8 +1444,10 @@ function enviarArchivoEnvio(res, envio, tipo) {
   res.end(datos);
   return { _enviado: true };
 }
+// Lo que gana el piloto por envío: porcentaje, monto fijo, o el precio menos lo que cobra Vaelo (Q5 por envío)
 const gananciaPiloto = (precio) => {
   const a = getAjustes(), v = Number(a.comision_valor) || 0;
+  if (a.comision_tipo === 'vaelo_fijo') return redondear(Math.max(0, precio - v));
   return redondear(a.comision_tipo === 'fijo' ? v : (precio * v) / 100);
 };
 
@@ -1465,21 +1512,26 @@ function validarPedido(u, body) {
     descripcion: texto(body.descripcion, 200), notas: texto(body.notas, 300), metodo_pago: texto(body.metodo_pago, 20) || 'efectivo',
     cobro_destinatario: body.cobro_destinatario === '' || body.cobro_destinatario == null ? 0 : numero(body.cobro_destinatario),
   };
-  d.origen_quien = body.origen_quien === 'tercero' ? 'tercero' : 'cliente';
+  d.origen_quien = body.origen_quien === 'tercero' ? 'tercero' : body.origen_quien === 'sede' && body._lote_sede_id ? 'sede' : 'cliente';
   d.origen_nombre = d.origen_quien === 'tercero' ? texto(body.origen_nombre, 100) : null;
   if (d.origen_quien === 'tercero' && d.origen_nombre.length < 2) falla(400, 'Escribe el nombre de quien entrega el paquete al piloto.');
   if (d.origen_telefono.replace(/\D/g, '').length < 8) falla(400, d.origen_quien === 'tercero' ? 'Escribe el teléfono de quien entrega el paquete (8 dígitos).' : 'Escribe un teléfono de contacto para la recogida.');
   if (d.destino_nombre.length < 2) falla(400, 'Escribe el nombre de quien recibe.');
   if (d.destino_telefono.replace(/\D/g, '').length < 8) falla(400, 'Escribe el teléfono de quien recibe (8 dígitos).');
   if (!METODOS_PAGO.includes(d.metodo_pago)) falla(400, 'Elige cómo vas a pagar el envío.');
-  if (d.metodo_pago === 'credito' && !db.prepare('SELECT credito_permitido FROM usuarios WHERE id = ?').get(u.id)?.credito_permitido) falla(400, 'Tu cuenta no tiene pago a fin de mes. Elige efectivo o transferencia.');
+  const cuenta = db.prepare('SELECT credito_permitido, tipo_cuenta FROM usuarios WHERE id = ?').get(u.id) || {};
+  if (d.metodo_pago === 'credito' && !cuenta.credito_permitido) falla(400, 'Tu cuenta no tiene pago a fin de mes. Elige efectivo o transferencia.');
+  if (d.metodo_pago === 'recibe' && cuenta.tipo_cuenta !== 'empresa') falla(400, '"Paga quien recibe" es para cuentas de empresa.');
+  // Varios paquetes a la misma dirección (empresas): mismo precio
+  d.paquetes = cuenta.tipo_cuenta === 'empresa' ? Math.min(30, Math.max(1, Math.round(numero(body.paquetes)) || 1)) : 1;
   if (!Number.isFinite(d.cobro_destinatario) || d.cobro_destinatario < 0 || d.cobro_destinatario > 50000) falla(400, 'El monto a cobrar a quien recibe no es válido.');
   return d;
 }
 function insertarEnvio(u, body, d, c, desc, programado, grupo = null) {
   // La recogida es donde está quien pide (su ubicación al enviar) o, si entrega otra persona, donde ella comparta la suya.
   // La entrega es donde comparta su ubicación quien recibe: al crear el envío todavía no hay punto.
-  const o = d.origen_quien === 'cliente' ? coordenada(body.origen_lat, body.origen_lng) : null, de = null;
+  const o = d.origen_quien === 'cliente' ? coordenada(body.origen_lat, body.origen_lng) : d.origen_quien === 'sede' ? sedeUbicacion() : null, de = null;
+  if (d.origen_quien === 'sede' && !o) falla(400, 'Falta la ubicación de la sede de Vaelo. Avísanos para configurarla.');
   if (d.origen_quien === 'cliente' && !o) falla(400, 'Necesitamos tu ubicación actual: el piloto llega a recoger a donde estás. Activa la ubicación (GPS) y permite que Vaelo la use.');
   const guia = nuevaGuia();
   const codigo = String(crypto.randomInt(1000, 10000));
@@ -1491,14 +1543,17 @@ function insertarEnvio(u, body, d, c, desc, programado, grupo = null) {
      tipo_tarifa, km, precio, metodo_pago, cobro_destinatario, notas, fragil, recargo_fragil,
      precio_base, descuento, promocion_id, codigo_entrega, programado_para, receptor_token,
      origen_quien, origen_nombre, origen_token, origen_ubic_fecha, origen_precision, precio_por_confirmar,
-     valor_declarado, seguro, grupo, precio_o_lat, precio_o_lng, pago_estado)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${o ? "datetime('now')" : 'NULL'}, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+     valor_declarado, seguro, grupo, precio_o_lat, precio_o_lng, pago_estado, paquetes, lote_sede_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${o ? "datetime('now')" : 'NULL'}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
     guia, u.id, c.vehiculo.id, c.peso, d.descripcion, d.origen_direccion, texto(body.origen_zona, 60), d.origen_telefono,
     o ? o.lat : null, o ? o.lng : null, d.destino_nombre, d.destino_telefono, d.destino_direccion, texto(body.destino_zona, 60),
     de ? de.lat : null, de ? de.lng : null, c.tipo, c.km, desc.precio, d.metodo_pago, redondear(d.cobro_destinatario), d.notas,
     c.fragil ? 1 : 0, c.recargo_fragil, c.precio, desc.descuento, desc.promocion_id, codigo, programado, token,
     d.origen_quien, d.origen_nombre, tokenEntrega, o ? (Number.isFinite(numero(body.origen_precision)) ? Math.round(numero(body.origen_precision)) : null) : null, c.por_confirmar ? 1 : 0,
-    c.valor_declarado || 0, c.seguro || 0, grupo, o ? o.lat : null, o ? o.lng : null, d.metodo_pago === 'transferencia' ? 'sin_comprobante' : null);
+    c.valor_declarado || 0, c.seguro || 0, grupo, o ? o.lat : null, o ? o.lng : null, d.metodo_pago === 'transferencia' ? 'sin_comprobante' : null,
+    d.paquetes || 1, body._lote_sede_id || null);
+  // Foto del paquete que tomó el cliente: muestra qué lleva desde antes de recogerlo
+  if (body.foto_paquete) guardarArchivoEnvio(Number(r.lastInsertRowid), 'paquete', body.foto_paquete);
   const id = Number(r.lastInsertRowid);
   // Los cargos pendientes del cliente (cancelación, devolución, sede) se cobran junto con este envío
   const extra = sumarCargosPendientes(u.id, id);
@@ -1521,9 +1576,11 @@ function revisarClienteParaEnviar(u) {
 }
 
 ruta('POST', '/api/envios', async ({ req, body }) => {
+  delete body._lote_sede_id;
   const u = requiereUsuario(req);
   revisarClienteParaEnviar(u);
   const d = validarPedido(u, body);
+  if (!body.foto_paquete) falla(400, 'Toma una foto del paquete: así queda registrado qué lleva antes de recogerlo.');
   const programado = programadoUtc(body.programado_para);
   const c = await cotizar(body);
   const desc = mejorDescuento(c.precio, u.id, body.cupon);
@@ -1536,7 +1593,7 @@ ruta('POST', '/api/envios', async ({ req, body }) => {
     avisarEnvio(out.id, 'nuevo');
     return { _status: 201, ...out };
   } catch (err) { db.exec('ROLLBACK'); throw err; }
-});
+}, { limite: 1_200_000 });
 
 // Empresas: varios envíos desde un archivo (mismo punto de recogida). Solo zonas con tarifa fija.
 ruta('POST', '/api/envios/lote', async ({ req, body }) => {
@@ -1578,7 +1635,7 @@ ruta('GET', '/api/envios/:id/entrega/:tipo', ({ req, res, params }) => {
   const u = requiereUsuario(req);
   const e = db.prepare('SELECT * FROM envios WHERE id = ? AND usuario_id = ?').get(Number(params.id), u.id);
   if (!e) falla(404, 'No encontramos ese envío.');
-  if (!['foto', 'firma', 'fallo', 'comprobante'].includes(params.tipo)) falla(404, 'No hay archivo.');
+  if (!['foto', 'firma', 'fallo', 'comprobante', 'paquete'].includes(params.tipo)) falla(404, 'No hay archivo.');
   return enviarArchivoEnvio(res, e, params.tipo);
 });
 
@@ -1865,6 +1922,7 @@ ruta('GET', '/api/admin/alertas', ({ req }) => { requiereStaff(req); return { al
 // Efectivo que tiene el piloto por un envío: el pago del envío (y cargos pendientes que se cobraron con él) si fue en efectivo,
 // más el cobro a quien recibe cuando él lo entregó (si se retiró en la sede, lo cobró la oficina)
 const SQL_EFECTIVO = `(CASE WHEN e.estado != 'cancelado' AND e.metodo_pago = 'efectivo' THEN e.precio + e.cargos_extra ELSE 0 END
+  + CASE WHEN e.estado = 'entregado' AND e.sede_llegada IS NULL AND e.metodo_pago = 'recibe' THEN e.precio ELSE 0 END
   + CASE WHEN e.estado = 'entregado' AND e.sede_llegada IS NULL THEN e.cobro_destinatario ELSE 0 END)`;
 ruta('GET', '/api/admin/caja', ({ req }) => {
   requiereRol(req, 'admin');
@@ -1885,7 +1943,11 @@ ruta('GET', '/api/admin/caja', ({ req }) => {
   const historial = db.prepare(`SELECT 'liquidacion' AS tipo, l.id AS id, l.creado AS creado, u.nombre AS nombre, l.esperado AS esperado, l.recibido AS monto, l.envios AS envios, l.nota AS nota FROM liquidaciones l JOIN usuarios u ON u.id = l.piloto_id
     UNION ALL SELECT 'pago' AS tipo, p.id, p.creado, u.nombre, NULL, p.monto, p.envios, p.nota FROM pagos_piloto p JOIN usuarios u ON u.id = p.piloto_id
     ORDER BY creado DESC LIMIT 40`).all();
-  return { pilotos: pilotos.map((p) => ({ ...p, efectivo: redondear(p.efectivo), ganancia: redondear(p.ganancia), detalle: detalle(p.id) })),
+  const reembolsos = db.prepare(`SELECT r.id, r.monto_cliente, r.resolucion, r.resuelto_en, e.guia, e.id AS envio_id, u.nombre AS cliente, u.telefono FROM reclamos r JOIN envios e ON e.id = r.envio_id
+    JOIN usuarios u ON u.id = r.usuario_id WHERE r.estado = 'aprobado' AND r.monto_cliente > 0 AND r.devuelto_en IS NULL ORDER BY r.id`).all();
+  return { reembolsos, pilotos: pilotos.map((p) => { const desc = descuentosPiloto(p.id); const d = redondear(desc.reduce((t, x) => t + x.monto_piloto, 0));
+      return { ...p, efectivo: redondear(p.efectivo), ganancia: redondear(p.ganancia), descuentos: d, descuentos_detalle: desc, a_pagar: redondear(Math.max(0, p.ganancia - d)), detalle: detalle(p.id),
+        deuda_vencida: deudaVencida(p.id) }; }),
     cobros: cobros.map((c) => ({ ...c, monto: redondear(c.monto) })), credito: credito.map((c) => ({ ...c, monto: redondear(c.monto) })), historial };
 });
 ruta('POST', '/api/admin/caja/liquidar', ({ req, body }) => {
@@ -1909,15 +1971,21 @@ ruta('POST', '/api/admin/caja/pagar-piloto', ({ req, body }) => {
   const id = numero(body.piloto_id);
   const envios = db.prepare("SELECT id, ganancia_piloto FROM envios WHERE mensajero_id = ? AND piloto_cerro_en IS NOT NULL AND pago_piloto_id IS NULL AND ganancia_piloto > 0").all(id);
   if (!envios.length) falla(400, 'No hay entregas pendientes de pago para este piloto.');
-  const monto = redondear(envios.reduce((s, x) => s + (x.ganancia_piloto || 0), 0));
+  // Se descuentan los reclamos aprobados en los que el piloto fue responsable
+  const desc = descuentosPiloto(id);
+  const bruto = redondear(envios.reduce((s, x) => s + (x.ganancia_piloto || 0), 0));
+  const descuento = redondear(desc.reduce((t, x) => t + x.monto_piloto, 0));
+  const monto = redondear(Math.max(0, bruto - descuento));
   db.exec('BEGIN');
   try {
-    const r = db.prepare('INSERT INTO pagos_piloto (piloto_id, monto, envios, nota) VALUES (?, ?, ?, ?)').run(id, monto, envios.length, texto(body.nota, 300));
+    const nota = [texto(body.nota, 300), descuento ? `Descuento por reclamos: Q${descuento.toFixed(2)} (${desc.map((x) => x.guia).join(', ')})` : ''].filter(Boolean).join('. ');
+    const r = db.prepare('INSERT INTO pagos_piloto (piloto_id, monto, envios, nota) VALUES (?, ?, ?, ?)').run(id, monto, envios.length, nota);
     const marcar = db.prepare('UPDATE envios SET pago_piloto_id = ? WHERE id = ?');
     for (const x of envios) marcar.run(Number(r.lastInsertRowid), x.id);
+    for (const x of desc) db.prepare('UPDATE reclamos SET descontado_pago_id = ? WHERE id = ?').run(Number(r.lastInsertRowid), x.id);
     db.exec('COMMIT');
   } catch (err) { db.exec('ROLLBACK'); throw err; }
-  return { ok: true, monto };
+  return { ok: true, monto, descuento };
 });
 ruta('POST', '/api/admin/caja/pagar-cobros', ({ req, body }) => {
   requiereRol(req, 'admin');
@@ -2169,7 +2237,7 @@ ruta('POST', '/api/push/probar', async ({ req }) => {
 });
 
 // ---------- Cargos al cliente ----------
-const TIPOS_CARGO = { cancelacion: 'Cancelación con el piloto en camino', devolucion: 'Devolución del paquete', bodega: 'Días en la sede', reentrega: 'Nueva entrega desde la sede' };
+const TIPOS_CARGO = { cancelacion: 'Cancelación con el piloto en camino', devolucion: 'Devolución del paquete', bodega: 'Días en la sede', reentrega: 'Nueva entrega desde la sede', bodega_empresa: 'Paquetes guardados en la sede' };
 function crearCargo(usuarioId, envioId, tipo, monto, nota) {
   if (!(monto > 0)) return;
   db.prepare('INSERT INTO cargos (usuario_id, envio_id, tipo, monto, nota) VALUES (?, ?, ?, ?, ?)').run(usuarioId, envioId, tipo, redondear(monto), nota || TIPOS_CARGO[tipo]);
@@ -2508,6 +2576,398 @@ ruta('GET', '/api/admin/respaldo', ({ req, res }) => {
   return { _enviado: true };
 });
 
+
+// =====================================================================
+// Versión 4: fletes en pickup, reclamos, empresas con contrato y envíos a la sede
+// =====================================================================
+
+// ---------- Fletes (pickup): se piden por WhatsApp y la oficina los crea con el precio que acordó ----------
+function usuarioWhatsapp() {
+  const correo = 'clientes-whatsapp@vaelo.interno';
+  let u = db.prepare('SELECT * FROM usuarios WHERE email = ?').get(correo);
+  if (!u) {
+    db.prepare("INSERT INTO usuarios (nombre, email, telefono, password_hash, rol, activo, email_verificado, verificacion) VALUES ('Cliente por WhatsApp', ?, '', ?, 'cliente', 0, 1, 'verificado')")
+      .run(correo, hashPassword(crypto.randomBytes(24).toString('hex')));
+    u = db.prepare('SELECT * FROM usuarios WHERE email = ?').get(correo);
+  }
+  return u;
+}
+ruta('POST', '/api/admin/fletes', ({ req, body }) => {
+  const quien = requiereStaff(req);
+  const precio = numero(body.precio);
+  if (!(precio > 0 && precio <= 100000)) falla(400, 'Escribe el precio que acordaron con el cliente.');
+  const v = db.prepare('SELECT * FROM vehiculos WHERE id = ?').get(numero(body.vehiculo_id));
+  if (!v) falla(400, 'Elige el vehículo.');
+  const m = pilotoPorId(numero(body.mensajero_id));
+  if (!m || !puedeTrabajar(m)) falla(400, 'Elige un piloto aprobado y con sus documentos vigentes.');
+  const cliente = body.cliente_id ? db.prepare("SELECT * FROM usuarios WHERE id = ? AND rol = 'cliente'").get(numero(body.cliente_id)) : usuarioWhatsapp();
+  if (!cliente) falla(400, 'No encontramos ese cliente.');
+  const nombre = texto(body.cliente_nombre, 100) || cliente.nombre, tel = texto(body.cliente_telefono, 30) || cliente.telefono;
+  if (!body.cliente_id && (nombre.length < 2 || tel.replace(/\D/g, '').length < 8)) falla(400, 'Escribe el nombre y teléfono del cliente.');
+  const d = { origen_direccion: texto(body.origen_direccion, 300), origen_zona: texto(body.origen_zona, 60) || OTRA_ZONA,
+    destino_nombre: texto(body.destino_nombre, 100), destino_telefono: texto(body.destino_telefono, 30), destino_direccion: texto(body.destino_direccion, 300), destino_zona: texto(body.destino_zona, 60) || OTRA_ZONA };
+  if (d.origen_direccion.length < 3) falla(400, 'Escribe de dónde sale el flete.');
+  if (d.destino_nombre.length < 2 || d.destino_telefono.replace(/\D/g, '').length < 8 || d.destino_direccion.length < 3) falla(400, 'Escribe a quién se entrega, su teléfono y la dirección.');
+  const metodo = ['efectivo', 'transferencia', 'credito'].includes(body.metodo_pago) ? body.metodo_pago : 'efectivo';
+  const o = coordenada(body.origen_lat, body.origen_lng), de = coordenada(body.destino_lat, body.destino_lng);
+  const estado = body.estado === 'pendiente' ? 'pendiente' : 'recogido';
+  const guia = nuevaGuia();
+  db.exec('BEGIN');
+  try {
+    const r = db.prepare(`INSERT INTO envios (guia, usuario_id, vehiculo_id, peso, descripcion, origen_direccion, origen_zona, origen_telefono, origen_lat, origen_lng,
+        destino_nombre, destino_telefono, destino_direccion, destino_zona, destino_lat, destino_lng, tipo_tarifa, precio, precio_base, metodo_pago, cobro_destinatario, notas,
+        estado, mensajero_id, asignacion, asignado_en, receptor_omitido, flete, flete_cliente, flete_telefono, origen_nombre, origen_quien, pago_estado, ganancia_piloto)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'zona', ?, ?, ?, ?, ?, ?, ?, 'aceptado', datetime('now'), ?, 1, ?, ?, ?, 'tercero', ?, ?)`).run(
+      guia, cliente.id, v.id, numero(body.peso) > 0 ? numero(body.peso) : 0, texto(body.descripcion, 200), d.origen_direccion, d.origen_zona, tel, o?.lat ?? null, o?.lng ?? null,
+      d.destino_nombre, d.destino_telefono, d.destino_direccion, d.destino_zona, de?.lat ?? null, de?.lng ?? null, redondear(precio), redondear(precio), metodo,
+      Math.max(0, numero(body.cobro_destinatario) || 0), texto(body.notas, 300), estado, m.id, `Flete coordinado por la oficina (${quien.nombre.split(' ')[0]})`,
+      nombre, tel, nombre, metodo === 'transferencia' ? 'verificado' : null, gananciaPiloto(precio));
+    const id = Number(r.lastInsertRowid);
+    db.prepare("UPDATE envios SET origen_confirmado_en = datetime('now') WHERE id = ?").run(id);
+    db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(id, estado,
+      `Flete en ${v.nombre.toLowerCase()} acordado por WhatsApp: Q${precio.toFixed(2)}. ${estado === 'recogido' ? `${m.nombre.split(' ')[0]} ya salió con la carga` : `Asignado a ${m.nombre.split(' ')[0]}`}`);
+    db.exec('COMMIT');
+    avisoFlete(id, m.id, guia, d);
+    return { _status: 201, ok: true, id, guia };
+  } catch (err) { db.exec('ROLLBACK'); throw err; }
+});
+function avisoFlete(id, pilotoId, guia, d) {
+  avisar(pilotoId, { titulo: 'Flete asignado', cuerpo: `${guia}: entregar a ${d.destino_nombre} en ${d.destino_zona}`, url: RUTA_PILOTO, etiqueta: 'piloto-' + id, urgente: true });
+}
+
+// ---------- Reclamos: paquete perdido, dañado o incompleto ----------
+// El cliente lo reporta; la oficina evalúa según lo que llevaba (foto y valor declarado), decide cuánto se le devuelve
+// y cuánto paga el piloto responsable (se descuenta de su próximo pago).
+const TIPOS_RECLAMO = { perdido: 'El paquete se perdió', danado: 'Llegó dañado', incompleto: 'Llegó incompleto', otro: 'Otro problema' };
+ruta('POST', '/api/envios/:id/reclamo', ({ req, params, body }) => {
+  const u = requiereUsuario(req);
+  const e = db.prepare('SELECT * FROM envios WHERE id = ? AND usuario_id = ?').get(Number(params.id), u.id);
+  if (!e) falla(404, 'No encontramos ese envío.');
+  if (['pendiente', 'cancelado'].includes(e.estado)) falla(400, 'Puedes reportar un problema cuando el paquete ya está en manos de Vaelo o fue entregado.');
+  const dias = Number(getAjustes().dias_reclamo) || 3;
+  if (e.estado === 'entregado' && e.entregado_en && fechaMs(e.entregado_en) < Date.now() - dias * 86400_000) falla(400, `Los problemas se reportan dentro de ${dias} días después de la entrega.`);
+  if (db.prepare("SELECT 1 FROM reclamos WHERE envio_id = ? AND estado = 'abierto'").get(e.id)) falla(400, 'Ya tienes un reporte abierto para este envío. Te contactaremos.');
+  const tipo = TIPOS_RECLAMO[body.tipo] ? body.tipo : falla(400, 'Elige qué pasó.');
+  const desc = texto(body.descripcion, 1000);
+  if (desc.length < 10) falla(400, 'Cuéntanos qué pasó y qué llevaba el paquete.');
+  const r = db.prepare('INSERT INTO reclamos (envio_id, usuario_id, tipo, descripcion, piloto_id) VALUES (?, ?, ?, ?, ?)').run(e.id, u.id, tipo, desc, e.mensajero_id);
+  const id = Number(r.lastInsertRowid);
+  if (body.foto) {
+    const m = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(String(body.foto));
+    if (m) {
+      const datos = Buffer.from(m[2], 'base64');
+      if (datos.length > 300 && datos.length < 700_000) {
+        const nombre = `reclamo-${id}-${crypto.randomBytes(6).toString('hex')}.${m[1] === 'jpeg' ? 'jpg' : m[1]}`;
+        fs.mkdirSync(DOCS_DIR, { recursive: true, mode: 0o750 });
+        fs.writeFileSync(path.join(DOCS_DIR, nombre), datos, { mode: 0o640 });
+        db.prepare('UPDATE reclamos SET foto = ? WHERE id = ?').run(nombre, id);
+      }
+    }
+  }
+  db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(e.id, e.estado, `El cliente reportó un problema: ${TIPOS_RECLAMO[tipo]}`);
+  avisarStaff({ titulo: 'Reclamo de un cliente', cuerpo: `${e.guia}: ${TIPOS_RECLAMO[tipo]}`, url: RUTA_ADMIN, etiqueta: 'reclamo-' + id, urgente: true });
+  return { _status: 201, ok: true };
+}, { limite: 1_000_000 });
+const reclamosDe = (envioId) => db.prepare('SELECT r.*, u.nombre AS piloto FROM reclamos r LEFT JOIN usuarios u ON u.id = r.piloto_id WHERE r.envio_id = ? ORDER BY r.id').all(envioId)
+  .map((r) => ({ ...r, tipo_texto: TIPOS_RECLAMO[r.tipo], tiene_foto: !!r.foto, foto: undefined }));
+ruta('GET', '/api/envios/:id/reclamos', ({ req, params }) => {
+  const u = requiereUsuario(req);
+  const e = db.prepare('SELECT id FROM envios WHERE id = ? AND usuario_id = ?').get(Number(params.id), u.id);
+  if (!e) falla(404, 'No encontramos ese envío.');
+  return { reclamos: reclamosDe(e.id).map(({ monto_piloto, piloto, piloto_id, descontado_pago_id, ...r }) => r), dias: Number(getAjustes().dias_reclamo) || 3 };
+});
+ruta('GET', '/api/admin/reclamos', ({ req }) => {
+  requiereStaff(req);
+  return { reclamos: db.prepare(`SELECT r.*, e.guia, e.valor_declarado, c.nombre AS cliente, c.empresa_nombre, p.nombre AS piloto FROM reclamos r JOIN envios e ON e.id = r.envio_id
+    JOIN usuarios c ON c.id = r.usuario_id LEFT JOIN usuarios p ON p.id = r.piloto_id
+    ORDER BY CASE WHEN r.estado = 'abierto' THEN 0 WHEN r.estado = 'aprobado' AND r.devuelto_en IS NULL AND r.monto_cliente > 0 THEN 1 ELSE 2 END, r.id DESC LIMIT 100`).all()
+    .map((r) => ({ ...r, tipo_texto: TIPOS_RECLAMO[r.tipo], tiene_foto: !!r.foto, foto: undefined })) };
+});
+ruta('GET', '/api/admin/reclamos/:id/foto', ({ req, res, params }) => {
+  requiereStaff(req);
+  const r = db.prepare('SELECT foto FROM reclamos WHERE id = ?').get(Number(params.id));
+  if (!r || !r.foto) falla(404, 'No hay foto.');
+  return enviarArchivoEnvio(res, { foto_entrega: r.foto }, 'foto');
+});
+ruta('POST', '/api/admin/reclamos/:id', ({ req, params, body }) => {
+  const quien = requiereRol(req, 'admin');
+  const r = db.prepare('SELECT * FROM reclamos WHERE id = ?').get(Number(params.id));
+  if (!r) falla(404, 'No encontramos ese reclamo.');
+  const e = db.prepare('SELECT * FROM envios WHERE id = ?').get(r.envio_id);
+  const nombre = quien.nombre.split(' ')[0];
+  if (body.accion === 'aprobar' || body.accion === 'rechazar') {
+    if (r.estado !== 'abierto') falla(400, 'Este reclamo ya se resolvió.');
+    const resolucion = texto(body.resolucion, 500);
+    if (resolucion.length < 5) falla(400, 'Escribe qué se evaluó y qué se decidió. El cliente lo verá.');
+    if (body.accion === 'aprobar') {
+      const mc = numero(body.monto_cliente) || 0, mp = numero(body.monto_piloto) || 0;
+      if (!(mc >= 0 && mc <= 100000) || !(mp >= 0 && mp <= 100000)) falla(400, 'Revisa los montos.');
+      db.prepare("UPDATE reclamos SET estado = 'aprobado', monto_cliente = ?, monto_piloto = ?, resolucion = ?, resuelto_por = ?, resuelto_en = datetime('now') WHERE id = ?")
+        .run(redondear(mc), r.piloto_id ? redondear(mp) : 0, resolucion, nombre, r.id);
+      db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(e.id, e.estado, `Reclamo evaluado: se devolverán Q${redondear(mc).toFixed(2)} al cliente`);
+      if (r.piloto_id && mp > 0) avisar(r.piloto_id, { titulo: 'Descuento por reclamo', cuerpo: `${e.guia}: se descontarán Q${redondear(mp).toFixed(2)} de tu próximo pago. ${resolucion}`, url: RUTA_PILOTO });
+    } else {
+      db.prepare("UPDATE reclamos SET estado = 'rechazado', resolucion = ?, resuelto_por = ?, resuelto_en = datetime('now') WHERE id = ?").run(resolucion, nombre, r.id);
+    }
+    avisar(r.usuario_id, { titulo: 'Revisamos tu reporte', cuerpo: `${e.guia}: ${resolucion}`, url: `/mi-cuenta?envio=${e.id}` });
+    correoA(r.usuario_id, `Tu reporte del envío ${e.guia}`, 'Revisamos tu reporte', [resolucion,
+      body.accion === 'aprobar' && numero(body.monto_cliente) > 0 ? `Te devolveremos Q${redondear(numero(body.monto_cliente)).toFixed(2)}. Te contactaremos para coordinar la devolución.` : ''].filter(Boolean),
+      { texto: 'Ver mi envío', url: `/mi-cuenta?envio=${e.id}` });
+    return { ok: true };
+  }
+  if (body.accion === 'devuelto') {
+    if (r.estado !== 'aprobado' || r.devuelto_en) falla(400, 'No hay devolución pendiente en este reclamo.');
+    db.prepare("UPDATE reclamos SET devuelto_en = datetime('now') WHERE id = ?").run(r.id);
+    return { ok: true };
+  }
+  falla(400, 'Acción no válida.');
+});
+// Descuentos al piloto por reclamos aprobados que todavía no se descontaron
+const descuentosPiloto = (pilotoId) => db.prepare(`SELECT r.id, r.monto_piloto, r.resolucion, r.resuelto_en, e.guia FROM reclamos r JOIN envios e ON e.id = r.envio_id
+  WHERE r.piloto_id = ? AND r.estado = 'aprobado' AND r.monto_piloto > 0 AND r.descontado_pago_id IS NULL ORDER BY r.id`).all(pilotoId);
+
+// ---------- Empresas: solicitud de contrato ----------
+const CAMPOS_EMPRESA = { empresa_nombre: 100, razon_social: 150, nit: 20, giro: 120, sitio_web: 200, direccion: 300, zona: 60, telefono: 30, correo: 150,
+  rep_nombre: 100, rep_cargo: 80, rep_dpi: 17, rep_telefono: 30, rep_correo: 150 };
+const DOCS_EMPRESA = { foto_sede_frente: { nombre: 'Fachada de la sede' }, foto_sede_interior: { nombre: 'Interior o bodega de la sede' }, foto_rep: { nombre: 'Foto del representante' },
+  dpi_rep_frente: { nombre: 'DPI del representante (frente)' }, dpi_rep_reverso: { nombre: 'DPI del representante (reverso)' },
+  patente: { nombre: 'Patente de comercio', pdf: true }, rtu: { nombre: 'RTU de la SAT', pdf: true, opcional: true } };
+const ESTADOS_SOLICITUD = { borrador: 'Sin enviar', enviada: 'En revisión', cita: 'Cita para firmar', aprobada: 'Contrato firmado', rechazada: 'Rechazada' };
+function solicitudDe(usuarioId, crear = false) {
+  let s = db.prepare('SELECT * FROM solicitudes_empresa WHERE usuario_id = ?').get(usuarioId);
+  if (!s && crear) { db.prepare('INSERT INTO solicitudes_empresa (usuario_id) VALUES (?)').run(usuarioId); s = db.prepare('SELECT * FROM solicitudes_empresa WHERE usuario_id = ?').get(usuarioId); }
+  return s;
+}
+function solicitudSalida(s) {
+  if (!s) return null;
+  const out = { ...s, docs: {}, estado_texto: ESTADOS_SOLICITUD[s.estado] };
+  for (const k of Object.keys(DOCS_EMPRESA)) { out.docs[k] = !!s[k]; delete out[k]; }
+  const falta = [];
+  for (const k of ['empresa_nombre', 'nit', 'giro', 'direccion', 'zona', 'telefono', 'correo', 'rep_nombre', 'rep_cargo', 'rep_dpi', 'rep_telefono']) if (!s[k]) falta.push(k);
+  if (!s.paquetes_mes) falta.push('paquetes_mes');
+  for (const [k, d] of Object.entries(DOCS_EMPRESA)) if (!d.opcional && !s[k]) falta.push(k);
+  out.falta = falta;
+  return out;
+}
+ruta('GET', '/api/empresa/solicitud', ({ req }) => {
+  const u = requiereRol(req, 'cliente');
+  return { solicitud: solicitudSalida(solicitudDe(u.id)), documentos: DOCS_EMPRESA, estados: ESTADOS_SOLICITUD,
+    es_empresa: db.prepare('SELECT tipo_cuenta FROM usuarios WHERE id = ?').get(u.id).tipo_cuenta === 'empresa' };
+});
+ruta('PUT', '/api/empresa/solicitud', ({ req, body }) => {
+  const u = requiereRol(req, 'cliente');
+  const s = solicitudDe(u.id, true);
+  if (!['borrador', 'rechazada'].includes(s.estado)) falla(400, 'Tu solicitud ya se envió. Si necesitas cambiar algo, escríbenos por WhatsApp.');
+  const datos = {};
+  for (const [k, max] of Object.entries(CAMPOS_EMPRESA)) if (body[k] !== undefined) datos[k] = texto(String(body[k]), max) || null;
+  if (datos.rep_dpi) { datos.rep_dpi = datos.rep_dpi.replace(/\D/g, ''); if (datos.rep_dpi.length !== 13) falla(400, 'El DPI del representante debe tener 13 dígitos.'); }
+  if (datos.correo && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(datos.correo)) falla(400, 'Revisa el correo de la empresa.');
+  if (datos.nit) datos.nit = datos.nit.toUpperCase().replace(/\s/g, '');
+  if (body.paquetes_mes !== undefined) { const n = Math.round(numero(body.paquetes_mes)); datos.paquetes_mes = n > 0 ? Math.min(n, 1_000_000) : null; }
+  const claves = Object.keys(datos);
+  if (claves.length) db.prepare(`UPDATE solicitudes_empresa SET ${claves.map((k) => `${k} = ?`).join(', ')}, actualizado = datetime('now') WHERE id = ?`).run(...claves.map((k) => datos[k]), s.id);
+  return { ok: true, solicitud: solicitudSalida(solicitudDe(u.id)) };
+});
+ruta('POST', '/api/empresa/solicitud/documento', ({ req, body }) => {
+  const u = requiereRol(req, 'cliente');
+  const s = solicitudDe(u.id, true);
+  if (!['borrador', 'rechazada'].includes(s.estado)) falla(400, 'Tu solicitud ya se envió.');
+  const d = DOCS_EMPRESA[body.campo];
+  if (!d) falla(400, 'Documento no válido.');
+  const m = /^data:(image\/(jpeg|png|webp)|application\/pdf);base64,([A-Za-z0-9+/=]+)$/.exec(String(body.archivo || ''));
+  if (!m) falla(400, d.pdf ? 'Sube una foto o un PDF.' : 'Sube una foto.');
+  const esPdf = m[1] === 'application/pdf';
+  if (esPdf && !d.pdf) falla(400, `${d.nombre}: tiene que ser una foto.`);
+  const datos = Buffer.from(m[3], 'base64');
+  if (datos.length < 1500 || datos.length > 700_000) falla(400, 'El archivo está vacío o pesa más de 700 KB.');
+  const ext = esPdf ? 'pdf' : (m[2] === 'jpeg' ? 'jpg' : m[2]);
+  if (!FIRMAS[ext].every((b, i) => datos[i] === b)) falla(400, 'El archivo no es válido.');
+  fs.mkdirSync(DOCS_DIR, { recursive: true, mode: 0o750 });
+  const nombre = `empresa-${s.id}-${body.campo}-${crypto.randomBytes(6).toString('hex')}.${ext}`;
+  fs.writeFileSync(path.join(DOCS_DIR, nombre), datos, { mode: 0o640 });
+  if (s[body.campo]) fs.rm(path.join(DOCS_DIR, path.basename(s[body.campo])), () => {});
+  db.prepare(`UPDATE solicitudes_empresa SET ${body.campo} = ?, actualizado = datetime('now') WHERE id = ?`).run(nombre, s.id);
+  return { ok: true };
+}, { limite: 1_000_000 });
+function enviarDocEmpresa(res, s, campo) {
+  if (!s || !DOCS_EMPRESA[campo] || !s[campo]) falla(404, 'No hay archivo.');
+  return enviarArchivoEnvio(res, { foto_entrega: s[campo] }, 'foto');
+}
+ruta('GET', '/api/empresa/solicitud/documento/:campo', ({ req, res, params }) => enviarDocEmpresa(res, solicitudDe(requiereRol(req, 'cliente').id), params.campo));
+ruta('POST', '/api/empresa/solicitud/enviar', ({ req, body }) => {
+  const u = requiereRol(req, 'cliente');
+  const s = solicitudDe(u.id);
+  if (!s || !['borrador', 'rechazada'].includes(s.estado)) falla(400, 'No hay una solicitud por enviar.');
+  if (solicitudSalida(s).falta.length) falla(400, 'Completa todos los datos y documentos antes de enviar.');
+  if (body.acepto_politica !== true) falla(400, 'Para enviar la solicitud acepta las políticas para empresas.');
+  db.prepare("UPDATE solicitudes_empresa SET estado = 'enviada', acepto_politica = datetime('now'), enviada_en = datetime('now'), motivo_rechazo = NULL, actualizado = datetime('now') WHERE id = ?").run(s.id);
+  db.prepare("UPDATE usuarios SET politica_empresa = datetime('now') WHERE id = ?").run(u.id);
+  avisarStaff({ titulo: 'Solicitud de empresa', cuerpo: `${s.empresa_nombre} quiere usar los pilotos de Vaelo (${s.paquetes_mes} paquetes al mes).`, url: RUTA_ADMIN, etiqueta: 'empresa-' + s.id });
+  return { ok: true };
+});
+// Panel: revisar solicitudes, poner la cita para firmar y activar la cuenta de empresa
+ruta('GET', '/api/admin/empresas', ({ req }) => {
+  requiereRol(req, 'admin');
+  return { solicitudes: db.prepare(`SELECT s.*, u.nombre AS usuario, u.email AS usuario_email FROM solicitudes_empresa s JOIN usuarios u ON u.id = s.usuario_id
+      WHERE s.estado != 'borrador' ORDER BY CASE s.estado WHEN 'enviada' THEN 0 WHEN 'cita' THEN 1 WHEN 'aprobada' THEN 2 ELSE 3 END, s.actualizado DESC`).all()
+      .map((s) => ({ ...solicitudSalida(s), usuario: s.usuario, usuario_email: s.usuario_email })),
+    documentos: DOCS_EMPRESA, estados: ESTADOS_SOLICITUD };
+});
+ruta('GET', '/api/admin/empresas/:id/documento/:campo', ({ req, res, params }) => {
+  requiereRol(req, 'admin');
+  return enviarDocEmpresa(res, db.prepare('SELECT * FROM solicitudes_empresa WHERE id = ?').get(Number(params.id)), params.campo);
+});
+ruta('POST', '/api/admin/empresas/:id', ({ req, params, body }) => {
+  requiereRol(req, 'admin');
+  const s = db.prepare('SELECT * FROM solicitudes_empresa WHERE id = ?').get(Number(params.id));
+  if (!s) falla(404, 'No encontramos esa solicitud.');
+  const url = '/mi-cuenta?empresa=1';
+  if (body.accion === 'cita') {
+    if (!['enviada', 'cita'].includes(s.estado)) falla(400, 'Esta solicitud no está en revisión.');
+    const f = texto(body.fecha, 16);
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(f)) falla(400, 'Elige la fecha y hora de la cita.');
+    const lugar = texto(body.lugar, 200) || getAjustes().sede_direccion || 'Sede de Vaelo';
+    db.prepare("UPDATE solicitudes_empresa SET estado = 'cita', cita_fecha = ?, cita_lugar = ?, nota_admin = ?, actualizado = datetime('now') WHERE id = ?").run(f, lugar, texto(body.nota, 500) || null, s.id);
+    const cuando = new Date(f + ':00-06:00').toLocaleString('es-GT', { timeZone: 'America/Guatemala', weekday: 'long', day: 'numeric', month: 'long', hour: 'numeric', minute: '2-digit' });
+    avisar(s.usuario_id, { titulo: 'Cita para firmar tu contrato', cuerpo: `${cuando} en ${lugar}`, url });
+    correoA(s.usuario_id, 'Cita para firmar tu contrato con Vaelo', `Tu cita es el ${cuando}`, [`Lugar: ${lugar}.`, 'Lleva el DPI del representante y la patente de comercio originales.', texto(body.nota, 500)].filter(Boolean), { texto: 'Ver mi solicitud', url });
+    return { ok: true };
+  }
+  if (body.accion === 'aprobar') {
+    if (!['enviada', 'cita'].includes(s.estado)) falla(400, 'Esta solicitud no está en revisión.');
+    db.prepare("UPDATE solicitudes_empresa SET estado = 'aprobada', aprobada_en = datetime('now'), actualizado = datetime('now') WHERE id = ?").run(s.id);
+    db.prepare("UPDATE usuarios SET tipo_cuenta = 'empresa', empresa_nombre = ?, credito_permitido = ? WHERE id = ?").run(s.empresa_nombre, body.credito ? 1 : 0, s.usuario_id);
+    avisar(s.usuario_id, { titulo: 'Bienvenido a Vaelo Empresas', cuerpo: `${s.empresa_nombre} ya puede usar el apartado de empresa.`, url });
+    correoA(s.usuario_id, 'Tu cuenta de empresa está activa', `Bienvenido, ${s.empresa_nombre}`, ['Tu contrato quedó firmado. Ya puedes enviar paquetes como empresa, mandar envíos a nuestra sede y ver tus estadísticas.'], { texto: 'Entrar al apartado de empresa', url });
+    return { ok: true };
+  }
+  if (body.accion === 'rechazar') {
+    const motivo = texto(body.motivo, 500);
+    if (motivo.length < 5) falla(400, 'Escribe el motivo para que la empresa sepa qué corregir.');
+    db.prepare("UPDATE solicitudes_empresa SET estado = 'rechazada', motivo_rechazo = ?, actualizado = datetime('now') WHERE id = ?").run(motivo, s.id);
+    avisar(s.usuario_id, { titulo: 'Revisa tu solicitud de empresa', cuerpo: motivo, url });
+    return { ok: true };
+  }
+  falla(400, 'Acción no válida.');
+});
+
+// ---------- Empresas: envíos a la sede de Vaelo (10 paquetes o más) ----------
+function requiereEmpresa(req) {
+  const u = requiereRol(req, 'cliente');
+  const f = db.prepare('SELECT * FROM usuarios WHERE id = ?').get(u.id);
+  if (f.tipo_cuenta !== 'empresa') falla(403, 'Este apartado es para empresas con contrato firmado.');
+  return f;
+}
+function cobrarBodegaEmpresa(e) {
+  const lote = db.prepare('SELECT * FROM lotes_sede WHERE id = ?').get(e.lote_sede_id);
+  if (!lote || !lote.recibido_en) return;
+  // Días completos en la sede: el día que llegó no cuenta si sale ese mismo día
+  const llegada = new Date(fechaMs(lote.recibido_en) - 6 * 3600_000).toISOString().slice(0, 10);
+  const dias = Math.max(0, Math.round((Date.parse(hoyGT()) - Date.parse(llegada)) / 86400_000));
+  if (!dias) return;
+  const monto = dias * (Number(getAjustes().cargo_bodega_empresa) || 0) * (e.paquetes || 1);
+  crearCargo(e.usuario_id, e.id, 'bodega_empresa', monto, `${e.paquetes > 1 ? e.paquetes + ' paquetes, ' : ''}${dias} día(s) en la sede`);
+}
+ruta('POST', '/api/empresa/lote-sede', async ({ req, body }) => {
+  const u = requiereEmpresa(req);
+  const aj = getAjustes(), minimo = Number(aj.min_paquetes_sede) || 10;
+  if (!sedeUbicacion()) falla(400, 'Todavía no está configurada la ubicación de la sede. Escríbenos por WhatsApp.');
+  const filas = Array.isArray(body.filas) ? body.filas : [];
+  const total = filas.reduce((t, f) => t + Math.max(1, Math.round(numero(f.paquetes)) || 1), 0);
+  if (total < minimo) falla(400, `Un envío a la sede lleva al menos ${minimo} paquetes. Este tiene ${total}.`);
+  if (filas.length > 300) falla(400, 'Máximo 300 entregas por envío a la sede.');
+  const desde = texto(body.entregar_desde, 10);
+  if (desde && (!/^\d{4}-\d{2}-\d{2}$/.test(desde) || desde < hoyGT())) falla(400, 'Revisa la fecha para repartir.');
+  const metodo = ['recibe', 'efectivo', 'credito', 'transferencia'].includes(body.metodo_pago) ? body.metodo_pago : 'recibe';
+  const preparados = [], errores = [];
+  for (const [i, fila] of filas.entries()) {
+    const b = { destino_nombre: fila.destino_nombre, destino_telefono: fila.destino_telefono, destino_direccion: fila.destino_direccion, destino_zona: fila.destino_zona || OTRA_ZONA,
+      peso: fila.peso || 1, descripcion: fila.descripcion, cobro_destinatario: fila.cobro_destinatario, notas: fila.notas, paquetes: fila.paquetes, fragil: fila.fragil === true || /^s/i.test(String(fila.fragil || '')),
+      vehiculo_id: db.prepare('SELECT id FROM vehiculos WHERE activo = 1 AND solo_oficina = 0 ORDER BY orden, id LIMIT 1').get()?.id,
+      origen_quien: 'sede', origen_zona: zonaDePunto(sedeUbicacion()) || OTRA_ZONA, origen_direccion: aj.sede_direccion || 'Sede Vaelo', origen_telefono: u.telefono, metodo_pago: metodo, _lote_sede_id: -1 };
+    try {
+      const d = validarPedido(u, b);
+      const c = await cotizar({ ...b, origen_lat: sedeUbicacion().lat, origen_lng: sedeUbicacion().lng });
+      preparados.push({ b, d, c, desc: mejorDescuento(c.precio, u.id, '') });
+    } catch (err) { errores.push(`Fila ${i + 2}: ${err.message}`); }
+  }
+  if (errores.length) return { _status: 400, ok: false, errores };
+  db.exec('BEGIN');
+  try {
+    const lote = Number(db.prepare('INSERT INTO lotes_sede (usuario_id, paquetes, entregar_desde, nota) VALUES (?, ?, ?, ?)').run(u.id, total, desde || null, texto(body.nota, 300) || null).lastInsertRowid);
+    const programado = desde && desde > hoyGT() ? new Date(Date.parse(desde + 'T08:00:00Z') + 6 * 3600_000).toISOString().slice(0, 19).replace('T', ' ') : null;
+    const creados = preparados.map((x) => insertarEnvio(u, { ...x.b, _lote_sede_id: lote }, x.d, x.c, x.desc, programado));
+    db.exec('COMMIT');
+    avisarStaff({ titulo: 'Envío de empresa a la sede', cuerpo: `${u.empresa_nombre || u.nombre} traerá ${total} paquetes a la sede.`, url: RUTA_ADMIN, etiqueta: 'lote-' + lote });
+    return { _status: 201, ok: true, lote, paquetes: total, envios: creados.length, guias: creados.map((x) => x.guia), enlaces: creados.map((x) => ({ guia: x.guia, enlace: x.enlace_receptor })) };
+  } catch (err) { db.exec('ROLLBACK'); throw err; }
+}, { limite: 800_000 });
+function lotesDe(usuarioId) {
+  const tarifa = Number(getAjustes().cargo_bodega_empresa) || 0;
+  return db.prepare(`SELECT l.*, (SELECT COUNT(*) FROM envios e WHERE e.lote_sede_id = l.id) AS entregas,
+      (SELECT COALESCE(SUM(e.paquetes), 0) FROM envios e WHERE e.lote_sede_id = l.id AND e.estado = 'pendiente') AS en_sede,
+      (SELECT COUNT(*) FROM envios e WHERE e.lote_sede_id = l.id AND e.estado = 'entregado') AS entregados
+    FROM lotes_sede l WHERE (? IS NULL OR l.usuario_id = ?) ORDER BY l.id DESC LIMIT 100`).all(usuarioId, usuarioId).map((l) => {
+    let dias = 0;
+    if (l.recibido_en && l.en_sede) dias = Math.max(0, Math.round((Date.parse(hoyGT()) - Date.parse(new Date(fechaMs(l.recibido_en) - 6 * 3600_000).toISOString().slice(0, 10))) / 86400_000));
+    return { ...l, dias_en_sede: dias, costo_hoy: redondear(dias * tarifa * l.en_sede) };
+  });
+}
+ruta('GET', '/api/empresa/lotes', ({ req }) => ({ lotes: lotesDe(requiereEmpresa(req).id), tarifa: Number(getAjustes().cargo_bodega_empresa) || 0, minimo: Number(getAjustes().min_paquetes_sede) || 10,
+  sede: getAjustes().sede_direccion || '' }));
+ruta('GET', '/api/admin/lotes-sede', ({ req }) => {
+  requiereStaff(req);
+  return { lotes: lotesDe(null).map((l) => ({ ...l, empresa: db.prepare('SELECT COALESCE(empresa_nombre, nombre) AS n FROM usuarios WHERE id = ?').get(l.usuario_id).n })) };
+});
+ruta('POST', '/api/admin/lotes-sede/:id', ({ req, params, body }) => {
+  const quien = requiereStaff(req);
+  const l = db.prepare('SELECT * FROM lotes_sede WHERE id = ?').get(Number(params.id));
+  if (!l) falla(404, 'No encontramos ese envío a la sede.');
+  if (body.accion === 'recibido') {
+    if (l.estado !== 'esperando') falla(400, 'Este envío ya se recibió o se canceló.');
+    db.prepare("UPDATE lotes_sede SET estado = 'recibido', recibido_en = datetime('now'), recibido_por = ? WHERE id = ?").run(quien.nombre.split(' ')[0], l.id);
+    for (const e of db.prepare("SELECT id FROM envios WHERE lote_sede_id = ? AND estado = 'pendiente'").all(l.id))
+      db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(e.id, 'pendiente', 'El paquete llegó a la sede de Vaelo');
+    avisar(l.usuario_id, { titulo: 'Recibimos tus paquetes', cuerpo: `${l.paquetes} paquetes en la sede de Vaelo. Los que salgan hoy no pagan bodega.`, url: '/mi-cuenta?empresa=1' });
+    return { ok: true };
+  }
+  if (body.accion === 'cancelar') {
+    if (l.estado !== 'esperando') falla(400, 'Solo se cancela un envío que todavía no llega a la sede.');
+    db.prepare("UPDATE lotes_sede SET estado = 'cancelado' WHERE id = ?").run(l.id);
+    for (const e of db.prepare("SELECT id FROM envios WHERE lote_sede_id = ? AND estado = 'pendiente'").all(l.id)) cambiarEstado(e.id, 'cancelado', 'Se canceló el envío de paquetes a la sede');
+    return { ok: true };
+  }
+  falla(400, 'Acción no válida.');
+});
+
+// ---------- Empresas: estadísticas ----------
+ruta('GET', '/api/empresa/estadisticas', ({ req, query }) => {
+  const u = requiereEmpresa(req);
+  const hoy = hoyGT();
+  const desde = /^\d{4}-\d{2}-\d{2}$/.test(query.get('desde') || '') ? query.get('desde') : sumarDias(hoy, -29);
+  const hasta = /^\d{4}-\d{2}-\d{2}$/.test(query.get('hasta') || '') ? query.get('hasta') : hoy;
+  const rango = "e.usuario_id = ? AND date(e.creado, '-6 hours') BETWEEN ? AND ?";
+  const g = db.prepare(`SELECT COUNT(*) AS envios, COALESCE(SUM(e.paquetes), 0) AS paquetes, SUM(e.estado = 'entregado') AS entregados, SUM(e.fallo_en IS NOT NULL) AS fallidos,
+      SUM(e.estado = 'cancelado') AS cancelados, SUM(e.estado IN ${SQL_PILOTO_ACTIVO}) AS en_curso,
+      COALESCE(SUM(CASE WHEN e.estado = 'entregado' THEN e.cobro_destinatario END), 0) AS cobrado,
+      COALESCE(SUM(CASE WHEN e.estado = 'entregado' AND e.metodo_pago != 'recibe' THEN e.precio END), 0) AS gasto,
+      COALESCE(SUM(CASE WHEN e.estado = 'entregado' AND e.metodo_pago = 'recibe' THEN e.precio END), 0) AS pagaron_clientes,
+      AVG(CASE WHEN e.estado = 'entregado' AND e.entregado_en IS NOT NULL THEN (julianday(e.entregado_en) - julianday(COALESCE(e.programado_para, e.creado))) * 1440 END) AS minutos
+    FROM envios e WHERE ${rango}`).get(u.id, desde, hasta);
+  const porDia = db.prepare(`SELECT date(e.creado, '-6 hours') AS dia, COUNT(*) AS envios, SUM(e.estado = 'entregado') AS entregados FROM envios e WHERE ${rango} GROUP BY dia ORDER BY dia`).all(u.id, desde, hasta);
+  const porZona = db.prepare(`SELECT e.destino_zona AS zona, COUNT(*) AS envios FROM envios e WHERE ${rango} AND e.estado != 'cancelado' GROUP BY zona ORDER BY envios DESC LIMIT 8`).all(u.id, desde, hasta);
+  const porFallo = db.prepare(`SELECT e.fallo_motivo AS motivo, COUNT(*) AS n FROM envios e WHERE ${rango} AND e.fallo_en IS NOT NULL GROUP BY motivo ORDER BY n DESC`).all(u.id, desde, hasta)
+    .map((x) => ({ ...x, texto: MOTIVOS_FALLO[x.motivo] || x.motivo }));
+  const porCobrar = db.prepare("SELECT COALESCE(SUM(cobro_destinatario), 0) AS t FROM envios WHERE usuario_id = ? AND estado = 'entregado' AND cobro_destinatario > 0 AND cobro_pagado_en IS NULL").get(u.id).t;
+  const cargos = redondear(cargosPendientes(u.id).reduce((t, c) => t + c.monto, 0));
+  const lotes = lotesDe(u.id);
+  const entregadosOk = g.entregados || 0, terminados = entregadosOk + (g.fallidos || 0);
+  return { desde, hasta, general: { ...g, entregados: entregadosOk, fallidos: g.fallidos || 0, cancelados: g.cancelados || 0, en_curso: g.en_curso || 0,
+      exito: terminados ? Math.round((entregadosOk / terminados) * 100) : null, minutos: g.minutos ? Math.round(g.minutos) : null,
+      cobrado: redondear(g.cobrado), gasto: redondear(g.gasto), pagaron_clientes: redondear(g.pagaron_clientes) },
+    porDia, porZona, porFallo, cobros_por_recibir: redondear(porCobrar), cargos_pendientes: cargos,
+    en_sede: lotes.reduce((t, l) => t + (l.estado === 'recibido' ? l.en_sede : 0), 0), costo_sede_hoy: redondear(lotes.reduce((t, l) => t + l.costo_hoy, 0)) };
+});
 // ---------- Asignación automática al piloto más cercano ----------
 // Cada 10 segundos: si un piloto no acepta a tiempo pasa al siguiente; los envíos sin piloto se ofrecen al más cercano libre.
 function asignacionAutomatica() {
@@ -2525,6 +2985,8 @@ function asignacionAutomatica() {
   const pendientes = db.prepare(`SELECT * FROM envios WHERE estado = 'pendiente' AND mensajero_id IS NULL AND origen_lat IS NOT NULL
     AND (programado_para IS NULL OR programado_para <= datetime('now', '+30 minutes')) ORDER BY COALESCE(programado_para, creado) LIMIT 40`).all();
   if (exigeReceptor()) for (let i = pendientes.length - 1; i >= 0; i--) if (!receptorListo(pendientes[i])) pendientes.splice(i, 1);
+  // Transferencias sin pago confirmado y paquetes de empresa que todavía no llegan a la sede: no se ofrecen a pilotos
+  for (let i = pendientes.length - 1; i >= 0; i--) if (!listoParaPiloto(pendientes[i])) pendientes.splice(i, 1);
   if (!pendientes.length) return;
   const libres = db.prepare(`${SQL_PILOTO} WHERE u.rol = 'mensajero' AND u.estado_piloto = 'aprobado' AND u.activo = 1 AND u.en_linea = 1`).all()
     .filter((p) => enLineaReal(p) && puedeTrabajar(p));
@@ -2626,6 +3088,8 @@ ruta('GET', '/api/admin/envios/:id', ({ req, params }) => {
   out.tiene_foto_entrega = !!e.foto_entrega; out.tiene_firma_entrega = !!e.firma_entrega; out.tiene_foto_fallo = !!e.fallo_foto;
   Object.assign(out, infoExtra(e));
   out.cargos = db.prepare('SELECT * FROM cargos WHERE envio_id = ? OR cobrado_envio_id = ? ORDER BY id').all(e.id, e.id);
+  out.reclamos = reclamosDe(e.id);
+  out.listo_para_piloto = listoParaPiloto(e); out.motivo_no_listo = out.listo_para_piloto ? null : motivoNoListo(e);
   out.receptor = { ...datosReceptor(e, true), enlace: ESTADOS_ACTIVOS.includes(e.estado) ? '/recibe/' + tokenReceptor(e) : null };
   out.origen = { ...datosOrigen(e, true), enlace: e.origen_quien === 'tercero' && e.estado === 'pendiente' && e.origen_token ? '/entrega/' + e.origen_token : null };
   sinCamposReceptor(out);
@@ -2663,7 +3127,8 @@ ruta('POST', '/api/admin/envios/:id/asignar', ({ req, params, body }) => {
     return { ok: true };
   }
   const m = pilotoPorId(numero(body.mensajero_id));
-  if (!m || !puedeTrabajar(m)) falla(400, 'Elige un piloto aprobado y con sus documentos vigentes.');
+  if (!m || !puedeTrabajar(m)) falla(400, 'Elige un piloto aprobado, con sus documentos vigentes, la política aceptada y sin efectivo pendiente de liquidar.');
+  if (!listoParaPiloto(e)) falla(400, motivoNoListo(e));
   db.prepare(`UPDATE envios SET mensajero_id = ?, asignacion = 'por_aceptar', asignado_en = datetime('now'), llego_origen = 0, llegando_destino = 0,
     actualizado = datetime('now') WHERE id = ?`).run(m.id, e.id);
   db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(e.id, e.estado, `Asignado a ${m.nombre.split(' ')[0]}, esperando que acepte`);
@@ -2692,8 +3157,9 @@ ruta('PUT', '/api/admin/vehiculos/:id', ({ req, params, body }) => {
   }
   if (nombre.length < 2) falla(400, 'Escribe el nombre del vehículo.');
   const activo = body.activo !== undefined ? (body.activo ? 1 : 0) : v.activo;
-  db.prepare('UPDATE vehiculos SET nombre=?, descripcion=?, peso_max=?, tarifa_zona=?, tarifa_base=?, precio_km=?, activo=? WHERE id=?')
-    .run(nombre, descripcion, nums.peso_max, redondear(nums.tarifa_zona), redondear(nums.tarifa_base), redondear(nums.precio_km), activo, v.id);
+  const soloOficina = body.solo_oficina !== undefined ? (body.solo_oficina ? 1 : 0) : v.solo_oficina;
+  db.prepare('UPDATE vehiculos SET nombre=?, descripcion=?, peso_max=?, tarifa_zona=?, tarifa_base=?, precio_km=?, activo=?, solo_oficina=? WHERE id=?')
+    .run(nombre, descripcion, nums.peso_max, redondear(nums.tarifa_zona), redondear(nums.tarifa_base), redondear(nums.precio_km), activo, soloOficina, v.id);
   return { ok: true };
 });
 
@@ -2742,10 +3208,10 @@ ruta('PUT', '/api/admin/ajustes', ({ req, body }) => {
     if (!(Number.isInteger(n) && n >= 20 && n <= 600)) falla(400, 'El tiempo para aceptar debe ser de 20 a 600 segundos.');
     up.run('segundos_aceptar', String(n));
   }
-  if (body.comision_tipo !== undefined) up.run('comision_tipo', body.comision_tipo === 'fijo' ? 'fijo' : 'porcentaje');
+  if (body.comision_tipo !== undefined) up.run('comision_tipo', ['fijo', 'vaelo_fijo'].includes(body.comision_tipo) ? body.comision_tipo : 'porcentaje');
   if (body.comision_valor !== undefined) {
     const n = numero(body.comision_valor);
-    if (!(n >= 0 && n <= (body.comision_tipo === 'fijo' ? 1000 : 100))) falla(400, 'Revisa lo que gana el piloto por entrega.');
+    if (!(n >= 0 && n <= (body.comision_tipo === 'porcentaje' ? 100 : 1000))) falla(400, 'Revisa lo que gana el piloto por entrega.');
     up.run('comision_valor', String(redondear(n)));
   }
   if (body.mapbox_token !== undefined) {
@@ -2753,8 +3219,9 @@ ruta('PUT', '/api/admin/ajustes', ({ req, body }) => {
     if (t && !/^pk\.[A-Za-z0-9._-]{20,}$/.test(t)) falla(400, 'La clave de Mapbox debe ser la pública (empieza con pk.).');
     up.run('mapbox_token', t);
   }
+  if (body.whatsapp_pagos !== undefined) up.run('whatsapp_pagos', String(body.whatsapp_pagos).replace(/\D/g, '').slice(0, 15));
   // Montos de cargos, seguro y tarifa fija
-  const montos = { cargo_devolucion: [0, 1000], cargo_bodega_dia: [0, 1000], cargo_reentrega: [0, 1000], cargo_cancelacion: [0, 1000], pct_piloto_cancelacion: [0, 100],
+  const montos = { dias_liquidar: [1, 60], cargo_bodega_empresa: [0, 1000], min_paquetes_sede: [1, 500], dias_reclamo: [1, 60], cargo_devolucion: [0, 1000], cargo_bodega_dia: [0, 1000], cargo_reentrega: [0, 1000], cargo_cancelacion: [0, 1000], pct_piloto_cancelacion: [0, 100],
     horas_decidir_fallido: [0.25, 48], seguro_pct: [0, 50], seguro_minimo: [0, 1000], responsabilidad_max: [0, 100000], km_max_tarifa_fija: [1, 200] };
   for (const [k, [min, max]] of Object.entries(montos)) {
     if (body[k] === undefined) continue;
@@ -2790,7 +3257,7 @@ const TIPOS = {
 };
 const PAGINAS = { '/': 'index.html', '/entrar': 'entrar.html', '/registro': 'registro.html', '/mi-cuenta': 'cliente.html',
   '/enviar': 'cliente.html', '/rastreo': 'rastreo.html', '/recuperar': 'recuperar.html', '/terminos': 'terminos.html', '/privacidad': 'privacidad.html',
-  '/tiendas': 'tiendas.html' };
+  '/tiendas': 'tiendas.html', '/politica-pilotos': 'politica-pilotos.html', '/politicas-empresas': 'politicas-empresas.html' };
 // Páginas que piden cuenta: si no has iniciado sesión, el servidor te manda a entrar antes de mostrar nada
 const PIDEN_CUENTA = { '/enviar': ['cliente', 'admin'], '/mi-cuenta': ['cliente', 'admin'] };
 

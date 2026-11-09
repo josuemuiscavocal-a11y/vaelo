@@ -38,6 +38,16 @@
       'Avisar de inmediato a la administración ante un accidente, robo o cualquier problema en la ruta.',
       'Mantener vigentes tu licencia y tus antecedentes. Con un documento vencido no podrás recibir envíos.',
     ];
+    // Lo más importante de la política (la completa está en /politica-pilotos)
+    const RESUMEN_POLITICA = [
+      'De cada envío Vaelo cobra Q5; el resto es para ti.',
+      'Todo el efectivo y los cobros contra entrega se entregan en la sede. Si pasa el plazo sin aclarar cuentas, no podrás conectarte y se puede suspender tu cuenta.',
+      'Si un paquete se pierde o se daña por descuido, te haces responsable: se evalúa y se descuenta de tu pago.',
+      'Respeta la Ley de Tránsito: casco, velocidad, semáforos y nada de teléfono en la mano al manejar. Las multas son tuyas.',
+      'Tus documentos y datos se piden para tu seguridad, la de los clientes y la de Vaelo.',
+      'Tu ubicación se comparte mientras estás en línea o llevas un envío.',
+      'Vaelo puede suspender tu cuenta por quedarte con dinero o paquetes, faltas graves de tránsito, documentos falsos o malos tratos.',
+    ];
     let yo = null, vehiculos = [], vigencia = 6;
     let enLinea = false, vigilante = null, ultimaPos = null, ultimaLectura = 0, ultimoEnvio = 0, gpsError = '';
     let conocidos = null, bloqueoPantalla = null, temporizador = null, envios = [], ultimaFirma = '', ocupado = 0;
@@ -95,8 +105,8 @@
         el('div', { class: 'campo' }, el('label', { for: 'r-tel', text: 'Teléfono o WhatsApp' }), el('input', { id: 'r-tel', type: 'tel', autocomplete: 'tel', placeholder: '0000-0000', maxlength: 30 })),
         el('div', { class: 'campo' }, el('label', { for: 'r-email', text: 'Correo' }), el('input', { id: 'r-email', type: 'email', autocomplete: 'email', maxlength: 150 })),
         el('div', { class: 'campo' }, el('label', { for: 'r-pass' }, 'Contraseña ', el('span', { class: 'ayuda', text: 'Mínimo 8 caracteres' })), el('input', { id: 'r-pass', type: 'password', autocomplete: 'new-password' })),
-        el('details', { class: 'reglas' }, el('summary', { text: 'Reglas de Vaelo para pilotos' }), el('ol', {}, REGLAS.map(t => el('li', { text: t })))),
-        el('label', { class: 'casilla', for: 'r-reglas' }, acepto, 'Leí y acepto las reglas de Vaelo para pilotos'),
+        el('details', { class: 'reglas' }, el('summary', { text: 'Resumen de la política para pilotos' }), el('ul', {}, RESUMEN_POLITICA.map(t => el('li', { text: t })))),
+        el('label', { class: 'casilla', for: 'r-reglas' }, acepto, el('span', {}, 'Leí y acepto la ', el('a', { href: '/politica-pilotos', target: '_blank', text: 'política y condiciones para pilotos' }))),
         el('button', { class: 'boton', type: 'submit', text: 'Crear mi cuenta' }),
         el('p', { class: 'alterno' }, '¿Ya tienes cuenta? ', el('a', { href: '#entrar', onclick: (ev) => { ev.preventDefault(); verEntrar(); }, text: 'Entra aquí' })));
       panelRegistro.addEventListener('submit', async (ev) => {
@@ -105,7 +115,7 @@
         const b = panelRegistro.querySelector('button[type=submit]'); b.disabled = true;
         try {
           await api('/api/piloto/registro', { body: { nombre: $('r-nombre').value, telefono: $('r-tel').value, email: $('r-email').value, password: $('r-pass').value } });
-          await api('/api/piloto/perfil', { method: 'PUT', body: { acepto_reglas: true } });
+          await api('/api/piloto/perfil', { method: 'PUT', body: { acepto_reglas: true, acepto_politica: true } });
           iniciar();
         } catch (e) { mostrarMensaje(msg2, e.message); b.disabled = false; }
       });
@@ -115,11 +125,12 @@
       if (location.hash === '#registro') verRegistro();
     }
 
-    // ---------- Formulario de perfil (solicitud y "Mi perfil") ----------
+    // ---------- Formulario de perfil (solicitud y "Mi perfil"), por secciones con avance ----------
     function formularioPerfil(aprobado, alGuardar) {
       const msg = el('div', { class: 'mensaje', role: 'alert' });
       const campos = {};
       const bloqueado = (k) => aprobado && !CAMPOS_APROBADO.includes(k);
+      const valor = (k) => (campos[k] && !campos[k].disabled ? campos[k].value : yo[k]);
       const entrada = (k, titulo, attrs = {}, ayuda) => {
         const id = 'p-' + k;
         const input = attrs.tag === 'select'
@@ -128,40 +139,105 @@
         if (attrs.tag === 'textarea') input.value = yo[k] || '';
         else if (attrs.tag !== 'select') input.value = k === 'dpi' && yo[k] ? `${yo[k].slice(0, 4)} ${yo[k].slice(4, 9)} ${yo[k].slice(9)}` : (yo[k] ?? '');
         if (bloqueado(k)) input.disabled = true;
+        input.addEventListener('input', pintarAvance);
         campos[k] = input;
         return el('div', { class: 'campo' }, el('label', { for: id }, titulo, ayuda ? el('span', { class: 'ayuda', text: ' ' + ayuda }) : null), input);
       };
       const doc = (tipo, titulo, op = {}) => campoDocumento({ titulo, tiene: yo.docs[tipo], ver: `/api/piloto/documento/${tipo}`, pdf: op.pdf, ayuda: op.ayuda, camara: op.camara,
         soloVer: aprobado && !DOCS_RENOVABLES.includes(tipo),
-        subir: (archivo) => api('/api/piloto/documento', { body: { tipo, archivo } }), alCambiar: refrescar });
-      const seccion = (titulo, ...hijos) => el('fieldset', { class: 'bloque' }, el('legend', { text: titulo }), ...hijos);
+        subir: (archivo) => api('/api/piloto/documento', { body: { tipo, archivo } }), alCambiar: async () => { await refrescar(); pintarAvance(); } });
       const fila = (...h) => el('div', { class: 'fila' }, ...h);
       const docs = (...h) => el('div', { class: 'docs' }, ...h);
       const hoy = new Date().toISOString().slice(0, 10);
+      // Qué pide cada sección para estar completa
+      const SECCIONES = [
+        { id: 'datos', titulo: 'Tus datos', icono: 'usuario', texto: 'Como aparecen en tu DPI. Tu foto la ve el cliente cuando llevas su paquete.',
+          ok: () => valor('nombre') && valor('fecha_nacimiento') && String(valor('dpi') || '').replace(/\D/g, '').length === 13 && valor('direccion') && yo.docs.foto && yo.docs.dpi_frente && yo.docs.dpi_reverso },
+        { id: 'emergencia', titulo: 'Contacto de emergencia', icono: 'alerta', texto: 'A quién llamamos si te pasa algo en la ruta.', ok: () => valor('emergencia_nombre') && valor('emergencia_telefono') },
+        { id: 'antecedentes', titulo: 'Antecedentes', icono: 'check', texto: `Penales y policiacos. Valen ${vigencia} meses desde su emisión.`,
+          ok: () => valor('penales_fecha') && valor('policiacos_fecha') && yo.docs.penales && yo.docs.policiacos },
+        { id: 'licencia', titulo: 'Licencia', icono: 'etiqueta', texto: 'Con la licencia vencida no puedes recibir envíos.', ok: () => valor('licencia_numero') && valor('licencia_tipo') && valor('licencia_vence') && yo.docs.licencia_frente },
+        { id: 'vehiculo', titulo: 'Tu vehículo', icono: 'piloto', texto: 'Con el que haces las entregas.',
+          ok: () => valor('vehiculo_id') && valor('veh_placa') && valor('veh_marca') && valor('veh_modelo') && valor('veh_color') && yo.docs.tarjeta && yo.docs.veh_frente && (String(valor('veh_propio')) === '1' || yo.docs.carta) },
+        { id: 'seguro', titulo: 'Seguro', icono: 'check', texto: 'Opcional, pero recomendado.', ok: () => true, opcional: true },
+      ];
+      const chips = {}, marcas = {};
+      const nav = el('nav', { class: 'perfil-pasos', 'aria-label': 'Secciones del perfil' }, SECCIONES.map(x => (chips[x.id] = el('button', { type: 'button',
+        onclick: () => document.getElementById('sec-' + x.id).scrollIntoView({ behavior: sinAnimacion() ? 'auto' : 'smooth', block: 'start' }) }, el('span', { class: 'marca-paso' }), x.titulo))));
+      const anillo = el('div', { class: 'anillo' }, el('span'));
+      const avanceTexto = el('div');
+      const avance = el('div', { class: 'perfil-avance' }, anillo, avanceTexto);
+      function pintarAvance() {
+        const req = SECCIONES.filter(x => !x.opcional);
+        const listas = req.filter(x => x.ok()).length;
+        const pct = Math.round((listas / req.length) * 100);
+        anillo.style.setProperty('--p', pct); anillo.firstChild.textContent = pct + '%';
+        avanceTexto.replaceChildren(el('strong', { text: pct === 100 ? 'Tu perfil está completo' : `Te faltan ${req.length - listas} de ${req.length} secciones` }),
+          el('small', { text: aprobado ? 'Mantén al día tu licencia y tus antecedentes.' : 'Guarda y vuelve cuando quieras. La administración revisa tu solicitud cuando esté completa.' }));
+        for (const x of SECCIONES) {
+          const ok = !!x.ok();
+          chips[x.id].classList.toggle('completo', ok && !x.opcional);
+          marcas[x.id] && marcas[x.id].replaceChildren(el('span', { class: x.opcional ? 'etiqueta-gris' : ok ? 'etiqueta-completa' : 'etiqueta-pendiente', text: x.opcional ? 'Opcional' : ok ? 'Completo' : 'Falta' }));
+        }
+        pintarLicencia(); pintarVencimientos();
+      }
+      const seccion = (id, ...hijos) => {
+        const x = SECCIONES.find(z => z.id === id);
+        marcas[id] = el('span', { class: 'estado-seccion' });
+        return el('fieldset', { class: 'perfil-seccion', id: 'sec-' + id }, el('legend', { class: 'oculto', text: x.titulo }),
+          el('div', { class: 'seccion-cab' }, el('span', { class: 'num' }, icono(x.icono)), el('div', {}, el('h2', { text: x.titulo }), el('p', { class: 'pista', text: x.texto })), marcas[id]), ...hijos);
+      };
+      // Vista de la licencia y vencimientos de antecedentes, se actualizan mientras escribes
+      const tarjetaLic = el('div', { class: 'licencia-tarjeta' });
+      const chipVence = (f, dias = 30) => {
+        if (!f) return el('span', { class: 'vence-chip', text: 'Sin fecha' });
+        const hoyD = new Date(hoy + 'T00:00:00'), d = new Date(f + 'T00:00:00');
+        if (d < hoyD) return el('span', { class: 'vence-chip mal', text: 'Vencida' });
+        if ((d - hoyD) / 86400e3 <= dias) return el('span', { class: 'vence-chip pronto', text: 'Vence pronto' });
+        return el('span', { class: 'vence-chip', text: 'Vigente' });
+      };
+      function pintarLicencia() {
+        const v = valor('licencia_vence');
+        tarjetaLic.replaceChildren(el('small', { text: 'Licencia de conducir · República de Guatemala' }),
+          el('div', { class: 'lic-num', text: valor('licencia_numero') || '—' }),
+          el('div', { class: 'lic-fila' },
+            el('div', {}, el('small', { text: 'Tipo' }), el('strong', { text: valor('licencia_tipo') || '—' })),
+            el('div', {}, el('small', { text: 'Vence' }), el('strong', { text: v ? new Date(v + 'T12:00:00').toLocaleDateString('es-GT', { day: 'numeric', month: 'short', year: 'numeric' }) : '—' })),
+            el('div', {}, el('small', { text: 'Estado' }), chipVence(v))),
+          el('small', { style: 'margin-top:.5rem', text: yo.nombre }));
+      }
+      const venceAnt = el('div', { class: 'lic-fila', style: 'color:var(--tinta);margin-bottom:.75rem' });
+      function pintarVencimientos() {
+        const vence = (f) => { if (!f) return ''; const d = new Date(f + 'T12:00:00'); d.setMonth(d.getMonth() + vigencia); return d.toISOString().slice(0, 10); };
+        venceAnt.replaceChildren(...[['Penales', valor('penales_fecha')], ['Policiacos', valor('policiacos_fecha')]].map(([t, f]) =>
+          el('div', {}, el('small', { class: 'mini', text: `${t} vencen` }), el('strong', { text: f ? new Date(vence(f) + 'T12:00:00').toLocaleDateString('es-GT', { day: 'numeric', month: 'short', year: 'numeric' }) + ' ' : '— ' }), f ? chipVence(vence(f)) : null)));
+      }
 
+      const guardar = el('button', { class: 'boton', type: 'submit', text: 'Guardar mis datos' });
       const form = el('form', { novalidate: true },
-        seccion('Tus datos',
-          fila(entrada('nombre', 'Nombre completo', { maxlength: 100 }), entrada('telefono', 'Teléfono', { type: 'tel', maxlength: 30 })),
+        avance, nav,
+        aprobado ? el('p', { class: 'mensaje aviso', text: 'Ya estás aprobado: puedes actualizar tu contacto y renovar licencia y antecedentes. Para cambiar otros datos (nombre, DPI, vehículo), comunícate con la administración.' }) : null,
+        seccion('datos',
+          fila(entrada('nombre', 'Nombre completo', { maxlength: 100, autocomplete: 'name' }), entrada('telefono', 'Teléfono', { type: 'tel', maxlength: 30 })),
           fila(entrada('fecha_nacimiento', 'Fecha de nacimiento', { type: 'date', max: hoy }), entrada('dpi', 'Número de DPI', { inputmode: 'numeric', maxlength: 17, placeholder: '0000 00000 0000' })),
           entrada('direccion', 'Dirección donde vives', { maxlength: 300, placeholder: 'Calle, número, zona, municipio' }),
           fila(entrada('nit', 'NIT', { maxlength: 20 }, 'Opcional'), el('div')),
           entrada('referencias', 'Referencias personales o de trabajo', { tag: 'textarea' }, 'Opcional. Nombre y teléfono'),
-          docs(doc('foto', 'Tu foto', { camara: 'user', ayuda: 'De frente, sin lentes oscuros ni gorra. La ve el cliente.' }),
+          docs(doc('foto', 'Tu foto', { camara: 'user', ayuda: 'De frente, sin lentes oscuros ni gorra.' }),
             doc('dpi_frente', 'DPI (frente)', { camara: 'environment' }), doc('dpi_reverso', 'DPI (reverso)', { camara: 'environment' }),
             doc('recibo', 'Recibo de luz o agua', { pdf: true, ayuda: 'Opcional. Comprueba tu dirección' }))),
-        seccion('Contacto de emergencia',
+        seccion('emergencia',
           fila(entrada('emergencia_nombre', 'Nombre', { maxlength: 100 }), entrada('emergencia_parentesco', 'Parentesco', { maxlength: 50, placeholder: 'Mamá, esposa, hermano…' })),
           fila(entrada('emergencia_telefono', 'Teléfono', { type: 'tel', maxlength: 30 }), el('div'))),
-        seccion('Antecedentes penales y policiacos',
-          el('p', { class: 'pista', text: `Valen ${vigencia} meses desde su fecha de emisión. Con antecedentes vencidos no podrás recibir envíos.` }),
+        seccion('antecedentes', venceAnt,
           fila(entrada('penales_fecha', 'Emisión de antecedentes penales', { type: 'date', max: hoy }), entrada('policiacos_fecha', 'Emisión de antecedentes policiacos', { type: 'date', max: hoy })),
           docs(doc('penales', 'Antecedentes penales', { pdf: true }), doc('policiacos', 'Antecedentes policiacos', { pdf: true }))),
-        seccion('Licencia de conducir',
+        seccion('licencia', tarjetaLic,
           fila(entrada('licencia_numero', 'Número de licencia', { maxlength: 30 }),
             entrada('licencia_tipo', 'Tipo', { tag: 'select', opciones: [['', 'Elige'], ['M', 'M (moto)'], ['C', 'C'], ['B', 'B'], ['A', 'A']] })),
           fila(entrada('licencia_vence', 'Fecha de vencimiento', { type: 'date' }), el('div')),
           docs(doc('licencia_frente', 'Licencia (frente)', { camara: 'environment' }), doc('licencia_reverso', 'Licencia (reverso)', { camara: 'environment', ayuda: 'Recomendada' }))),
-        seccion('Tu vehículo',
+        seccion('vehiculo',
           fila(entrada('vehiculo_id', 'Tipo de vehículo', { tag: 'select', opciones: [['', 'Elige'], ...vehiculos.map(v => [v.id, v.nombre])] }),
             entrada('veh_placa', 'Placa', { maxlength: 12, placeholder: 'M-123ABC', style: 'text-transform:uppercase' })),
           fila(entrada('veh_marca', 'Marca', { maxlength: 40 }), entrada('veh_modelo', 'Modelo / línea', { maxlength: 40 })),
@@ -170,21 +246,21 @@
           docs(doc('tarjeta', 'Tarjeta de circulación', { camara: 'environment' }), doc('veh_frente', 'Vehículo (frente)', { camara: 'environment' }),
             doc('veh_lado', 'Vehículo (de lado)', { camara: 'environment', ayuda: 'Recomendada' }), doc('veh_placa', 'Placa', { camara: 'environment', ayuda: 'Recomendada' }),
             doc('carta', 'Carta del dueño', { pdf: true, ayuda: 'Solo si el vehículo no es tuyo: autorización firmada con copia de su DPI' }))),
-        seccion('Seguro del vehículo',
+        seccion('seguro',
           fila(entrada('seguro_aseguradora', 'Aseguradora', { maxlength: 60 }, 'Opcional'), entrada('seguro_vence', 'Vence', { type: 'date' }, 'Opcional'))),
-        msg,
-        el('button', { class: 'boton', type: 'submit', text: 'Guardar mis datos' }));
-      if (aprobado) form.prepend(el('p', { class: 'mensaje aviso', text: 'Ya estás aprobado: puedes actualizar tu contacto y renovar licencia y antecedentes. Para cambiar otros datos (nombre, DPI, vehículo), comunícate con la administración.' }));
+        el('div', { class: 'guardar-flotante' }, msg, guardar));
+      form.addEventListener('change', pintarAvance);
       form.addEventListener('submit', async (ev) => {
         ev.preventDefault();
-        const b = form.querySelector('button[type=submit]'); b.disabled = true;
+        guardar.disabled = true; guardar.textContent = 'Guardando…';
         const body = {};
         for (const [k, input] of Object.entries(campos)) if (!input.disabled) body[k] = input.value;
-        try { await api('/api/piloto/perfil', { method: 'PUT', body }); mostrarMensaje(msg, 'Datos guardados.', 'exito'); await refrescar(); }
+        try { await api('/api/piloto/perfil', { method: 'PUT', body }); mostrarMensaje(msg, 'Datos guardados.', 'exito'); await refrescar(); pintarAvance(); }
         catch (e) { mostrarMensaje(msg, e.message); }
-        b.disabled = false;
+        guardar.disabled = false; guardar.textContent = 'Guardar mis datos';
       });
       async function refrescar() { try { yo = (await api('/api/piloto/yo')).piloto; alGuardar && alGuardar(); } catch { /* nada */ } }
+      setTimeout(pintarAvance, 0);
       return form;
     }
 
@@ -219,6 +295,7 @@
         boton('entregas', 'paquete', 'Entregas', true), boton('ganancias', 'dinero', 'Ganancias', false), boton('perfil', 'usuario', 'Mi perfil', false));
       const panelEntregas = el('section', { id: 'panel-entregas' },
         el('div', { id: 'revision' }), bloqueInstalar('Vaelo Pilotos'),
+        el('div', { id: 'avisos-trabajo' }),
         bloqueAvisos('Te avisamos de cada envío nuevo aunque tengas otra app abierta o la pantalla apagada.'),
         el('div', { class: 'conexion', id: 'conexion' }),
         el('div', { id: 'alerta-gps' }),
@@ -230,6 +307,7 @@
         ['entregas', 'ganancias', 'perfil'].forEach(x => $('tab-' + x).setAttribute('aria-selected', String(t === x)));
         panelEntregas.hidden = t !== 'entregas'; panelPerfil.hidden = t !== 'perfil'; panelGanancias.hidden = t !== 'ganancias';
         window.scrollTo(0, 0);
+        $('boton-emergencia').hidden = t === 'perfil';
         if (t === 'ganancias') pintarGanancias(panelGanancias);
         if (t === 'perfil') panelPerfil.replaceChildren(cajaRevision(), formularioPerfil(true, () => { $('revision').replaceChildren(cajaRevision()); }), formularioClave());
       };
@@ -241,6 +319,7 @@
       $('boton-emergencia').hidden = false;
       cargarEnvios(true);
       temporizador = setInterval(() => cargarEnvios(), 10000);
+      setInterval(async () => { try { yo = (await api('/api/piloto/yo')).piloto; pintarConexion(); } catch { /* sigue */ } }, 60000);
     }
 
     function formularioClave() {
@@ -269,8 +348,10 @@
             el('div', {}, el('span', { text: 'Hoy' }), el('strong', { text: dinero(g.hoy) })),
             el('div', {}, el('span', { text: 'Últimos 7 días' }), el('strong', { text: dinero(g.semana) })),
             el('div', {}, el('span', { text: 'Este mes' }), el('strong', { text: dinero(g.mes) })))),
+        g.deuda ? el('div', { class: 'deuda-piloto', text: `Pasaron más de ${g.dias_liquidar} días: entrega el efectivo en la sede para poder conectarte.` }) : null,
+        g.descuentos.length ? el('div', { class: 'mensaje aviso' }, el('strong', { text: 'Descuentos por reclamos' }), el('ul', { class: 'lista-simple' }, g.descuentos.map(d => el('li', { text: `${d.guia}: ${dinero(d.monto_piloto)}. ${d.resolucion || ''}` })))) : null,
         g.efectivo_por_entregar > 0 ? el('div', { class: 'efectivo-pendiente' }, el('span', {}, 'Efectivo que debes entregar en la sede', el('br'), el('small', { text: `${g.envios_efectivo} envío(s)` })), el('strong', { text: dinero(g.efectivo_por_entregar) })) : null,
-        el('p', { class: 'pista', text: `Ganas ${g.comision.tipo === 'fijo' ? dinero(g.comision.valor) + ' por entrega' : g.comision.valor + '% de cada envío'}. ${g.entregas_mes} entregas este mes.` }),
+        el('p', { class: 'pista', text: `${g.comision.tipo === 'vaelo_fijo' ? `De cada envío Vaelo cobra ${dinero(g.comision.valor)} y el resto es para ti` : g.comision.tipo === 'fijo' ? 'Ganas ' + dinero(g.comision.valor) + ' por entrega' : 'Ganas ' + g.comision.valor + '% de cada envío'}. ${g.entregas_mes} entregas este mes. Entrega el efectivo en la sede antes de ${g.dias_liquidar} días.` }),
         el('h2', { style: 'font-size:1.15rem;margin-top:1.25rem', text: 'Tus últimos envíos' }),
         g.ultimas.length ? el('ul', { class: 'movimientos' }, g.ultimas.map(x => el('li', {},
           el('span', {}, el('strong', { text: x.guia }), el('small', { text: `${ESTADO_CORTO[x.estado] || x.estado} · ${x.destino_zona} · ${fecha(x.piloto_cerro_en)}${x.efectivo > 0 ? ' · cobraste ' + dinero(x.efectivo) : ''}` })),
@@ -295,14 +376,38 @@
       const caja = $('conexion');
       if (!caja) return;
       const puede = yo.puede_trabajar;
+      pintarAvisosTrabajo();
       const hace = ultimaLectura ? Math.round((Date.now() - ultimaLectura) / 1000) : null;
       const gps = !enLinea && !hayEntregaActiva() ? 'Ubicación apagada'
         : gpsError ? 'Sin ubicación' : ultimaPos ? `GPS activo${ultimaPos.precision ? `, precisión ${Math.round(ultimaPos.precision)} m` : ''}${hace != null ? `, hace ${hace} s` : ''}` : 'Buscando tu ubicación…';
       caja.className = 'conexion' + (enLinea ? ' activa' : '');
       caja.replaceChildren(
         el('div', {}, el('strong', { text: enLinea ? 'Estás en línea' : 'Estás fuera de línea' }),
-          el('small', { text: enLinea ? `Puedes recibir envíos. ${gps}.` : puede ? 'Conéctate para recibir envíos. Necesitas la ubicación encendida.' : 'No puedes conectarte hasta renovar tus documentos vencidos.' })),
+          el('small', { text: enLinea ? `Puedes recibir envíos. ${gps}.` : puede ? 'Conéctate para recibir envíos. Necesitas la ubicación encendida.'
+            : !yo.politica_al_dia ? 'Acepta la política para pilotos para poder conectarte.' : yo.deuda ? 'Liquida el efectivo en la sede para poder conectarte.' : 'No puedes conectarte hasta renovar tus documentos vencidos.' })),
         el('button', { class: 'boton' + (enLinea ? ' borde' : ' cinta'), type: 'button', disabled: !puede && !enLinea, text: enLinea ? 'Desconectarme' : 'Conectarme', onclick: (ev) => enLinea ? desconectar(ev.target) : conectar(ev.target) }));
+    }
+
+    // Política sin aceptar o efectivo sin liquidar: se muestra arriba de las entregas
+    function pintarAvisosTrabajo() {
+      const caja = $('avisos-trabajo');
+      if (!caja) return;
+      const nodos = [];
+      if (!yo.politica_al_dia) {
+        const msg = el('div', { class: 'mensaje', role: 'alert' });
+        nodos.push(el('div', { class: 'politica-piloto' }, el('h2', { text: 'Política para pilotos' }),
+          el('p', { text: 'Antes de trabajar, lee y acepta las condiciones de Vaelo. Lo más importante:' }),
+          el('ul', {}, RESUMEN_POLITICA.map(t => el('li', { text: t }))),
+          el('p', {}, el('a', { href: '/politica-pilotos', target: '_blank', text: 'Leer la política completa' })), msg,
+          el('button', { class: 'boton accion-principal', type: 'button', text: 'Leí y acepto la política', onclick: async (ev) => {
+            ev.target.disabled = true;
+            try { yo = (await api('/api/piloto/perfil', { method: 'PUT', body: { acepto_politica: true } })).piloto; pintarConexion(); }
+            catch (e) { mostrarMensaje(msg, e.message); ev.target.disabled = false; }
+          } })));
+      }
+      if (yo.deuda) nodos.push(el('div', { class: 'deuda-piloto' }, el('strong', { text: `Debes entregar ${dinero(yo.deuda.monto)} en la sede` }),
+        el('p', { style: 'margin:.35rem 0 0', text: `Tienes efectivo de hace más de ${yo.deuda.dias} días. Pasa a la sede a aclarar cuentas: hasta entonces no puedes conectarte, y si no liquidas se suspende tu cuenta.` })));
+      caja.replaceChildren(...nodos);
     }
 
     function posicionFresca() {
@@ -456,8 +561,11 @@
     function tarjeta(e) {
       const fragil = e.fragil ? el('div', { class: 'franja-fragil', text: 'FRÁGIL: manejar con cuidado especial' }) : null;
       const cobro = Number(e.cobro_destinatario) > 0 ? el('div', { class: 'cobro', text: `Cobrar a quien recibe: ${dinero(e.cobro_destinatario)}` }) : null;
+      const cobraEnvio = e.metodo_pago === 'recibe' ? `Cobra el envío (${dinero(e.precio)}) a quien recibe` : e.metodo_pago === 'efectivo' ? `Cobra ${dinero(e.precio + (e.cargos_extra || 0))} en efectivo` : PAGOS[e.metodo_pago] || e.metodo_pago;
       const resumen = el('div', { style: 'font-size:.92rem;color:var(--suave)' },
-        `${e.vehiculo}, ${e.peso} lb${e.descripcion ? '. ' + e.descripcion : ''}. Envío ${dinero(e.precio)} (${PAGOS[e.metodo_pago] || e.metodo_pago})`,
+        e.tiene_foto_paquete ? el('div', { class: 'foto-lleva', style: 'margin-bottom:.5rem' }, el('img', { src: `/api/piloto/envios/${e.id}/foto-paquete`, alt: 'Foto del paquete', onclick: (ev) => window.open(ev.target.src, '_blank') }),
+          el('div', {}, el('strong', { style: 'color:var(--tinta)', text: 'Lo que llevas' }), el('br'), 'Revisa que el paquete sea el de la foto.')) : null,
+        `${e.vehiculo}, ${e.peso} lb${e.paquetes > 1 ? `, ${e.paquetes} paquetes` : ''}${e.descripcion ? '. ' + e.descripcion : ''}. ${cobraEnvio}. Ganas ${dinero(e.ganancia_piloto ?? 0)}`,
         e.notas ? el('div', { style: 'color:var(--tinta)', text: 'Indicaciones: ' + e.notas }) : null);
 
       if (e.asignacion === 'por_aceptar') {
@@ -520,7 +628,7 @@
         zona: e.destino_zona, referencias: e.destino_direccion, punto: 'destino', accion: 'Dejar el pedido',
         extra: r.omitido && !r.confirmado ? el('div', { class: 'pista', text: 'Sin ubicación: ' + r.omitido }) : null });
       return el('article', { class: 'entrega-tarjeta' + (!cerrado ? ' activa' : '') },
-        el('div', { class: 'cab' }, el('strong', { class: 'guia', text: e.guia }), chipEstado(e.estado)),
+        el('div', { class: 'cab' }, el('strong', { class: 'guia' }, e.guia, e.flete ? el('span', { class: 'etiqueta-flete', style: 'margin-left:.4rem', text: 'Flete' }) : null), chipEstado(e.estado)),
         e.programado_para && recoger ? el('div', { class: 'mensaje aviso', text: 'Recoger el ' + fechaProgramada(e.programado_para) }) : '',
         fragil,
         cerrado ? el('p', {}, 'Entregado a ', el('strong', { text: e.recibio || e.destino_nombre })) : [quienEntrega, quienRecibe],

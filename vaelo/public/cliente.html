@@ -34,8 +34,10 @@
       <div class="pestanas" role="tablist">
         <button role="tab" id="tab-nuevo" aria-selected="true" aria-controls="panel-nuevo">Enviar paquete</button>
         <button role="tab" id="tab-lista" aria-selected="false" aria-controls="panel-lista">Mis envíos <span id="conteo"></span></button>
+        <button role="tab" id="tab-empresa" aria-selected="false" aria-controls="panel-empresa">Empresa</button>
         <button role="tab" id="tab-cuenta" aria-selected="false" aria-controls="panel-cuenta">Mis datos</button>
       </div>
+      <section id="panel-empresa" role="tabpanel" aria-labelledby="tab-empresa" hidden><div id="zona-empresa"></div></section>
 
       <section id="panel-nuevo" role="tabpanel" aria-labelledby="tab-nuevo">
         <form id="form-envio" class="bloque" novalidate>
@@ -48,6 +50,7 @@
           <fieldset>
             <legend>¿En qué lo enviamos?</legend>
             <div class="vehiculos" id="vehiculos" role="radiogroup" aria-label="Vehículo"></div>
+            <p class="pista" id="aviso-flete" hidden></p>
           </fieldset>
 
           <fieldset id="fs-paquete">
@@ -56,9 +59,16 @@
               <div class="campo"><label for="peso">Peso aproximado (libras)</label><input id="peso" type="number" min="0.1" step="0.1" inputmode="decimal" placeholder="Ej. 5" required></div>
               <div class="campo"><label for="descripcion">¿Qué contiene? <span class="ayuda">Opcional</span></label><input id="descripcion" maxlength="200" placeholder="Documentos, ropa, repuestos…"></div>
             </div>
+            <div class="foto-paquete" id="caja-foto-paquete">
+              <label class="foto-paquete-boton" for="foto_paquete">
+                <img id="vista-paquete" alt="" hidden>
+                <span class="foto-paquete-vacio" id="foto-paquete-vacio"><strong>Toma una foto del paquete</strong><small>Obligatoria. Así queda registrado qué lleva antes de recogerlo.</small></span>
+                <input id="foto_paquete" type="file" accept="image/*" capture="environment">
+              </label>
+            </div>
             <div class="fila">
-              <div class="campo"><label for="valor_declarado">Valor del contenido (Q) <span class="ayuda" id="ayuda-valor">Opcional. Sin seguro, Vaelo responde hasta un máximo</span></label><input id="valor_declarado" type="number" min="0" step="1" inputmode="decimal" placeholder="0"></div>
-              <div class="campo" style="align-self:end"><label class="casilla" for="asegurar" style="margin-bottom:.9rem"><input type="checkbox" id="asegurar" style="width:auto"><span><strong>Asegurarlo</strong> <span id="texto-seguro"></span></span></label></div>
+              <div class="campo"><label for="valor_declarado">Valor del contenido (Q) <span class="ayuda">Opcional. Sirve para evaluar si hay un reclamo</span></label><input id="valor_declarado" type="number" min="0" step="1" inputmode="decimal" placeholder="0"></div>
+              <div class="campo" id="campo-paquetes" hidden><label for="paquetes">Paquetes para esta dirección <span class="ayuda">Mismo precio</span></label><input id="paquetes" type="number" min="1" max="30" step="1" value="1"></div>
             </div>
             <label class="casilla opcion-fragil" for="fragil"><input type="checkbox" id="fragil" style="width:auto"><span><strong>Es frágil: cuidado especial</strong> <span id="recargo-fragil-texto">(+Q10.00)</span><br><small style="color:var(--suave)">El piloto lo maneja con cuidado extra y la guía lo marca como frágil.</small></span></label>
           </fieldset>
@@ -117,8 +127,9 @@
             <div class="campo">
               <div class="opciones" role="radiogroup" aria-label="Cómo pagas el envío">
                 <label class="opcion"><input type="radio" name="metodo_pago" value="efectivo" checked><span>Efectivo<small>Al mensajero</small></span></label>
-                <label class="opcion"><input type="radio" name="metodo_pago" value="transferencia"><span>Transferencia<small>Te enviamos los datos</small></span></label>
+                <label class="opcion"><input type="radio" name="metodo_pago" value="transferencia"><span>Transferencia<small>Comprobante por WhatsApp</small></span></label>
                 <label class="opcion" id="opcion-credito" hidden><input type="radio" name="metodo_pago" value="credito"><span>A fin de mes<small>Cuenta de empresa</small></span></label>
+                <label class="opcion" id="opcion-recibe" hidden><input type="radio" name="metodo_pago" value="recibe"><span>Paga quien recibe<small>El piloto cobra el envío al entregar</small></span></label>
               </div>
             </div>
             <div class="mensaje aviso" id="datos-transferencia" hidden></div>
@@ -194,6 +205,7 @@
 
   <script src="/vendor/maplibre/maplibre-gl.js?v=4.7.1"></script>
   <script src="/js/comun.js?v=20261109c"></script>
+  <script src="/js/empresa.js?v=1"></script>
   <script>
     let cfg = null, envios = [], selOrigen = null, selDestino = null, refresco = null;
     const $ = (id) => document.getElementById(id);
@@ -211,10 +223,11 @@
     }
 
     // Pestañas
-    const tabs = ['nuevo', 'lista', 'cuenta'];
+    const tabs = ['nuevo', 'lista', 'empresa', 'cuenta'];
     function abrirTab(nombre) {
       tabs.forEach(t => { $('tab-' + t).setAttribute('aria-selected', String(t === nombre)); $('panel-' + t).hidden = t !== nombre; });
       if (nombre === 'lista') cargarEnvios();
+      if (nombre === 'empresa') pintarEmpresa($('zona-empresa'), { alCrear: () => { abrirTab('lista'); } });
     }
     tabs.forEach(t => $('tab-' + t).addEventListener('click', () => abrirTab(t)));
 
@@ -223,7 +236,7 @@
       return {
         vehiculo_id: document.querySelector('input[name="vehiculo_id"]:checked')?.value,
         peso: $('peso').value, origen_zona: $('origen_zona').value, destino_zona: $('destino_zona').value, fragil: $('fragil').checked,
-        cupon: $('cupon').value.trim(), valor_declarado: $('valor_declarado').value, asegurar: $('asegurar').checked,
+        cupon: $('cupon').value.trim(), valor_declarado: $('valor_declarado').value, paquetes: $('paquetes').value,
       };
     }
     let temporizador = null, turno = 0;
@@ -283,17 +296,16 @@
       }
       return null;
     }
-    // Transferencia: subir el comprobante
-    function cajaComprobante(e, alListo) {
+    // Transferencia: el comprobante se manda al WhatsApp oficial de Vaelo; el envío sale cuando la oficina confirma el pago
+    let whatsappPagos = '50237731793';
+    function cajaComprobante(e) {
       if (e.metodo_pago !== 'transferencia' || e.estado === 'cancelado' || e.pago_estado === 'verificado') return null;
-      const texto = { sin_comprobante: 'Sube la foto del comprobante de tu transferencia.', por_revisar: 'Recibimos tu comprobante. Lo estamos revisando.', rechazado: `Revisa tu comprobante: ${e.pago_nota || 'no lo pudimos verificar'}.` }[e.pago_estado] || '';
-      const entrada = el('input', { type: 'file', accept: 'image/*,application/pdf' });
-      entrada.addEventListener('change', async () => {
-        try { await api(`/api/envios/${e.id}/comprobante`, { body: { archivo: await prepararArchivo(entrada.files[0], true) } }); alListo(); }
-        catch (err) { alert(err.message); }
-      });
-      return el('div', { class: 'cargos-aviso' }, el('span', {}, el('strong', { style: 'font-size:1rem', text: `Transferencia de ${dinero(e.precio + (e.cargos_extra || 0))}` }), el('br'), el('small', { text: texto })),
-        e.pago_estado !== 'por_revisar' ? el('label', { class: 'boton chico doc-boton' }, e.tiene_comprobante ? 'Cambiar comprobante' : 'Subir comprobante', entrada) : null);
+      const total = dinero(e.precio + (e.cargos_extra || 0));
+      const texto = `Hola Vaelo, adjunto el comprobante de la transferencia del envío ${e.guia} por ${total}.`;
+      return el('div', { class: 'cargos-aviso' },
+        el('span', {}, el('strong', { style: 'font-size:1rem', text: `Transferencia de ${total}` }), el('br'),
+          el('small', { text: e.pago_estado === 'rechazado' ? `Revisa tu comprobante: ${e.pago_nota || 'no lo pudimos verificar'}. Mándalo de nuevo por WhatsApp.` : 'Manda la foto del comprobante al WhatsApp de Vaelo. Tu envío sale con el piloto cuando confirmemos el pago.' })),
+        el('a', { class: 'boton cinta chico', href: `https://wa.me/${whatsappPagos}?text=${encodeURIComponent(texto)}`, target: '_blank', rel: 'noopener', text: 'Mandar comprobante por WhatsApp' }));
     }
     async function cancelarEnvio(e, boton) {
       if (!confirm(`¿Cancelar el envío ${e.guia}?`)) return;
@@ -327,7 +339,7 @@
           e.cargos_extra > 0 ? el('small', { class: 'pista', text: `+ ${dinero(e.cargos_extra)} de cargos` }) : null),
         e.estado !== 'cancelado' ? barraPasos(e.estado) : null,
         cajaDecision(e, () => { cargarEnvios(); cargarCargos(); }),
-        e.metodo_pago === 'transferencia' && ['sin_comprobante', 'rechazado'].includes(e.pago_estado) ? el('div', { style: 'grid-column:1/-1' }, cajaComprobante(e, cargarEnvios)) : null,
+        e.metodo_pago === 'transferencia' && e.pago_estado !== 'verificado' && e.estado !== 'cancelado' ? el('div', { style: 'grid-column:1/-1' }, cajaComprobante(e)) : null,
         acciones);
     }
 
@@ -544,6 +556,39 @@
         } }));
     }
 
+    // ---------- Reportar un problema con el paquete ----------
+    const TIPOS_RECLAMO = { perdido: 'El paquete se perdió', danado: 'Llegó dañado', incompleto: 'Llegó incompleto', otro: 'Otro problema' };
+    function bloqueReclamo(e, datos, alListo) {
+      const lista = datos.reclamos || [];
+      const vistos = lista.map(r => el('div', { class: 'mensaje ' + (r.estado === 'abierto' ? 'aviso' : r.estado === 'aprobado' ? 'exito' : 'error') },
+        el('strong', { text: `Tu reporte: ${r.tipo_texto}` }), el('br'),
+        r.estado === 'abierto' ? 'Lo estamos evaluando según lo que llevaba el paquete. Te contactaremos.' : r.resolucion,
+        r.estado === 'aprobado' && r.monto_cliente > 0 ? [el('br'), el('strong', { text: `Devolución: ${dinero(r.monto_cliente)}${r.devuelto_en ? ' (pagada)' : ' (pendiente de pagarte)'}` })] : null));
+      const puede = !['pendiente', 'cancelado'].includes(e.estado) && !lista.some(r => r.estado === 'abierto')
+        && !(e.estado === 'entregado' && e.entregado_en && Date.now() - new Date(e.entregado_en.replace(' ', 'T') + 'Z') > datos.dias_reclamo * 86400e3);
+      if (!puede) return vistos.length ? el('div', {}, vistos) : null;
+      const caja = el('div', { class: 'reclamo' });
+      const abrir = () => {
+        const msg = el('div', { class: 'mensaje', role: 'alert' });
+        const tipo = el('select', {}, Object.entries(TIPOS_RECLAMO).map(([k, t]) => el('option', { value: k, text: t })));
+        const desc = el('textarea', { rows: 3, maxlength: 1000, placeholder: 'Qué pasó y qué llevaba el paquete (por ejemplo: un teléfono de Q2,500 llegó con la pantalla rota)' });
+        const foto = el('input', { type: 'file', accept: 'image/*' });
+        caja.replaceChildren(el('h3', { text: 'Reportar un problema' }),
+          el('p', { class: 'pista', text: 'Vaelo evalúa cada caso según lo que llevaba el paquete (tu foto, el valor que declaraste y la foto de entrega) y, si corresponde, te devuelve el dinero.' }), msg,
+          el('div', { class: 'campo' }, el('label', { text: '¿Qué pasó?' }), tipo), el('div', { class: 'campo' }, el('label', { text: 'Detalle' }), desc),
+          el('div', { class: 'campo' }, el('label', { text: 'Foto del problema (opcional)' }), foto),
+          el('button', { class: 'boton', type: 'button', text: 'Enviar reporte', onclick: async (ev) => {
+            ev.target.disabled = true;
+            try {
+              await api(`/api/envios/${e.id}/reclamo`, { body: { tipo: tipo.value, descripcion: desc.value, foto: foto.files[0] ? await prepararArchivo(foto.files[0], false) : '' } });
+              alListo();
+            } catch (err) { mostrarMensaje(msg, err.message); ev.target.disabled = false; }
+          } }));
+      };
+      caja.append(el('button', { class: 'boton borde chico', type: 'button', text: '¿Problema con tu paquete? Repórtalo', onclick: abrir }));
+      return el('div', {}, vistos, caja);
+    }
+
     // Resumen arriba: envíos en curso, entregados y cargos pendientes
     let totalCargos = 0;
     function pintarResumenCliente() {
@@ -604,6 +649,8 @@
       if (q.get('correo') === 'confirmado') avisos.push(el('div', { class: 'mensaje exito', text: 'Listo, tu correo quedó confirmado.' }));
       if (yoCliente.rol === 'cliente') {
         $('opcion-credito').hidden = !yoCliente.credito_permitido;
+        $('opcion-recibe').hidden = yoCliente.tipo_cuenta !== 'empresa';
+        $('campo-paquetes').hidden = yoCliente.tipo_cuenta !== 'empresa';
         $('modo-envio').hidden = yoCliente.tipo_cuenta !== 'empresa';
         if (yoCliente.tipo_cuenta === 'empresa') avisos.push(el('div', { class: 'mensaje exito' }, `Cuenta de empresa${yoCliente.empresa_nombre ? ': ' + yoCliente.empresa_nombre : ''}.`,
           yoCliente.descuento_empresa > 0 ? ` Tienes ${yoCliente.descuento_empresa}% de descuento en tus envíos.` : ''));
@@ -638,6 +685,7 @@
       let datos;
       try { datos = await api('/api/envios/' + id); } catch (err) { alert(err.message); return; }
       const { envio: e, eventos, piloto } = datos;
+      if (datos.whatsapp_pagos) whatsappPagos = datos.whatsapp_pagos;
       const cajaMapa = el('div', { class: 'mapa alto' });
       const recargar = () => { verDetalle(id); cargarEnvios(); cargarCargos(); };
       $('dlg-cuerpo').replaceChildren(
@@ -648,7 +696,9 @@
         e.tiene_foto_fallo ? el('a', { class: 'prueba-img', href: `/api/envios/${e.id}/entrega/fallo`, target: '_blank', rel: 'noopener', style: 'margin:.5rem 0' },
           el('img', { src: `/api/envios/${e.id}/entrega/fallo`, alt: 'Foto del intento de entrega' }), el('small', { text: 'Foto del intento de entrega' })) : null,
         e.reenviado_como ? el('p', { class: 'mensaje exito' }, 'Este paquete salió de nuevo con la guía ', el('a', { href: '#', text: e.reenviado_como.guia, onclick: (ev) => { ev.preventDefault(); verDetalle(e.reenviado_como.id); } }), '.') : null,
-        cajaComprobante(e, recargar),
+        cajaComprobante(e),
+        e.tiene_foto_paquete ? el('a', { class: 'prueba-img', href: `/api/envios/${e.id}/entrega/paquete`, target: '_blank', rel: 'noopener', style: 'margin:.5rem 0' },
+          el('img', { src: `/api/envios/${e.id}/entrega/paquete`, alt: 'Foto del paquete' }), el('small', { text: 'Tu foto del paquete' })) : null,
         cajaEntrega(e),
         cajaReceptor(e),
         cajaCodigo(e),
@@ -669,9 +719,11 @@
           el('div', {}, el('span', { text: 'Pago' }), PAGOS[e.metodo_pago] || e.metodo_pago,
             e.metodo_pago === 'transferencia' && datos.datos_transferencia && e.pago_estado !== 'verificado' ? el('small', { style: 'display:block;color:var(--suave);white-space:pre-line', text: datos.datos_transferencia }) : ''),
           e.cargos_extra > 0 ? el('div', {}, el('span', { text: 'Cargos pendientes incluidos' }), dinero(e.cargos_extra)) : null,
-          e.valor_declarado > 0 ? el('div', {}, el('span', { text: 'Valor declarado' }), `${dinero(e.valor_declarado)}${e.seguro > 0 ? ` (asegurado, ${dinero(e.seguro)})` : ' (sin seguro)'}`) : null,
+          e.valor_declarado > 0 ? el('div', {}, el('span', { text: 'Valor declarado' }), dinero(e.valor_declarado)) : null,
+          e.paquetes > 1 ? el('div', {}, el('span', { text: 'Paquetes' }), `${e.paquetes} para la misma dirección`) : null,
           Number(e.cobro_destinatario) > 0 ? el('div', {}, el('span', { text: 'Cobrar al recibir' }), dinero(e.cobro_destinatario)) : null),
         e.estado === 'entregado' ? pruebaEntrega(e) : '',
+        bloqueReclamo(e, datos, recargar),
         e.estado === 'devuelto' ? el('p', { class: 'mensaje exito' }, 'Devuelto a ', el('strong', { text: e.devuelto_a || '' }), e.devuelto_en ? ` el ${fecha(e.devuelto_en)}.` : '.') : '',
         e.estado === 'entregado' && piloto ? bloqueCalificar(e) : '',
         el('h3', { text: 'Historial' }),
@@ -700,6 +752,8 @@
         if (f.cuando.value === 'programar' && !programado) throw new Error('Elige la fecha y hora de recogida.');
         if (modo === 'lote') { await enviarLote(f, programado); boton.disabled = false; boton.classList.remove('cargando'); return; }
         const quien = f.origen_quien.value;
+        if (!$('foto_paquete').files[0]) { $('caja-foto-paquete').scrollIntoView({ behavior: 'smooth', block: 'center' }); throw new Error('Toma una foto del paquete antes de enviarlo.'); }
+        const fotoPaquete = await prepararArchivo($('foto_paquete').files[0], false);
         let pos = {};
         if (quien === 'cliente') { boton.textContent = 'Buscando tu ubicación…'; pos = await miUbicacion(); }
         const r = await api('/api/envios', { body: {
@@ -707,9 +761,9 @@
           origen_lat: pos.lat, origen_lng: pos.lng, origen_precision: pos.precision, guardar_destino: $('guardar-destino').value.trim(),
           descripcion: f.descripcion.value, origen_telefono: f.origen_telefono.value, origen_direccion: f.origen_direccion.value,
           destino_nombre: f.destino_nombre.value, destino_telefono: f.destino_telefono.value, destino_direccion: f.destino_direccion.value,
-          cobro_destinatario: f.cobro_destinatario.value, metodo_pago: f.metodo_pago.value, notas: f.notas.value,
+          cobro_destinatario: f.cobro_destinatario.value, metodo_pago: f.metodo_pago.value, notas: f.notas.value, foto_paquete: fotoPaquete,
         } });
-        $('valor_declarado').value = ''; $('asegurar').checked = false; cargarCargos();
+        $('valor_declarado').value = ''; $('paquetes').value = 1; $('foto_paquete').value = ''; $('vista-paquete').hidden = true; $('foto-paquete-vacio').hidden = false; cargarCargos();
         ['peso', 'descripcion', 'destino_nombre', 'destino_telefono', 'destino_direccion', 'cobro_destinatario', 'notas'].forEach(k => { f[k].value = ''; });
         $('fragil').checked = false; $('cupon').value = ''; $('cupon-msg').textContent = ''; $('precio-antes').textContent = '';
         if ($('guardar-destino').value) cargarDirecciones();
@@ -822,12 +876,17 @@
         pintarLote();
       });
       $('recargo-fragil-texto').textContent = cfg.recargo_fragil ? `(+${dinero(cfg.recargo_fragil)})` : '';
-      if (cfg.seguro) {
-        $('texto-seguro').textContent = `(${cfg.seguro.pct}% del valor, mínimo ${dinero(cfg.seguro.minimo)})`;
-        $('ayuda-valor').textContent = `Opcional. Sin seguro, Vaelo responde hasta ${dinero(cfg.seguro.responsabilidad_max)}`;
+      whatsappPagos = cfg.whatsapp_pagos || whatsappPagos;
+      if (cfg.fletes && cfg.fletes.length) {
+        $('aviso-flete').hidden = false;
+        $('aviso-flete').replaceChildren(`¿Necesitas ${cfg.fletes.join(' o ').toLowerCase()} para un flete? `,
+          el('a', { href: `https://wa.me/${whatsappPagos}?text=${encodeURIComponent('Hola Vaelo, quiero cotizar un flete en ' + cfg.fletes[0].toLowerCase() + '. Voy a llevar: ')}`, target: '_blank', rel: 'noopener', text: 'Escríbenos por WhatsApp' }),
+          ': primero coordinamos qué llevas y te damos el precio.');
       }
-      ['valor_declarado'].forEach(id => $(id).addEventListener('input', actualizarPrecio));
-      $('asegurar').addEventListener('change', () => { if ($('asegurar').checked && !Number($('valor_declarado').value)) { $('valor_declarado').focus(); } actualizarPrecio(); });
+      $('foto_paquete').addEventListener('change', () => {
+        const f = $('foto_paquete').files[0];
+        if (f) { $('vista-paquete').src = URL.createObjectURL(f); $('vista-paquete').hidden = false; $('foto-paquete-vacio').hidden = true; }
+      });
       document.querySelectorAll('input[name="metodo_pago"]').forEach(r => r.addEventListener('change', () => {
         const t = document.querySelector('input[name="metodo_pago"]:checked').value === 'transferencia';
         $('datos-transferencia').hidden = !t || !cfg.datos_transferencia;
@@ -840,6 +899,7 @@
       // Desde un aviso del celular: abre ese envío
       const abrir = new URLSearchParams(location.search).get('envio');
       if (abrir) verDetalle(Number(abrir));
+      if (new URLSearchParams(location.search).get('empresa')) abrirTab('empresa');
     })();
   </script>
 </body>
