@@ -605,7 +605,7 @@
         el('span', { style: 'text-align:right' }, el('span', { class: 'monto', text: dinero(c.monto) }), el('br'), el('span', { class: estado(c)[1], text: estado(c)[0] })))))
         : el('p', { class: 'pista', text: 'No tienes cargos.' }));
     }
-    // Avisos de la cuenta: correo sin confirmar y verificación de identidad
+    // Avisos de la cuenta: correo sin confirmar y datos de empresa
     let yoCliente = null, correoActivo = false;
     async function cargarCuenta() {
       const r = await api('/api/yo');

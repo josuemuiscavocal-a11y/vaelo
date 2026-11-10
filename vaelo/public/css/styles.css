@@ -1283,3 +1283,4 @@ body.app-piloto main { padding-bottom: 9rem; }
 .doc-pro.solo-ver { gap: .4rem; } .doc-pro.solo-ver:hover { transform: none; }
 .doc-pro .doc-pro-cab strong { overflow-wrap: anywhere; }
 .doc-pro-botones .boton { white-space: nowrap; padding-left: .5rem; padding-right: .5rem; }
+.buscador-clientes { margin: 0 0 .75rem; } .buscador-clientes input { max-width: 420px; }

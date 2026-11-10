@@ -117,10 +117,10 @@
 
       <section id="panel-clientes" role="tabpanel" aria-labelledby="tab-clientes" hidden>
         <div id="aviso-correo"></div>
-        <p class="bloque-nota">Los clientes "En revisión" subieron su DPI y su foto. Ábrelos, compara que el nombre, el DPI y la foto coincidan, y verifícalos.</p>
+        <div class="buscador-clientes"><input id="buscar-cliente" type="search" placeholder="Buscar por nombre, correo o teléfono" aria-label="Buscar cliente"></div>
         <div class="tabla-envoltura">
           <table>
-            <thead><tr><th>Nombre</th><th>Correo</th><th>Teléfono</th><th>Identidad</th><th>Envíos</th><th>Calificación de pilotos</th><th>Cargos pendientes</th><th>Registro</th><th></th></tr></thead>
+            <thead><tr><th>Nombre</th><th>Correo</th><th>Teléfono</th><th>Cuenta</th><th>Envíos</th><th>Calificación de pilotos</th><th>Cargos pendientes</th><th>Registro</th><th></th></tr></thead>
             <tbody id="tabla-clientes"></tbody>
           </table>
         </div>
@@ -841,7 +841,6 @@ null))));
       const estadoPiloto = !e.mensajero_id ? el('span', { class: 'estado pendiente', text: 'Sin piloto' })
         : e.asignacion === 'por_aceptar' ? el('span', { class: 'etiqueta-azul', text: `${e.mensajero_nombre}: esperando que acepte` })
         : el('span', { class: 'etiqueta-completa', text: `${e.mensajero_nombre}: aceptó` });
-      const idCliente = cliente ? cliente.verificacion : '';
       poner($('dlg-cuerpo'), 
         el('button', { class: 'cerrar no-imprimir', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: () => $('dlg').close() }),
         el('div', { class: 'no-imprimir' },
@@ -1077,7 +1076,8 @@ null))));
         p.estado_piloto === 'baja' ? el('button', { class: 'boton peligro chico', type: 'button', text: 'Borrar sus documentos', onclick: async () => {
           if (!confirm(`Se borrarán para siempre las fotos y documentos de ${p.nombre}. ¿Continuar?`)) return;
           try { await api(`/api/admin/mensajeros/${p.id}/borrar-documentos`, { body: {} }); abrirFicha(p.id); } catch (e) { mostrarMensaje(msg, e.message); }
-        } }) : null);
+        } }) : null,
+        rolPanel === 'admin' ? el('button', { class: 'boton peligro chico', type: 'button', text: 'Eliminar cuenta', onclick: () => dialogoEliminar(p.id, cargarMensajeros) }) : null);
       const alertas = el('div', { class: 'lista-alertas' },
         rv.faltan.length ? el('div', { class: 'mensaje error', text: 'Falta: ' + rv.faltan.join(', ') + '.' }) : null,
         rv.vencidos.length ? el('div', { class: 'mensaje error', text: 'Vencido: ' + rv.vencidos.join(', ') + '. No puede recibir envíos.' }) : null,
@@ -1158,27 +1158,32 @@ null))));
     }
 
     // ---------- Clientes: revisión de identidad ----------
-    const ESTADO_CLIENTE = { sin_datos: ['Incompleta', 'etiqueta-gris'], por_revisar: ['En revisión', 'etiqueta-azul'], verificado: ['Verificada', 'etiqueta-completa'], rechazado: ['Rechazada', 'etiqueta-pendiente'] };
     let clientes = [];
+    document.getElementById('buscar-cliente').addEventListener('input', () => pintarClientes());
     async function cargarClientes() {
       const r = await api('/api/admin/clientes');
       clientes = r.clientes;
       poner($('aviso-correo'), r.correo_activo ? '' : el('div', { class: 'mensaje aviso', text: 'El correo automático de confirmación todavía no está configurado, así que no se exige confirmar el correo. Mira el README para activarlo.' }));
-      const porRevisar = clientes.filter(c => c.verificacion === 'por_revisar').length;
-      $('insignia-clientes').textContent = String(porRevisar); $('insignia-clientes').hidden = !porRevisar;
+      $('insignia-clientes').hidden = true;
+      pintarClientes();
+    }
+    function pintarClientes() {
+      const q = ($('buscar-cliente').value || '').trim().toLowerCase(), qd = q.replace(/\D/g, '');
+      const lista = !q ? clientes : clientes.filter(c => [c.nombre, c.email, c.empresa_nombre].some(v => (v || '').toLowerCase().includes(q)) || (qd.length >= 3 && (c.telefono || '').replace(/\D/g, '').includes(qd)));
+      if (q && !lista.length) { poner($('tabla-clientes'), el('tr', {}, el('td', { colspan: 9, style: 'text-align:center;color:var(--suave);padding:2rem', text: 'Ningún cliente coincide con la búsqueda.' }))); return; }
       if (!clientes.length) { poner($('tabla-clientes'), el('tr', {}, el('td', { colspan: 9, style: 'text-align:center;color:var(--suave);padding:2rem', text: 'Todavía no hay clientes.' }))); return; }
-      poner($('tabla-clientes'), ...clientes.map(c => {
-        const [txt, clase] = ESTADO_CLIENTE[c.verificacion] || ['', ''];
+      poner($('tabla-clientes'), ...lista.map(c => {
         return el('tr', { class: 'clic', tabindex: 0, onclick: () => revisarCliente(c.id), onkeydown: (ev) => { if (ev.key === 'Enter') revisarCliente(c.id); } },
           el('td', {}, el('strong', { text: c.nombre }), c.tipo_cuenta === 'empresa' ? [el('br'), el('span', { class: 'etiqueta-azul', text: c.empresa_nombre || 'Empresa' })] : ''),
           el('td', {}, el('a', { href: 'mailto:' + c.email, text: c.email, onclick: (ev) => ev.stopPropagation() }), el('br'), sub(c.email_verificado ? 'Correo confirmado' : 'Correo sin confirmar')),
           el('td', {}, c.telefono ? el('a', { href: 'https://wa.me/502' + c.telefono.replace(/\D/g, '').slice(-8), target: '_blank', rel: 'noopener', text: c.telefono, onclick: (ev) => ev.stopPropagation() }) : '—'),
-          el('td', {}, el('span', { class: clase, text: txt })),
+          el('td', {}, el('span', { class: c.tipo_cuenta === 'empresa' ? 'etiqueta-azul' : 'etiqueta-gris', text: c.tipo_cuenta === 'empresa' ? 'Empresa' : 'Personal' }),
+            !c.activo ? [' ', el('span', { class: 'etiqueta-pendiente', text: 'Bloqueada' })] : ''),
           el('td', { text: c.envios }),
           el('td', {}, c.calif_cliente ? el('span', { class: c.calif_cliente < 3 ? 'etiqueta-pendiente' : 'etiqueta-gris', text: `${c.calif_cliente} de 5` }) : '—'),
           el('td', {}, c.cargos_pendientes > 0 ? el('strong', { text: dinero(c.cargos_pendientes) }) : '—'),
           el('td', { text: fecha(c.creado, false) }),
-          el('td', {}, el('button', { class: 'boton chico' + (c.verificacion === 'por_revisar' ? '' : ' borde'), type: 'button', text: 'Revisar', onclick: (ev) => { ev.stopPropagation(); revisarCliente(c.id); } })));
+          el('td', {}, el('button', { class: 'boton chico borde', type: 'button', text: 'Abrir', onclick: (ev) => { ev.stopPropagation(); revisarCliente(c.id); } })));
       }));
     }
     function bloqueEmpresa(c) {
@@ -1203,36 +1208,60 @@ null))));
       const c = clientes.find(x => x.id === id);
       if (!c) return;
       const msg = el('div', { class: 'mensaje', role: 'alert' });
-      const decidir = (estado) => async (ev) => {
-        let nota = '';
-        if (estado === 'rechazado') { nota = prompt('¿Qué tiene que corregir el cliente? (Ej. La foto del DPI no se lee)'); if (!nota) return; }
-        ev.target.disabled = true;
-        try { await api(`/api/admin/clientes/${c.id}/verificacion`, { body: { estado, nota } }); $('dlg').close(); cargarClientes(); }
-        catch (e) { mostrarMensaje(msg, e.message); ev.target.disabled = false; }
-      };
-      const [txt, clase] = ESTADO_CLIENTE[c.verificacion] || ['', ''];
-      const doc = (tipo, titulo, tiene) => campoDocumento({ titulo, tiene, ver: `/api/admin/usuarios/${c.id}/documento/${tipo}`, soloVer: true });
-      const dato = (t, v) => el('div', {}, el('span', { text: t }), v || el('em', { style: 'color:var(--alerta)', text: 'No lo ha escrito' }));
-      poner($('dlg-cuerpo'), 
+      const dato = (t, v) => el('div', {}, el('span', { text: t }), v || el('em', { style: 'color:var(--suave)', text: '—' }));
+      poner($('dlg-cuerpo'),
         el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: () => $('dlg').close() }),
-        el('h2', { style: 'font-size:1.4rem;margin-bottom:.3rem', text: c.nombre }), el('span', { class: clase, text: txt }),
-        el('p', { class: 'pista', style: 'margin-top:.5rem', text: 'Compara: ¿el nombre y el número coinciden con el DPI? ¿La foto es de la misma persona del DPI?' }),
-        el('div', { class: 'docs' }, doc('foto', 'Foto del cliente', c.tiene_foto), doc('dpi_frente', 'DPI (frente)', c.tiene_dpi_frente)),
+        el('div', { style: 'display:flex;gap:1rem;align-items:center;margin-bottom:.75rem' },
+          c.tiene_foto ? el('img', { src: `/api/admin/usuarios/${c.id}/documento/foto`, alt: '', style: 'width:64px;height:64px;border-radius:50%;object-fit:cover' }) : null,
+          el('div', {}, el('h2', { style: 'font-size:1.4rem;margin:0', text: c.nombre }),
+            el('span', { class: c.tipo_cuenta === 'empresa' ? 'etiqueta-azul' : 'etiqueta-gris', text: c.tipo_cuenta === 'empresa' ? (c.empresa_nombre || 'Empresa') : 'Cuenta personal' }),
+            !c.activo ? [' ', el('span', { class: 'etiqueta-pendiente', text: 'Bloqueada' })] : '')),
         el('div', { class: 'datos' },
-          dato('Nombre escrito', c.nombre), dato('DPI escrito', formatoDpi(c.dpi)), dato('Dirección', c.direccion),
-          dato('Teléfono', c.telefono), dato('Correo', `${c.email} (${c.email_verificado ? 'confirmado' : 'sin confirmar'})`), dato('Envíos', String(c.envios))),
-        c.verificacion_nota ? el('p', { class: 'mensaje aviso', text: 'Motivo del rechazo: ' + c.verificacion_nota }) : '',
+          dato('Teléfono', c.telefono), dato('Correo', `${c.email} (${c.email_verificado ? 'confirmado' : 'sin confirmar'})`),
+          dato('Dirección', c.direccion), dato('Envíos', String(c.envios)), dato('Se registró', fecha(c.creado, false))),
         rolPanel === 'admin' ? bloqueEmpresa(c) : '',
         msg,
         el('div', { style: 'display:flex;gap:.5rem;flex-wrap:wrap' },
-          c.verificacion !== 'verificado' ? el('button', { class: 'boton', type: 'button', text: 'Todo coincide: verificar', disabled: c.verificacion === 'sin_datos', onclick: decidir('verificado') }) : null,
-          c.verificacion !== 'rechazado' ? el('button', { class: 'boton peligro', type: 'button', text: 'Rechazar', onclick: decidir('rechazado') }) : null,
-          c.verificacion === 'verificado' ? el('button', { class: 'boton borde', type: 'button', text: 'Volver a revisión', onclick: decidir('por_revisar') }) : null,
-          el('button', { class: 'boton borde', type: 'button', text: 'Bloquear cuenta', onclick: async () => {
-            if (!confirm(`${c.nombre} ya no podrá entrar ni enviar paquetes. ¿Bloquear?`)) return;
-            try { await api(`/api/admin/clientes/${c.id}/activo`, { body: { activo: false } }); $('dlg').close(); cargarClientes(); } catch (e) { mostrarMensaje(msg, e.message); }
-          } })));
+          rolPanel === 'admin' ? el('button', { class: 'boton borde', type: 'button', text: c.activo ? 'Bloquear cuenta' : 'Desbloquear cuenta', onclick: async () => {
+            if (c.activo && !confirm(`${c.nombre} ya no podrá entrar ni enviar paquetes. ¿Bloquear?`)) return;
+            try { await api(`/api/admin/clientes/${c.id}/activo`, { body: { activo: !c.activo } }); $('dlg').close(); cargarClientes(); } catch (e) { mostrarMensaje(msg, e.message); }
+          } }) : null,
+          rolPanel === 'admin' ? el('button', { class: 'boton peligro', type: 'button', text: 'Eliminar cuenta', onclick: () => dialogoEliminar(c.id, cargarClientes) }) : null));
       $('dlg').showModal();
+    }
+
+    // Eliminar una cuenta por completo: muestra lo que se va a borrar y pide escribir el correo para confirmar
+    async function dialogoEliminar(id, alTerminar) {
+      let r;
+      try { r = await api(`/api/admin/usuarios/${id}/eliminar`); } catch (e) { alert(e.message); return; }
+      const msg = el('div', { class: 'mensaje', role: 'alert' });
+      const conf = el('input', { type: 'text', autocomplete: 'off', placeholder: r.email, 'aria-label': 'Escribe el correo para confirmar' });
+      const boton = el('button', { class: 'boton peligro', type: 'button', text: 'Eliminar para siempre', disabled: true });
+      conf.addEventListener('input', () => { boton.disabled = conf.value.trim().toLowerCase() !== r.email.toLowerCase(); });
+      const puntos = [
+        r.envios ? `Sus ${r.envios} envíos, con su historial, fotos y enlaces${r.envios_en_curso ? ` (${r.envios_en_curso} todavía en curso)` : ''}.` : null,
+        r.pedidos_empresa ? `Sus ${r.pedidos_empresa} pedidos de empresa y sus carpetas.` : null,
+        r.como_piloto ? `Como piloto tiene ${r.como_piloto} envíos: no se borran porque son de los clientes.${r.como_piloto_en_curso ? ` Los ${r.como_piloto_en_curso} en curso vuelven a buscar piloto.` : ''} Sus pagos y cierres de piloto sí se borran.` : null,
+        'Sus datos, documentos, direcciones guardadas y sesiones.',
+      ].filter(Boolean);
+      boton.onclick = async () => {
+        boton.disabled = true; boton.textContent = 'Eliminando…';
+        try {
+          await api(`/api/admin/usuarios/${id}/eliminar`, { body: { confirmar: conf.value } });
+          $('dlg').close(); alTerminar && alTerminar();
+        } catch (e) { mostrarMensaje(msg, e.message); boton.disabled = false; boton.textContent = 'Eliminar para siempre'; }
+      };
+      poner($('dlg-cuerpo'),
+        el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: () => $('dlg').close() }),
+        el('h2', { style: 'font-size:1.35rem;margin-bottom:.4rem', text: `Eliminar la cuenta de ${r.nombre}` }),
+        el('p', { class: 'pista', text: `Sirve para limpiar cuentas de prueba. El correo ${r.email}${r.telefono ? ` y el teléfono ${r.telefono}` : ''} quedan libres: la persona se puede volver a registrar con ellos cuando quiera.` }),
+        el('div', { class: 'mensaje error', style: 'display:block' }, el('strong', { text: 'Se borra para siempre:' }), el('ul', { style: 'margin:.4rem 0 0 1.1rem' }, puntos.map(x => el('li', { text: x })))),
+        r.envios_en_curso || r.como_piloto_en_curso ? el('p', { class: 'mensaje aviso', style: 'display:block', text: 'Tiene envíos en curso. Si es una cuenta real, mejor espera a que terminen o usa «Bloquear».' }) : null,
+        el('div', { class: 'campo', style: 'margin-top:1rem' }, el('label', {}, 'Para confirmar, escribe el correo ', el('strong', { text: r.email })), conf),
+        msg,
+        el('div', { style: 'display:flex;gap:.5rem;flex-wrap:wrap' }, boton, el('button', { class: 'boton borde', type: 'button', text: 'Cancelar', onclick: () => $('dlg').close() })));
+      if (!$('dlg').open) $('dlg').showModal();
+      conf.focus();
     }
 
     async function cargarTarifas() {

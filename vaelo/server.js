@@ -1492,6 +1492,74 @@ ruta('POST', '/api/admin/clientes/:id/verificacion', ({ req, params, body }) => 
   return { ok: true };
 });
 
+// ---------- Eliminar una cuenta por completo (para limpiar cuentas de prueba) ----------
+// Borra la cuenta y lo suyo: así el correo y el teléfono quedan libres para registrarse otra vez.
+// Si era piloto, sus envíos de clientes no se borran: los que estaban en curso vuelven a buscar piloto.
+function resumenBorrado(id) {
+  const u = db.prepare('SELECT id, nombre, email, telefono, rol FROM usuarios WHERE id = ?').get(id);
+  if (!u) falla(404, 'No encontramos esa cuenta.');
+  const n = (sql, ...a) => db.prepare(sql).get(...a).n;
+  const enCurso = ESTADOS.filter((x) => !ESTADOS_CERRADOS.includes(x)).map((x) => `'${x}'`).join(',');
+  return { ...u,
+    envios: n('SELECT COUNT(*) n FROM envios WHERE usuario_id = ?', id),
+    envios_en_curso: n(`SELECT COUNT(*) n FROM envios WHERE usuario_id = ? AND estado IN (${enCurso})`, id),
+    pedidos_empresa: n('SELECT COUNT(*) n FROM pedidos_empresa WHERE usuario_id = ?', id),
+    como_piloto: n('SELECT COUNT(*) n FROM envios WHERE mensajero_id = ?', id),
+    como_piloto_en_curso: n(`SELECT COUNT(*) n FROM envios WHERE mensajero_id = ? AND estado IN (${enCurso})`, id) };
+}
+function borrarArchivosDe(filas) {
+  for (const f of filas) for (const v of Object.values(f || {})) {
+    if (typeof v !== 'string' || !/^[\w.-]+\.(jpe?g|png|webp|pdf)$/i.test(v)) continue;
+    try { fs.unlinkSync(path.join(DOCS_DIR, path.basename(v))); } catch {}
+  }
+}
+function eliminarCuenta(id) {
+  const enCurso = ESTADOS.filter((x) => !ESTADOS_CERRADOS.includes(x)).map((x) => `'${x}'`).join(',');
+  const archivos = [];
+  db.exec('BEGIN');
+  try {
+    const ids = db.prepare('SELECT id FROM envios WHERE usuario_id = ?').all(id).map((x) => x.id);
+    const lista = ids.length ? ids.join(',') : '0';
+    archivos.push(...db.prepare(`SELECT * FROM envios WHERE id IN (${lista})`).all(), ...db.prepare(`SELECT foto FROM paquetes_envio WHERE envio_id IN (${lista})`).all(),
+      ...db.prepare(`SELECT foto FROM reclamos WHERE envio_id IN (${lista}) OR usuario_id = ?`).all(id), ...db.prepare('SELECT foto FROM pedidos_empresa WHERE usuario_id = ?').all(id),
+      ...db.prepare('SELECT * FROM solicitudes_empresa WHERE usuario_id = ?').all(id), ...db.prepare('SELECT * FROM usuarios WHERE id = ?').all(id));
+    // Lo que cuelga de sus envíos
+    for (const t of ['eventos', 'alertas', 'ubicaciones', 'paquetes_envio', 'reclamos']) db.prepare(`DELETE FROM ${t} WHERE envio_id IN (${lista})`).run();
+    db.prepare(`DELETE FROM cargos WHERE envio_id IN (${lista}) OR usuario_id = ?`).run(id);
+    db.prepare(`UPDATE cargos SET cobrado_envio_id = NULL WHERE cobrado_envio_id IN (${lista})`).run();
+    db.prepare('DELETE FROM reclamos WHERE usuario_id = ?').run(id);
+    db.prepare('DELETE FROM push_pedidos WHERE pedido_id IN (SELECT id FROM pedidos_empresa WHERE usuario_id = ?)').run(id);
+    db.prepare(`UPDATE pedidos_empresa SET envio_id = NULL WHERE envio_id IN (${lista})`).run();
+    db.prepare(`DELETE FROM envios WHERE id IN (${lista})`).run();
+    for (const t of ['pedidos_empresa', 'carpetas_empresa', 'lotes_empresa', 'lotes_sede']) db.prepare(`DELETE FROM ${t} WHERE usuario_id = ?`).run(id);
+    // Si era piloto: sus envíos en curso vuelven a buscar piloto; los terminados se quedan sin piloto
+    const vuelven = db.prepare(`SELECT id FROM envios WHERE mensajero_id = ? AND estado IN (${enCurso})`).all(id);
+    for (const e of vuelven) {
+      db.prepare("UPDATE envios SET mensajero_id = NULL, estado = CASE WHEN estado IN ('pendiente', 'recogido', 'en_camino') THEN 'pendiente' ELSE estado END WHERE id = ?").run(e.id);
+      db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, (SELECT estado FROM envios WHERE id = ?), ?)').run(e.id, e.id, 'Se eliminó la cuenta del piloto: el envío vuelve a buscar piloto');
+    }
+    db.prepare('UPDATE envios SET mensajero_id = NULL, pago_piloto_id = NULL WHERE mensajero_id = ?').run(id);
+    db.prepare('UPDATE reclamos SET piloto_id = NULL WHERE piloto_id = ?').run(id);
+    for (const t of ['alertas', 'liquidaciones', 'pagos_piloto', 'cuentas_piloto']) db.prepare(`DELETE FROM ${t} WHERE piloto_id = ?`).run(id);
+    db.prepare('DELETE FROM usuarios WHERE id = ?').run(id);   // sesiones, direcciones, avisos, solicitud, etc. se borran solos
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  borrarArchivosDe(archivos);
+}
+ruta('GET', '/api/admin/usuarios/:id/eliminar', ({ req, params }) => {
+  requiereRol(req, 'admin');
+  return resumenBorrado(Number(params.id));
+});
+ruta('POST', '/api/admin/usuarios/:id/eliminar', ({ req, params, body }) => {
+  const yo = requiereRol(req, 'admin');
+  const r = resumenBorrado(Number(params.id));
+  if (r.id === yo.id) falla(400, 'No puedes eliminar tu propia cuenta.');
+  if (r.rol === 'admin' && db.prepare("SELECT COUNT(*) n FROM usuarios WHERE rol = 'admin'").get().n <= 1) falla(400, 'Es la única cuenta de administración: no se puede eliminar.');
+  if (String(body.confirmar || '').trim().toLowerCase() !== String(r.email).toLowerCase()) falla(400, 'Para confirmar, escribe el correo de la cuenta tal como aparece.');
+  eliminarCuenta(r.id);
+  return { ok: true, eliminada: r.nombre };
+});
+
 ruta('POST', '/api/admin/clientes/:id/activo', ({ req, params, body }) => {
   requiereRol(req, 'admin');
   const u = db.prepare("SELECT id FROM usuarios WHERE id = ? AND rol = 'cliente'").get(Number(params.id));

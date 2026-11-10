@@ -548,3 +548,38 @@ test('sueldo del piloto: neto del día, "Ya fue pagado", cierre del día con Exc
   const guia = db.prepare('SELECT guia FROM envios ORDER BY id DESC LIMIT 1').get().guia;
   assert.equal((await admin('GET', `/api/admin/buscar?q=${guia.slice(0, 7)}`)).j.envios.some((e) => e.guia === guia), true);
 });
+
+test('administración: eliminar una cuenta de prueba deja libre su correo y teléfono', async () => {
+  const pr = cliente();
+  assert.equal((await pr('POST', '/api/registro', { nombre: 'Prueba Borrar', email: 'borrar@prueba.com', telefono: '55990011', password: 'clave-de-prueba-123', acepto_terminos: true })).status, 201);
+  const id = db.prepare("SELECT id FROM usuarios WHERE email = 'borrar@prueba.com'").get().id;
+  const e = await pr('POST', '/api/envios', { vehiculo_id: 1, peso: 1, origen_zona: 'Zona 1', destino_zona: 'Zona 16', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng,
+    metodo_pago: 'efectivo', destino_nombre: 'Luis', destino_telefono: '55554444', foto_paquete: FOTO });
+  assert.equal(e.status, 201, JSON.stringify(e.j));
+  assert.equal((await ana('GET', `/api/admin/usuarios/${id}/eliminar`)).status, 403, 'solo administración');
+  const r = await admin('GET', `/api/admin/usuarios/${id}/eliminar`);
+  assert.equal(r.j.envios, 1); assert.equal(r.j.envios_en_curso, 1);
+  assert.equal((await admin('POST', `/api/admin/usuarios/${id}/eliminar`, { confirmar: 'otro@correo.com' })).status, 400, 'pide escribir el correo');
+  const yo = db.prepare("SELECT id FROM usuarios WHERE rol = 'admin'").get().id;
+  assert.equal((await admin('POST', `/api/admin/usuarios/${yo}/eliminar`, { confirmar: 'administracionvaelo@vaelomensajeria.com' })).status, 400, 'no se borra a sí mismo');
+  const ok = await admin('POST', `/api/admin/usuarios/${id}/eliminar`, { confirmar: 'BORRAR@prueba.com' });
+  assert.equal(ok.status, 200, JSON.stringify(ok.j));
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM usuarios WHERE id = ?').get(id).n, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM envios WHERE id = ?').get(e.j.id).n, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM eventos WHERE envio_id = ?').get(e.j.id).n, 0);
+  // Se puede registrar otra vez con el mismo correo y teléfono
+  assert.equal((await cliente()('POST', '/api/registro', { nombre: 'Prueba Borrar', email: 'borrar@prueba.com', telefono: '55990011', password: 'clave-de-prueba-123', acepto_terminos: true })).status, 201);
+});
+
+test('administración: eliminar un piloto devuelve sus envíos en curso a buscar piloto', async () => {
+  const h = hashPassword('clave-de-prueba-123');
+  const pid = Number(db.prepare("INSERT INTO usuarios (nombre,email,telefono,password_hash,rol,email_verificado,verificacion,estado_piloto) VALUES ('Piloto Prueba','pp@prueba.com','55001122',?,'mensajero',1,'verificado','aprobado')").run(h).lastInsertRowid);
+  const e = await ana('POST', '/api/envios', { vehiculo_id: 1, peso: 1, origen_zona: 'Zona 1', destino_zona: 'Zona 16', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng,
+    metodo_pago: 'efectivo', destino_nombre: 'Luis', destino_telefono: '55554444', foto_paquete: FOTO });
+  db.prepare("UPDATE envios SET mensajero_id = ?, estado = 'recogido' WHERE id = ?").run(pid, e.j.id);
+  const ok = await admin('POST', `/api/admin/usuarios/${pid}/eliminar`, { confirmar: 'pp@prueba.com' });
+  assert.equal(ok.status, 200, JSON.stringify(ok.j));
+  const f = db.prepare('SELECT estado, mensajero_id FROM envios WHERE id = ?').get(e.j.id);
+  assert.equal(f.estado, 'pendiente'); assert.equal(f.mensajero_id, null);
+  db.prepare("UPDATE envios SET estado = 'cancelado' WHERE id = ?").run(e.j.id);
+});
