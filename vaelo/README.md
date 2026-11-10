@@ -232,3 +232,7 @@ systemctl restart vaelo         # reiniciar
 ## Logo
 
 `public/img/logo-blanco.png` (barra y pie), `public/img/logo-negro.png` (guías) y los íconos de la app `icono-192.png`, `icono-512.png`, `apple-touch-icon.png`, `favicon.png`.
+
+### Bono por envío para empresas
+
+En el panel, **Empresas → Bono por envío**, pones cuántos quetzales gana cada empresa por cada envío **entregado** (sale de los Q5 de Vaelo; máximo Q5). Hay un monto general y cada empresa puede tener el suyo. Por cada empresa eliges si se le **paga** o se le **descuenta**, según lo que acuerden, y con «Ya fue pagado» / «Ya se descontó» cierras lo pendiente. La empresa ve en su panel la pestaña **Tus ganancias** con solo lo suyo: por recibir, este mes, ya recibido y total. Nunca ve lo que gana Vaelo ni el piloto.

@@ -1284,3 +1284,18 @@ body.app-piloto main { padding-bottom: 9rem; }
 .doc-pro .doc-pro-cab strong { overflow-wrap: anywhere; }
 .doc-pro-botones .boton { white-space: nowrap; padding-left: .5rem; padding-right: .5rem; }
 .buscador-clientes { margin: 0 0 .75rem; } .buscador-clientes input { max-width: 420px; }
+
+/* ---------- Bono por envío (panel de empresa) ---------- */
+.bono-franja { display: flex; align-items: center; gap: .9rem; width: 100%; margin: .25rem 0 1rem; padding: .8rem 1rem; text-align: left; cursor: pointer; font: inherit;
+  border: 0; border-radius: 14px; background: linear-gradient(135deg, #11226B, #1c3faa); color: #fff; }
+.bono-franja-q { flex: none; display: grid; place-items: center; min-width: 64px; height: 52px; padding: 0 .6rem; border-radius: 12px; background: var(--cinta); color: #11226B; font-weight: 900; font-size: 1.1rem; }
+.bono-franja strong { display: block; } .bono-franja small { color: #C9D3F5; }
+.bono-cabeza { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; }
+.bono-cabeza h3 { margin: 0 0 .25rem; }
+.bono-cifras { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .7rem; margin-top: 1rem; }
+.bono-cifra { display: grid; gap: .15rem; padding: .9rem 1rem; border-radius: 14px; background: var(--gris); }
+.bono-cifra span { font-size: .82rem; color: var(--suave); } .bono-cifra strong { font-size: 1.45rem; } .bono-cifra small { color: var(--suave); }
+.bono-cifra.fuerte { background: #11226B; color: #fff; } .bono-cifra.fuerte span, .bono-cifra.fuerte small { color: #C9D3F5; }
+.bono-lista { list-style: none; margin: .5rem 0 0; padding: 0; }
+.bono-lista li { display: flex; justify-content: space-between; gap: 1rem; padding: .55rem 0; border-bottom: 1px solid var(--linea); font-size: .92rem; }
+.bono-lista li:last-child { border-bottom: 0; }

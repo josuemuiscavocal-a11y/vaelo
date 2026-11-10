@@ -131,7 +131,9 @@
         <div class="pestanas" role="tablist" id="empresas-sub">
           <button type="button" role="tab" aria-selected="true" data-sub="activas">Empresas activas</button>
           <button type="button" role="tab" aria-selected="false" data-sub="solicitudes" class="solo-admin">Solicitudes de contrato <span class="insignia" id="insignia-solicitudes" hidden></span></button>
+          <button type="button" role="tab" aria-selected="false" data-sub="bonos" class="solo-admin">Bono por envío</button>
         </div>
+        <div class="bloque" id="empresas-bonos" hidden></div>
         <div id="empresas-activas"></div>
         <div class="bloque" id="empresas-solicitudes" hidden>
           <h2>Solicitudes de contrato</h2>
@@ -586,7 +588,51 @@ null))));
       subEmpresas = b.dataset.sub;
       document.querySelectorAll('#empresas-sub button').forEach((x) => x.setAttribute('aria-selected', String(x === b)));
       $('empresas-activas').hidden = subEmpresas !== 'activas'; $('empresas-solicitudes').hidden = subEmpresas !== 'solicitudes';
+      $('empresas-bonos').hidden = subEmpresas !== 'bonos';
+      if (subEmpresas === 'bonos') cargarBonos();
     }));
+    // ---------- Bono por envío para empresas: una parte de lo que gana Vaelo, por cada envío entregado ----------
+    async function cargarBonos() {
+      const caja = $('empresas-bonos');
+      let r; try { r = await api('/api/admin/bonos'); } catch (e) { poner(caja, el('div', { class: 'mensaje error', text: e.message })); return; }
+      const msg = el('div', { class: 'mensaje', role: 'alert' });
+      const general = el('input', { type: 'number', min: 0, max: r.tope, step: 0.5, value: r.general, style: 'max-width:120px', 'aria-label': 'Bono general por envío (Q)' });
+      const filas = r.empresas.map((x) => {
+        const propio = el('input', { type: 'number', min: 0, max: r.tope, step: 0.5, value: x.propio ?? '', placeholder: 'General', style: 'max-width:120px', 'aria-label': `Bono de ${x.empresa}` });
+        const modo = el('select', { 'aria-label': `Forma de entregar el bono a ${x.empresa}` }, el('option', { value: 'pago', text: 'Pago' }), el('option', { value: 'descuento', text: 'Descuento' }));
+        modo.value = x.modo;
+        return el('tr', {},
+          el('td', {}, el('strong', { text: x.empresa }), el('br'), sub(x.por_envio > 0 ? `Gana ${dinero(x.por_envio)} por envío` : 'Sin bono')),
+          el('td', {}, propio), el('td', {}, modo),
+          el('td', {}, el('strong', { text: dinero(x.pendiente) }), el('br'), sub(`${x.entregas_pendientes} entregas`)),
+          el('td', {}, dinero(x.mes), el('br'), sub(`${x.entregas_mes} este mes`)),
+          el('td', { text: dinero(x.recibido) }),
+          el('td', {}, el('div', { style: 'display:flex;gap:.4rem;flex-wrap:wrap' },
+            el('button', { class: 'boton borde chico', type: 'button', text: 'Guardar', onclick: async () => {
+              try { await api(`/api/admin/bonos/${x.id}`, { method: 'PUT', body: { bono_envio: propio.value, bono_modo: modo.value } }); mostrarMensaje(msg, `${x.empresa}: guardado.`, 'exito'); cargarBonos(); }
+              catch (e) { mostrarMensaje(msg, e.message); }
+            } }),
+            x.pendiente > 0 ? el('button', { class: 'boton chico', type: 'button', text: x.modo === 'descuento' ? 'Ya se descontó' : 'Ya fue pagado', onclick: async () => {
+              if (!confirm(`¿Marcar ${dinero(x.pendiente)} de ${x.empresa} como ${x.modo === 'descuento' ? 'descontado' : 'pagado'}?`)) return;
+              try { await api(`/api/admin/bonos/${x.id}/liquidar`, { body: {} }); cargarBonos(); } catch (e) { mostrarMensaje(msg, e.message); }
+            } }) : null)));
+      });
+      poner(caja,
+        el('h2', { text: 'Bono por envío para empresas' }),
+        el('p', { class: 'bloque-nota', text: `Cada envío entregado de una empresa le suma este bono, sacado de lo que gana Vaelo (máximo ${dinero(r.tope)}). La empresa solo ve cuánto ha ganado ella; nunca ve lo que gana Vaelo ni el piloto. Tú decides con cada empresa si se le paga o se le descuenta.` }),
+        el('div', { style: 'display:flex;gap:.6rem;align-items:flex-end;flex-wrap:wrap;margin-bottom:1rem' },
+          el('div', { class: 'campo', style: 'margin:0' }, el('label', { text: 'Bono general por envío entregado (Q)' }), general),
+          el('button', { class: 'boton chico', type: 'button', text: 'Guardar general', onclick: async () => {
+            try { await api('/api/admin/ajustes', { method: 'PUT', body: { bono_empresa: general.value } }); mostrarMensaje(msg, Number(general.value) > 0 ? `Listo: las empresas ganan ${dinero(Number(general.value))} por envío entregado (salvo las que tienen monto propio).` : 'Bono general apagado.', 'exito'); cargarBonos(); }
+            catch (e) { mostrarMensaje(msg, e.message); }
+          } }),
+          el('span', { class: 'pista', style: 'margin:0', text: `Pendiente de entregar a empresas: ${dinero(r.pendiente)}` })),
+        msg,
+        r.empresas.length ? el('div', { class: 'tabla-envoltura' }, el('table', {},
+          el('thead', {}, el('tr', {}, ['Empresa', 'Monto propio (Q)', 'Se le entrega como', 'Pendiente', 'Este mes', 'Ya entregado', ''].map(t => el('th', { text: t })))),
+          el('tbody', {}, filas))) : el('p', { class: 'pista', text: 'Todavía no hay cuentas de empresa.' }),
+        el('p', { class: 'pista', text: 'Deja "Monto propio" vacío para que use el general. Pon 0 para que esa empresa no tenga bono.' }));
+    }
     const DIAS_GT = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
     const diaLargo = (d) => { if (!d) return ''; const f = new Date(d + 'T12:00:00Z'); return `${DIAS_GT[f.getUTCDay()]} ${f.getUTCDate()} de ${f.toLocaleDateString('es-GT', { month: 'long', timeZone: 'UTC' })}`; };
     async function cargarEmpresas() {

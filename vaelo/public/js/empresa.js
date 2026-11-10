@@ -197,18 +197,46 @@ const ESTADO_ENVIO_EMP = { pendiente: 'Por recoger', recogido: 'Recogido', en_ca
 
 async function panelEmpresa(caja) {
   const yo = (await api('/api/yo')).usuario;
-  let vista = new URLSearchParams(location.search).get('vista') === 'analitica' ? 'analitica' : 'pedidos';
+  let bono = null; try { bono = await api('/api/empresa/bono'); } catch { /* sin bono */ }
+  const conBono = bono && (bono.por_envio > 0 || bono.total > 0);
+  const pedida = new URLSearchParams(location.search).get('vista');
+  let vista = pedida === 'analitica' ? 'analitica' : pedida === 'ganancias' && conBono ? 'ganancias' : 'pedidos';
   const cuerpo = el('div');
   const pest = el('div', { class: 'pestanas', role: 'tablist' });
-  const pintarPest = () => poner(pest, ...[['pedidos', 'Carpetas de envíos'], ['analitica', 'Analítica']].map(([k, t]) =>
+  const pintarPest = () => poner(pest, ...[['pedidos', 'Carpetas de envíos'], ['analitica', 'Analítica'], conBono ? ['ganancias', 'Tus ganancias'] : null].filter(Boolean).map(([k, t]) =>
     el('button', { type: 'button', role: 'tab', 'aria-selected': String(vista === k), text: t, onclick: () => { vista = k; pintarPest(); abrir(); } })));
-  const abrir = () => (vista === 'pedidos' ? panelPedidos(cuerpo, yo) : panelAnalitica(cuerpo));
+  const abrir = () => (vista === 'pedidos' ? panelPedidos(cuerpo, yo) : vista === 'ganancias' ? panelGanancias(cuerpo) : panelAnalitica(cuerpo));
   poner(caja, 
     el('div', { class: 'empresa-cabecera' }, el('div', {}, el('span', { class: 'etiqueta-completa', text: 'Contrato firmado' }), el('h2', { text: yo.empresa_nombre || yo.nombre }),
       el('p', { class: 'pista', text: 'Vaelo te presta sus pilotos: cada cliente paga su envío al recibir. Tu empresa solo paga si eliges pickup pagado por ti o si un paquete se queda en la sede.' })),
       el('a', { class: 'boton borde chico', href: '/politicas-empresas', target: '_blank', text: 'Políticas para empresas' })),
+    conBono && bono.por_envio > 0 ? el('button', { type: 'button', class: 'bono-franja', onclick: () => { vista = 'ganancias'; pintarPest(); abrir(); } },
+      el('span', { class: 'bono-franja-q', text: dinero(bono.por_envio) }),
+      el('span', {}, el('strong', { text: `Ganas ${dinero(bono.por_envio)} por cada envío entregado` }), el('small', { text: `Este mes llevas ${dinero(bono.mes)} (${bono.entregas_mes} entregas). Ver tus ganancias` }))) : null,
     pest, cuerpo);
   pintarPest(); abrir();
+}
+
+// ---------- Tus ganancias: lo que gana la empresa por sus envíos entregados (solo sus cifras) ----------
+async function panelGanancias(caja) {
+  poner(caja, el('p', { class: 'pista', text: 'Cargando…' }));
+  let b; try { b = await api('/api/empresa/bono'); } catch (e) { poner(caja, el('div', { class: 'mensaje error', text: e.message })); return; }
+  const cifra = (t, v, s, fuerte) => el('div', { class: 'bono-cifra' + (fuerte ? ' fuerte' : '') }, el('span', { text: t }), el('strong', { text: v }), s ? el('small', { text: s }) : null);
+  poner(caja,
+    el('div', { class: 'bono-cabeza' },
+      el('div', {}, el('h3', { text: 'Tus ganancias con Vaelo' }),
+        el('p', { class: 'pista', text: b.por_envio > 0 ? `Por cada envío que entregamos de tu empresa ganas ${dinero(b.por_envio)}. ${b.modo === 'descuento' ? 'Lo que acumulas se descuenta de tus envíos.' : 'Lo que acumulas se te paga.'}` : 'Tu bono por envío está en pausa. Lo acumulado sigue siendo tuyo.' })),
+      el('span', { class: 'etiqueta-azul', text: b.modo_texto })),
+    el('div', { class: 'bono-cifras' },
+      cifra('Por recibir', dinero(b.pendiente), `${b.entregas_pendientes} entregas`, true),
+      cifra('Este mes', dinero(b.mes), `${b.entregas_mes} entregas`),
+      cifra(b.modo === 'descuento' ? 'Ya descontado' : 'Ya recibido', dinero(b.recibido)),
+      cifra('Total ganado', dinero(b.total), `${b.entregas_total} entregas`)),
+    b.liquidaciones.length ? el('div', { class: 'bloque', style: 'margin-top:1rem' }, el('h3', { style: 'font-size:1.05rem', text: 'Pagos y descuentos' }),
+      el('ul', { class: 'bono-lista' }, b.liquidaciones.map((l) => el('li', {}, el('span', { text: `${fecha(l.creado, false)} · ${l.entregas} entregas · ${l.modo === 'descuento' ? 'Descontado' : 'Pagado'}` }), el('strong', { text: dinero(l.monto) }))))) : null,
+    b.ultimos.length ? el('div', { class: 'bloque', style: 'margin-top:1rem' }, el('h3', { style: 'font-size:1.05rem', text: 'Últimas entregas que te sumaron' }),
+      el('ul', { class: 'bono-lista' }, b.ultimos.map((x) => el('li', {}, el('span', { text: `${x.guia} · ${x.destino_nombre}` }), el('strong', { text: '+' + dinero(x.monto) }))))) :
+      el('p', { class: 'pista', style: 'margin-top:1rem', text: 'Cuando entreguemos tus envíos, aquí verás cada uno.' }));
 }
 
 // ---------- Carpetas de envíos ----------

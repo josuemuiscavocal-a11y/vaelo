@@ -285,6 +285,7 @@ const insAj = db.prepare('INSERT OR IGNORE INTO ajustes (clave, valor) VALUES (?
 insAj.run('whatsapp', '');
 insAj.run('horario', 'Lunes a sábado, 8:00 a. m. a 6:00 p. m.');
 insAj.run('recargo_fragil', '10');            // Q extra por paquete frágil
+insAj.run('bono_empresa', '0');               // Q que gana cada empresa por envío entregado (0 = apagado)
 insAj.run('vigencia_antecedentes', '6');      // meses que valen los antecedentes penales y policiacos
 insAj.run('auto_asignar', '0');               // asignar solo al piloto más cercano
 insAj.run('segundos_aceptar', '60');          // tiempo que tiene el piloto para aceptar antes de pasar al siguiente
@@ -543,6 +544,26 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_carpetas_usuario ON carpetas_empresa(usuario_id, estado);
 `);
 agregarColumnas('pedidos_empresa', [['carpeta_id', 'INTEGER'], ['no_puede_nota', 'TEXT']]);
+// Bono para empresas: una parte de lo que gana Vaelo por cada envío entregado. La administración decide el monto
+// (general o por empresa) y si se le paga o se le descuenta, según lo que acuerden.
+agregarColumnas('usuarios', [['bono_envio', 'REAL'], ['bono_modo', "TEXT NOT NULL DEFAULT 'pago'"]]);
+db.exec(`
+  CREATE TABLE IF NOT EXISTS bonos_empresa (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+    envio_id INTEGER NOT NULL UNIQUE,
+    monto REAL NOT NULL,
+    creado TEXT NOT NULL DEFAULT (datetime('now')),
+    liquidacion_id INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_bonos_empresa ON bonos_empresa(usuario_id, liquidacion_id);
+  CREATE TABLE IF NOT EXISTS liquidaciones_bono (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+    monto REAL NOT NULL, entregas INTEGER NOT NULL, modo TEXT NOT NULL, nota TEXT,
+    hecho_por INTEGER, creado TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
 // Hasta 3 paquetes en un mismo envío: el primero vive en el envío; el 2.º y el 3.º aquí, cada uno con su peso, contenido y foto
 db.exec(`
   CREATE TABLE IF NOT EXISTS paquetes_envio (

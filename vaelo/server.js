@@ -364,6 +364,35 @@ function cambiarEstado(envioId, estado, nota, lat, lng) {
   db.prepare('INSERT INTO eventos (envio_id, estado, nota, lat, lng) VALUES (?, ?, ?, ?, ?)')
     .run(envioId, estado, nota, c ? c.lat : null, c ? c.lng : null);
   if (antes.estado !== estado) avisarEnvio(envioId, estado);
+  // Bono de la empresa: se suma al entregar; si el envío deja de estar entregado y no se ha pagado, se quita
+  if (estado === 'entregado' && antes.estado !== 'entregado') registrarBono(antes);
+  if (antes.estado === 'entregado' && estado !== 'entregado') db.prepare('DELETE FROM bonos_empresa WHERE envio_id = ? AND liquidacion_id IS NULL').run(envioId);
+}
+
+// ---------- Bono para empresas por envío entregado ----------
+const TOPE_BONO = 5;   // nunca más de lo que se queda Vaelo por envío
+function bonoDe(u) {
+  if (!u || u.tipo_cuenta !== 'empresa') return 0;
+  const m = u.bono_envio != null ? Number(u.bono_envio) : Number(getAjustes().bono_empresa) || 0;
+  return redondear(Math.max(0, Math.min(TOPE_BONO, m || 0)));
+}
+function registrarBono(e) {
+  const u = db.prepare('SELECT tipo_cuenta, bono_envio FROM usuarios WHERE id = ?').get(e.usuario_id);
+  const monto = bonoDe(u);
+  if (monto > 0) db.prepare('INSERT OR IGNORE INTO bonos_empresa (usuario_id, envio_id, monto) VALUES (?, ?, ?)').run(e.usuario_id, e.id, monto);
+}
+const MODOS_BONO = { pago: 'Se te paga', descuento: 'Se descuenta de tus envíos' };
+function resumenBono(uid) {
+  const u = db.prepare('SELECT tipo_cuenta, bono_envio, bono_modo FROM usuarios WHERE id = ?').get(uid);
+  const mes = hoyGT().slice(0, 7);
+  const g = (sql, ...a) => db.prepare(sql).get(uid, ...a);
+  const pend = g('SELECT COUNT(*) AS n, COALESCE(SUM(monto), 0) AS total FROM bonos_empresa WHERE usuario_id = ? AND liquidacion_id IS NULL');
+  const delMes = g("SELECT COUNT(*) AS n, COALESCE(SUM(monto), 0) AS total FROM bonos_empresa WHERE usuario_id = ? AND strftime('%Y-%m', creado, '-6 hours') = ?", mes);
+  const todo = g('SELECT COUNT(*) AS n, COALESCE(SUM(monto), 0) AS total FROM bonos_empresa WHERE usuario_id = ?');
+  return { por_envio: bonoDe(u), modo: u?.bono_modo || 'pago', modo_texto: MODOS_BONO[u?.bono_modo] || MODOS_BONO.pago,
+    pendiente: redondear(pend.total), entregas_pendientes: pend.n, mes: redondear(delMes.total), entregas_mes: delMes.n,
+    total: redondear(todo.total), entregas_total: todo.n, recibido: redondear(todo.total - pend.total),
+    liquidaciones: db.prepare('SELECT id, monto, entregas, modo, nota, creado FROM liquidaciones_bono WHERE usuario_id = ? ORDER BY id DESC LIMIT 24').all(uid) };
 }
 
 // ---------- Rutas de la API ----------
@@ -3852,6 +3881,50 @@ function resumenEmpresa(uid) {
     entregados_mes: n("SELECT COUNT(*) AS n FROM envios WHERE usuario_id = ? AND pedido_id IS NOT NULL AND estado = 'entregado' AND strftime('%Y-%m', entregado_en, '-6 hours') = ?", hoyGT().slice(0, 7)),
   };
 }
+// La empresa solo ve lo que gana ella (nunca las cifras de Vaelo)
+ruta('GET', '/api/empresa/bono', ({ req }) => {
+  const u = requiereUsuario(req);
+  if (u.rol !== 'cliente') falla(403, 'Solo para empresas.');
+  const r = resumenBono(u.id);
+  const ultimos = db.prepare(`SELECT b.monto, b.creado, e.guia, e.destino_nombre FROM bonos_empresa b JOIN envios e ON e.id = b.envio_id
+    WHERE b.usuario_id = ? ORDER BY b.id DESC LIMIT 15`).all(u.id);
+  return { ...r, ultimos };
+});
+ruta('GET', '/api/admin/bonos', ({ req }) => {
+  requiereRol(req, 'admin');
+  const lista = db.prepare("SELECT id, nombre, empresa_nombre, bono_envio, bono_modo FROM usuarios WHERE tipo_cuenta = 'empresa' AND rol = 'cliente' ORDER BY COALESCE(empresa_nombre, nombre)").all()
+    .map((u) => { const r = resumenBono(u.id); return { id: u.id, empresa: u.empresa_nombre || u.nombre, propio: u.bono_envio, ...r, liquidaciones: undefined }; });
+  return { general: Number(getAjustes().bono_empresa) || 0, tope: TOPE_BONO, empresas: lista,
+    pendiente: redondear(lista.reduce((t, x) => t + x.pendiente, 0)) };
+});
+ruta('PUT', '/api/admin/bonos/:id', ({ req, params, body }) => {
+  requiereRol(req, 'admin');
+  const u = db.prepare("SELECT id FROM usuarios WHERE id = ? AND tipo_cuenta = 'empresa'").get(Number(params.id));
+  if (!u) falla(404, 'No encontramos esa empresa.');
+  let propio = null;
+  if (body.bono_envio !== '' && body.bono_envio != null) {
+    propio = numero(body.bono_envio);
+    if (!(propio >= 0 && propio <= TOPE_BONO)) falla(400, `El bono por envío va de Q0 a Q${TOPE_BONO}.`);
+  }
+  const modo = body.bono_modo === 'descuento' ? 'descuento' : 'pago';
+  db.prepare('UPDATE usuarios SET bono_envio = ?, bono_modo = ? WHERE id = ?').run(propio, modo, u.id);
+  return { ok: true, ...resumenBono(u.id) };
+});
+ruta('POST', '/api/admin/bonos/:id/liquidar', ({ req, params, body }) => {
+  const yo = requiereRol(req, 'admin');
+  const u = db.prepare("SELECT id, bono_modo FROM usuarios WHERE id = ? AND tipo_cuenta = 'empresa'").get(Number(params.id));
+  if (!u) falla(404, 'No encontramos esa empresa.');
+  const p = db.prepare('SELECT COUNT(*) AS n, COALESCE(SUM(monto), 0) AS total FROM bonos_empresa WHERE usuario_id = ? AND liquidacion_id IS NULL').get(u.id);
+  if (!p.n) falla(400, 'No tiene nada pendiente.');
+  db.exec('BEGIN');
+  try {
+    const id = Number(db.prepare('INSERT INTO liquidaciones_bono (usuario_id, monto, entregas, modo, nota, hecho_por) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(u.id, redondear(p.total), p.n, u.bono_modo || 'pago', texto(body.nota, 200) || null, yo.id).lastInsertRowid);
+    db.prepare('UPDATE bonos_empresa SET liquidacion_id = ? WHERE usuario_id = ? AND liquidacion_id IS NULL').run(id, u.id);
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  return { ok: true, ...resumenBono(u.id) };
+});
 ruta('GET', '/api/admin/empresas-activas', ({ req }) => {
   requiereStaff(req);
   const lista = db.prepare("SELECT id, nombre, empresa_nombre, telefono, email FROM usuarios WHERE tipo_cuenta = 'empresa' AND rol = 'cliente' ORDER BY COALESCE(empresa_nombre, nombre)").all()
@@ -4509,6 +4582,11 @@ ruta('PUT', '/api/admin/ajustes', ({ req, body }) => {
     up.run('recargo_fragil', String(redondear(n)));
   }
   if (body.exigir_receptor !== undefined) up.run('exigir_receptor', body.exigir_receptor === true || body.exigir_receptor === '1' ? '1' : '0');
+  if (body.bono_empresa !== undefined) {
+    const b = numero(body.bono_empresa);
+    if (!(b >= 0 && b <= TOPE_BONO)) falla(400, `El bono general para empresas va de Q0 a Q${TOPE_BONO}.`);
+    up.run('bono_empresa', String(redondear(b)));
+  }
   if (body.tema_navidad !== undefined) up.run('tema_navidad', body.tema_navidad === true || body.tema_navidad === '1' ? '1' : '0');
   if (body.auto_asignar !== undefined) up.run('auto_asignar', body.auto_asignar === true || body.auto_asignar === '1' ? '1' : '0');
   if (body.segundos_aceptar !== undefined) {

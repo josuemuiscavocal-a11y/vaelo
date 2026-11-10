@@ -583,3 +583,30 @@ test('administración: eliminar un piloto devuelve sus envíos en curso a buscar
   assert.equal(f.estado, 'pendiente'); assert.equal(f.mensajero_id, null);
   db.prepare("UPDATE envios SET estado = 'cancelado' WHERE id = ?").run(e.j.id);
 });
+
+test('bono para empresas: suma al entregar, la empresa solo ve lo suyo y administración lo liquida', async () => {
+  const em = cliente();
+  assert.equal((await em('POST', '/api/registro', { nombre: 'Tienda Bono', email: 'bono@prueba.com', telefono: '55660011', password: 'clave-de-prueba-123', acepto_terminos: true })).status, 201);
+  const uid = db.prepare("SELECT id FROM usuarios WHERE email = 'bono@prueba.com'").get().id;
+  assert.equal((await admin('PUT', `/api/admin/clientes/${uid}/empresa`, { tipo_cuenta: 'empresa', empresa_nombre: 'Tienda Bono' })).status, 200);
+  assert.equal((await admin('PUT', '/api/admin/ajustes', { bono_empresa: 9 })).status, 400, 'no más de Q5');
+  assert.equal((await admin('PUT', '/api/admin/ajustes', { bono_empresa: 1 })).status, 200);
+  const nuevo = () => em('POST', '/api/envios', { vehiculo_id: 1, peso: 1, origen_zona: 'Zona 1', destino_zona: 'Zona 16', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng,
+    metodo_pago: 'efectivo', destino_nombre: 'Luis', destino_telefono: '55554444', foto_paquete: FOTO });
+  const a = await nuevo(); const b = await nuevo(); const c = await nuevo();
+  assert.equal(a.status, 201, JSON.stringify(a.j));
+  await admin('POST', `/api/admin/envios/${a.j.id}/estado`, { estado: 'entregado', nota: 'prueba' });
+  await admin('POST', `/api/admin/envios/${c.j.id}/estado`, { estado: 'cancelado', nota: 'prueba' });
+  // Monto propio de Q2 para esta empresa: el siguiente entregado suma Q2
+  assert.equal((await admin('PUT', `/api/admin/bonos/${uid}`, { bono_envio: 2, bono_modo: 'descuento' })).status, 200);
+  await admin('POST', `/api/admin/envios/${b.j.id}/estado`, { estado: 'entregado', nota: 'prueba' });
+  const v = await em('GET', '/api/empresa/bono');
+  assert.equal(v.j.pendiente, 3); assert.equal(v.j.entregas_pendientes, 2); assert.equal(v.j.por_envio, 2); assert.equal(v.j.modo, 'descuento');
+  const texto = JSON.stringify(v.j);
+  assert.ok(!/precio|vaelo|ganancia_piloto|comision/i.test(texto), 'la empresa no ve las cifras de Vaelo');
+  assert.equal((await em('GET', '/api/admin/bonos')).status, 403);
+  const l = await admin('POST', `/api/admin/bonos/${uid}/liquidar`, {});
+  assert.equal(l.status, 200); assert.equal(l.j.pendiente, 0); assert.equal(l.j.recibido, 3);
+  assert.equal((await admin('POST', `/api/admin/bonos/${uid}/liquidar`, {})).status, 400, 'nada pendiente');
+  await admin('PUT', '/api/admin/ajustes', { bono_empresa: 0 });
+});
