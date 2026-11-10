@@ -593,12 +593,16 @@ test('bono para empresas: suma al entregar, la empresa solo ve lo suyo y adminis
   assert.equal((await admin('PUT', '/api/admin/ajustes', { bono_empresa: 1 })).status, 200);
   const nuevo = () => em('POST', '/api/envios', { vehiculo_id: 1, peso: 1, origen_zona: 'Zona 1', destino_zona: 'Zona 16', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng,
     metodo_pago: 'efectivo', destino_nombre: 'Luis', destino_telefono: '55554444', foto_paquete: FOTO });
+  const cero = await nuevo();
+  await admin('POST', `/api/admin/envios/${cero.j.id}/estado`, { estado: 'entregado', nota: 'prueba' });
+  assert.deepEqual((await em('GET', '/api/empresa/bono')).j, { activo: false }, 'sin activar no gana ni ve nada');
+  assert.equal((await admin('PUT', `/api/admin/bonos/${uid}`, { bono_envio: '', bono_modo: 'pago', bono_activo: true })).status, 200);
   const a = await nuevo(); const b = await nuevo(); const c = await nuevo();
   assert.equal(a.status, 201, JSON.stringify(a.j));
   await admin('POST', `/api/admin/envios/${a.j.id}/estado`, { estado: 'entregado', nota: 'prueba' });
   await admin('POST', `/api/admin/envios/${c.j.id}/estado`, { estado: 'cancelado', nota: 'prueba' });
   // Monto propio de Q2 para esta empresa: el siguiente entregado suma Q2
-  assert.equal((await admin('PUT', `/api/admin/bonos/${uid}`, { bono_envio: 2, bono_modo: 'descuento' })).status, 200);
+  assert.equal((await admin('PUT', `/api/admin/bonos/${uid}`, { bono_envio: 2, bono_modo: 'descuento', bono_activo: true })).status, 200);
   await admin('POST', `/api/admin/envios/${b.j.id}/estado`, { estado: 'entregado', nota: 'prueba' });
   const v = await em('GET', '/api/empresa/bono');
   assert.equal(v.j.pendiente, 3); assert.equal(v.j.entregas_pendientes, 2); assert.equal(v.j.por_envio, 2); assert.equal(v.j.modo, 'descuento');

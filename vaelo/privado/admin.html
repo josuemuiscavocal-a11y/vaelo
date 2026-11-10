@@ -601,15 +601,17 @@ null))));
         const propio = el('input', { type: 'number', min: 0, max: r.tope, step: 0.5, value: x.propio ?? '', placeholder: 'General', style: 'max-width:120px', 'aria-label': `Bono de ${x.empresa}` });
         const modo = el('select', { 'aria-label': `Forma de entregar el bono a ${x.empresa}` }, el('option', { value: 'pago', text: 'Pago' }), el('option', { value: 'descuento', text: 'Descuento' }));
         modo.value = x.modo;
+        const activo = el('input', { type: 'checkbox', checked: !!x.activo, style: 'width:auto', 'aria-label': `Bono activo para ${x.empresa}` });
         return el('tr', {},
-          el('td', {}, el('strong', { text: x.empresa }), el('br'), sub(x.por_envio > 0 ? `Gana ${dinero(x.por_envio)} por envío` : 'Sin bono')),
+          el('td', {}, el('strong', { text: x.empresa }), el('br'), sub(x.activo ? (x.por_envio > 0 ? `Gana ${dinero(x.por_envio)} por envío` : 'Activo, pero el monto es Q0') : 'Apagado: no gana ni ve nada')),
+          el('td', {}, el('label', { class: 'casilla', style: 'margin:0' }, activo, el('span', { text: 'Activo' }))),
           el('td', {}, propio), el('td', {}, modo),
           el('td', {}, el('strong', { text: dinero(x.pendiente) }), el('br'), sub(`${x.entregas_pendientes} entregas`)),
           el('td', {}, dinero(x.mes), el('br'), sub(`${x.entregas_mes} este mes`)),
           el('td', { text: dinero(x.recibido) }),
           el('td', {}, el('div', { style: 'display:flex;gap:.4rem;flex-wrap:wrap' },
             el('button', { class: 'boton borde chico', type: 'button', text: 'Guardar', onclick: async () => {
-              try { await api(`/api/admin/bonos/${x.id}`, { method: 'PUT', body: { bono_envio: propio.value, bono_modo: modo.value } }); mostrarMensaje(msg, `${x.empresa}: guardado.`, 'exito'); cargarBonos(); }
+              try { await api(`/api/admin/bonos/${x.id}`, { method: 'PUT', body: { bono_envio: propio.value, bono_modo: modo.value, bono_activo: activo.checked } }); mostrarMensaje(msg, `${x.empresa}: guardado.`, 'exito'); cargarBonos(); }
               catch (e) { mostrarMensaje(msg, e.message); }
             } }),
             x.pendiente > 0 ? el('button', { class: 'boton chico', type: 'button', text: x.modo === 'descuento' ? 'Ya se descontó' : 'Ya fue pagado', onclick: async () => {
@@ -619,19 +621,19 @@ null))));
       });
       poner(caja,
         el('h2', { text: 'Bono por envío para empresas' }),
-        el('p', { class: 'bloque-nota', text: `Cada envío entregado de una empresa le suma este bono, sacado de lo que gana Vaelo (máximo ${dinero(r.tope)}). La empresa solo ve cuánto ha ganado ella; nunca ve lo que gana Vaelo ni el piloto. Tú decides con cada empresa si se le paga o se le descuenta.` }),
+        el('p', { class: 'bloque-nota', text: `Solo las empresas que marques como «Activo» ganan bono y ven «Tus ganancias» en su panel; las demás no ven nada. Cada envío entregado les suma el monto, sacado de lo que gana Vaelo (máximo ${dinero(r.tope)}). Nunca ven lo que gana Vaelo ni el piloto. Tú decides con cada una si se le paga o se le descuenta.` }),
         el('div', { style: 'display:flex;gap:.6rem;align-items:flex-end;flex-wrap:wrap;margin-bottom:1rem' },
-          el('div', { class: 'campo', style: 'margin:0' }, el('label', { text: 'Bono general por envío entregado (Q)' }), general),
+          el('div', { class: 'campo', style: 'margin:0' }, el('label', { text: 'Monto general para las empresas activas (Q)' }), general),
           el('button', { class: 'boton chico', type: 'button', text: 'Guardar general', onclick: async () => {
-            try { await api('/api/admin/ajustes', { method: 'PUT', body: { bono_empresa: general.value } }); mostrarMensaje(msg, Number(general.value) > 0 ? `Listo: las empresas ganan ${dinero(Number(general.value))} por envío entregado (salvo las que tienen monto propio).` : 'Bono general apagado.', 'exito'); cargarBonos(); }
+            try { await api('/api/admin/ajustes', { method: 'PUT', body: { bono_empresa: general.value } }); mostrarMensaje(msg, `Listo: las empresas con bono activo ganan ${dinero(Number(general.value) || 0)} por envío entregado (salvo las que tienen monto propio).`, 'exito'); cargarBonos(); }
             catch (e) { mostrarMensaje(msg, e.message); }
           } }),
           el('span', { class: 'pista', style: 'margin:0', text: `Pendiente de entregar a empresas: ${dinero(r.pendiente)}` })),
         msg,
         r.empresas.length ? el('div', { class: 'tabla-envoltura' }, el('table', {},
-          el('thead', {}, el('tr', {}, ['Empresa', 'Monto propio (Q)', 'Se le entrega como', 'Pendiente', 'Este mes', 'Ya entregado', ''].map(t => el('th', { text: t })))),
+          el('thead', {}, el('tr', {}, ['Empresa', 'Bono', 'Monto propio (Q)', 'Se le entrega como', 'Pendiente', 'Este mes', 'Ya entregado', ''].map(t => el('th', { text: t })))),
           el('tbody', {}, filas))) : el('p', { class: 'pista', text: 'Todavía no hay cuentas de empresa.' }),
-        el('p', { class: 'pista', text: 'Deja "Monto propio" vacío para que use el general. Pon 0 para que esa empresa no tenga bono.' }));
+        el('p', { class: 'pista', text: 'Marca «Activo» y toca Guardar en la fila de la empresa. Deja «Monto propio» vacío para que use el monto general.' }));
     }
     const DIAS_GT = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
     const diaLargo = (d) => { if (!d) return ''; const f = new Date(d + 'T12:00:00Z'); return `${DIAS_GT[f.getUTCDay()]} ${f.getUTCDate()} de ${f.toLocaleDateString('es-GT', { month: 'long', timeZone: 'UTC' })}`; };

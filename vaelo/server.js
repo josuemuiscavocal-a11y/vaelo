@@ -371,25 +371,26 @@ function cambiarEstado(envioId, estado, nota, lat, lng) {
 
 // ---------- Bono para empresas por envío entregado ----------
 const TOPE_BONO = 5;   // nunca más de lo que se queda Vaelo por envío
+// Solo ganan bono las empresas a las que la administración se lo activó
 function bonoDe(u) {
-  if (!u || u.tipo_cuenta !== 'empresa') return 0;
+  if (!u || u.tipo_cuenta !== 'empresa' || !u.bono_activo) return 0;
   const m = u.bono_envio != null ? Number(u.bono_envio) : Number(getAjustes().bono_empresa) || 0;
   return redondear(Math.max(0, Math.min(TOPE_BONO, m || 0)));
 }
 function registrarBono(e) {
-  const u = db.prepare('SELECT tipo_cuenta, bono_envio FROM usuarios WHERE id = ?').get(e.usuario_id);
+  const u = db.prepare('SELECT tipo_cuenta, bono_envio, bono_activo FROM usuarios WHERE id = ?').get(e.usuario_id);
   const monto = bonoDe(u);
   if (monto > 0) db.prepare('INSERT OR IGNORE INTO bonos_empresa (usuario_id, envio_id, monto) VALUES (?, ?, ?)').run(e.usuario_id, e.id, monto);
 }
 const MODOS_BONO = { pago: 'Se te paga', descuento: 'Se descuenta de tus envíos' };
 function resumenBono(uid) {
-  const u = db.prepare('SELECT tipo_cuenta, bono_envio, bono_modo FROM usuarios WHERE id = ?').get(uid);
+  const u = db.prepare('SELECT tipo_cuenta, bono_envio, bono_modo, bono_activo FROM usuarios WHERE id = ?').get(uid);
   const mes = hoyGT().slice(0, 7);
   const g = (sql, ...a) => db.prepare(sql).get(uid, ...a);
   const pend = g('SELECT COUNT(*) AS n, COALESCE(SUM(monto), 0) AS total FROM bonos_empresa WHERE usuario_id = ? AND liquidacion_id IS NULL');
   const delMes = g("SELECT COUNT(*) AS n, COALESCE(SUM(monto), 0) AS total FROM bonos_empresa WHERE usuario_id = ? AND strftime('%Y-%m', creado, '-6 hours') = ?", mes);
   const todo = g('SELECT COUNT(*) AS n, COALESCE(SUM(monto), 0) AS total FROM bonos_empresa WHERE usuario_id = ?');
-  return { por_envio: bonoDe(u), modo: u?.bono_modo || 'pago', modo_texto: MODOS_BONO[u?.bono_modo] || MODOS_BONO.pago,
+  return { activo: !!u?.bono_activo, por_envio: bonoDe(u), modo: u?.bono_modo || 'pago', modo_texto: MODOS_BONO[u?.bono_modo] || MODOS_BONO.pago,
     pendiente: redondear(pend.total), entregas_pendientes: pend.n, mes: redondear(delMes.total), entregas_mes: delMes.n,
     total: redondear(todo.total), entregas_total: todo.n, recibido: redondear(todo.total - pend.total),
     liquidaciones: db.prepare('SELECT id, monto, entregas, modo, nota, creado FROM liquidaciones_bono WHERE usuario_id = ? ORDER BY id DESC LIMIT 24').all(uid) };
@@ -3886,13 +3887,14 @@ ruta('GET', '/api/empresa/bono', ({ req }) => {
   const u = requiereUsuario(req);
   if (u.rol !== 'cliente') falla(403, 'Solo para empresas.');
   const r = resumenBono(u.id);
+  if (!r.activo) return { activo: false };   // sin bono activado no ve nada
   const ultimos = db.prepare(`SELECT b.monto, b.creado, e.guia, e.destino_nombre FROM bonos_empresa b JOIN envios e ON e.id = b.envio_id
     WHERE b.usuario_id = ? ORDER BY b.id DESC LIMIT 15`).all(u.id);
   return { ...r, ultimos };
 });
 ruta('GET', '/api/admin/bonos', ({ req }) => {
   requiereRol(req, 'admin');
-  const lista = db.prepare("SELECT id, nombre, empresa_nombre, bono_envio, bono_modo FROM usuarios WHERE tipo_cuenta = 'empresa' AND rol = 'cliente' ORDER BY COALESCE(empresa_nombre, nombre)").all()
+  const lista = db.prepare("SELECT id, nombre, empresa_nombre, bono_envio, bono_modo, bono_activo FROM usuarios WHERE tipo_cuenta = 'empresa' AND rol = 'cliente' ORDER BY COALESCE(empresa_nombre, nombre)").all()
     .map((u) => { const r = resumenBono(u.id); return { id: u.id, empresa: u.empresa_nombre || u.nombre, propio: u.bono_envio, ...r, liquidaciones: undefined }; });
   return { general: Number(getAjustes().bono_empresa) || 0, tope: TOPE_BONO, empresas: lista,
     pendiente: redondear(lista.reduce((t, x) => t + x.pendiente, 0)) };
@@ -3907,7 +3909,7 @@ ruta('PUT', '/api/admin/bonos/:id', ({ req, params, body }) => {
     if (!(propio >= 0 && propio <= TOPE_BONO)) falla(400, `El bono por envío va de Q0 a Q${TOPE_BONO}.`);
   }
   const modo = body.bono_modo === 'descuento' ? 'descuento' : 'pago';
-  db.prepare('UPDATE usuarios SET bono_envio = ?, bono_modo = ? WHERE id = ?').run(propio, modo, u.id);
+  db.prepare('UPDATE usuarios SET bono_envio = ?, bono_modo = ?, bono_activo = ? WHERE id = ?').run(propio, modo, body.bono_activo ? 1 : 0, u.id);
   return { ok: true, ...resumenBono(u.id) };
 });
 ruta('POST', '/api/admin/bonos/:id/liquidar', ({ req, params, body }) => {

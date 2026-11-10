@@ -546,7 +546,7 @@ db.exec(`
 agregarColumnas('pedidos_empresa', [['carpeta_id', 'INTEGER'], ['no_puede_nota', 'TEXT']]);
 // Bono para empresas: una parte de lo que gana Vaelo por cada envío entregado. La administración decide el monto
 // (general o por empresa) y si se le paga o se le descuenta, según lo que acuerden.
-agregarColumnas('usuarios', [['bono_envio', 'REAL'], ['bono_modo', "TEXT NOT NULL DEFAULT 'pago'"]]);
+agregarColumnas('usuarios', [['bono_envio', 'REAL'], ['bono_modo', "TEXT NOT NULL DEFAULT 'pago'"], ['bono_activo', 'INTEGER NOT NULL DEFAULT 0']]);
 db.exec(`
   CREATE TABLE IF NOT EXISTS bonos_empresa (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

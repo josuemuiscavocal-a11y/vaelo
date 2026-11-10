@@ -198,7 +198,7 @@ const ESTADO_ENVIO_EMP = { pendiente: 'Por recoger', recogido: 'Recogido', en_ca
 async function panelEmpresa(caja) {
   const yo = (await api('/api/yo')).usuario;
   let bono = null; try { bono = await api('/api/empresa/bono'); } catch { /* sin bono */ }
-  const conBono = bono && (bono.por_envio > 0 || bono.total > 0);
+  const conBono = !!(bono && bono.activo);
   const pedida = new URLSearchParams(location.search).get('vista');
   let vista = pedida === 'analitica' ? 'analitica' : pedida === 'ganancias' && conBono ? 'ganancias' : 'pedidos';
   const cuerpo = el('div');
