@@ -1115,6 +1115,57 @@ ruta('POST', '/api/piloto/ubicacion', ({ req, body }) => {
   return { ok: true };
 });
 
+// Ver ruta antes de aceptar: piloto → recoger → entregar (o todas las paradas de una ruta de empresa), por calles
+const cacheTrazos = new Map();
+async function trazarRuta(puntos) {
+  const coords = puntos.map((x) => `${x.lng.toFixed(5)},${x.lat.toFixed(5)}`).join(';');
+  if (cacheTrazos.has(coords)) return cacheTrazos.get(coords);
+  const leer = (r) => r && r.routes && r.routes[0] ? { linea: r.routes[0].geometry.coordinates.map(([ln, la]) => [la, ln]),
+    tramos: r.routes[0].legs.map((l) => ({ km: Math.round(l.distance / 100) / 10, min: Math.max(1, Math.round(l.duration / 60)) })) } : null;
+  let out = null, fuente = 'calle';
+  const token = getAjustes().mapbox_token || process.env.MAPBOX_TOKEN || '';
+  if (token && puntos.length <= 25) {
+    try {
+      const r = await fetch(`https://api.mapbox.com/directions/v5/mapbox/driving-traffic/${coords}?geometries=geojson&overview=full&language=es&access_token=${encodeURIComponent(token)}`, { signal: AbortSignal.timeout(7000) });
+      out = leer(await r.json());
+    } catch { /* se intenta con OSRM */ }
+  }
+  if (!out && OSRM_URL) {
+    try {
+      const r = await fetch(`${OSRM_URL}/route/v1/driving/${coords}?geometries=geojson&overview=full`, { signal: AbortSignal.timeout(7000), headers: { 'User-Agent': 'Vaelo-Mensajeria/1.0' } });
+      const j = await r.json(); if (j.code === 'Ok') out = leer(j);
+    } catch { /* línea recta */ }
+  }
+  if (!out) {
+    fuente = 'estimado';
+    out = { linea: puntos.map((x) => [x.lat, x.lng]), tramos: puntos.slice(1).map((x, i) => { const km = Math.round(distanciaRecta(puntos[i], x) * 1.4 * 10) / 10; return { km, min: Math.max(1, Math.round(km * 3)) }; }) };
+  }
+  out = { ...out, fuente };
+  if (cacheTrazos.size > 500) cacheTrazos.clear();
+  cacheTrazos.set(coords, out);
+  return out;
+}
+ruta('GET', '/api/piloto/envios/:id/ruta', async ({ req, params, query }) => {
+  const p = requierePiloto(req);
+  const e = db.prepare('SELECT * FROM envios WHERE id = ? AND mensajero_id = ?').get(Number(params.id), p.id);
+  if (!e) falla(404, 'Ese envío ya no está asignado a ti.');
+  const paradas = [];
+  const yo = coordenada(query.get('lat'), query.get('lng'));
+  if (yo) paradas.push({ tipo: 'yo', etiqueta: 'Tú', lat: yo.lat, lng: yo.lng });
+  const lista = e.grupo ? db.prepare("SELECT * FROM envios WHERE grupo = ? AND mensajero_id = ? AND estado IN ('pendiente','recogido','en_camino') ORDER BY COALESCE(parada, 999), id").all(e.grupo, p.id) : [e];
+  const recoger = lista.find((x) => x.estado === 'pendiente' && x.origen_lat != null);
+  if (recoger) paradas.push({ tipo: 'recoger', etiqueta: 'A', nombre: 'Recoger', zona: recoger.origen_zona, lat: recoger.origen_lat, lng: recoger.origen_lng });
+  const sinUbicacion = [];
+  lista.forEach((x, i) => {
+    const n = lista.length > 1 ? String(x.parada || i + 1) : 'B';
+    if (x.destino_lat != null) paradas.push({ tipo: 'entregar', etiqueta: n, nombre: lista.length > 1 ? `Entrega ${n}` : 'Entregar', zona: x.destino_zona, lat: x.destino_lat, lng: x.destino_lng });
+    else sinUbicacion.push(`${lista.length > 1 ? 'Entrega ' + n : 'Entrega'} en ${x.destino_zona}: todavía sin ubicación exacta`);
+  });
+  if (paradas.length < 2) return { paradas, tramos: [], linea: paradas.map((x) => [x.lat, x.lng]), sin_ubicacion: sinUbicacion, fuente: 'estimado' };
+  const t = await trazarRuta(paradas.slice(0, 25));
+  return { paradas, ...t, sin_ubicacion: sinUbicacion };
+});
+
 ruta('GET', '/api/piloto/envios', ({ req }) => {
   const p = requierePiloto(req);
   const filas = db.prepare(`${SQL_ENVIO} WHERE e.mensajero_id = ?
@@ -2068,7 +2119,27 @@ function guardarPosicionOrigen(id, c, precision) {
 }
 // Precio con los puntos reales: al conocerse las dos ubicaciones se confirma (tarifa fija solo si caen dentro de las zonas
 // cubiertas; si no, por km). Si después la recogida o la entrega se mueven más de 1 km, se vuelve a calcular.
+// Zona real: con las zonas dibujadas, el nombre de la zona se corrige con la ubicación que comparten (recogida mientras no se
+// recoja; entrega siempre). Así el piloto ve la zona verdadera aunque el cliente haya elegido otra.
+function corregirZonas(id) {
+  const formas = zonasConForma();
+  if (!formas.length) return;
+  const e = db.prepare('SELECT id, estado, origen_zona, destino_zona, origen_lat, origen_lng, destino_lat, destino_lng FROM envios WHERE id = ?').get(id);
+  if (!e || !ESTADOS_ACTIVOS.includes(e.estado)) return;
+  const real = (lat, lng) => formas.find((z) => dentroDe({ lat, lng }, z.puntos))?.nombre || OTRA_ZONA;
+  const cambios = [];
+  if (e.estado === 'pendiente' && e.origen_lat != null) {
+    const z = real(e.origen_lat, e.origen_lng);
+    if (z !== e.origen_zona) { db.prepare('UPDATE envios SET origen_zona = ? WHERE id = ?').run(z, id); cambios.push(`recogida: eligieron ${e.origen_zona}, la ubicación real es ${z}`); }
+  }
+  if (e.destino_lat != null) {
+    const z = real(e.destino_lat, e.destino_lng);
+    if (z !== e.destino_zona) { db.prepare('UPDATE envios SET destino_zona = ? WHERE id = ?').run(z, id); cambios.push(`entrega: eligieron ${e.destino_zona}, la ubicación real es ${z}`); }
+  }
+  if (cambios.length) db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(id, e.estado, 'Zona corregida con la ubicación real (' + cambios.join('; ') + ')');
+}
 async function revisarPrecio(id) {
+  corregirZonas(id);
   const e = db.prepare('SELECT * FROM envios WHERE id = ?').get(id);
   // Los fletes tienen el precio que acordó la oficina: no se recalcula
   if (!e || e.flete || !['pendiente', 'recogido', 'en_camino'].includes(e.estado) || e.origen_lat == null || e.destino_lat == null) return;

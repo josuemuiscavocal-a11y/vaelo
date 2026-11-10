@@ -10,6 +10,7 @@
   <link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
   <link rel="manifest" href="/manifest-piloto.webmanifest">
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/vendor/maplibre/maplibre-gl.css?v=4.7.1">
   <link rel="stylesheet" href="/css/styles.css?v=20261109b">
 </head>
 <body class="modo-piloto app-piloto">
@@ -21,6 +22,7 @@
   <button class="boton-emergencia" type="button" id="boton-emergencia" hidden>Emergencia</button>
   <dialog id="dlg-p"><div class="dialogo" id="dlg-p-cuerpo"></div></dialog>
 
+  <script src="/vendor/maplibre/maplibre-gl.js?v=4.7.1"></script>
   <script src="/js/comun.js?v=20261109c"></script>
   <script src="/js/qr.js?v=1"></script>
   <script>
@@ -654,6 +656,7 @@
           e0.programado_para ? el('div', { class: 'mensaje aviso', text: 'Recoger el ' + fechaProgramada(e0.programado_para) }) : null,
           el('div', { class: 'parada' }, el('span', { text: 'Recoger en' }), [e0.origen_zona, e0.origen_direccion].filter(Boolean).join('. '), km != null ? el('div', { class: 'pista', text: `A ${km.toFixed(1)} km de ti` }) : null),
           paradasResumen(), notaCobro,
+          botonVerRuta(e0, `Ruta de ${e0.empresa}`),
           el('div', { class: 'acciones-aceptar' },
             el('button', { class: 'boton cinta accion-principal', type: 'button', text: 'Aceptar ruta', onclick: async (ev) => {
               const b = ev.target; b.disabled = true; b.textContent = 'Revisando tu ubicación…'; ocupado++;
@@ -735,6 +738,7 @@
           fragil,
           el('div', { class: 'parada' }, el('span', { text: 'A. Recoger en' }), [e.origen_zona, e.origen_direccion].filter(Boolean).join('. '), km != null ? el('div', { class: 'pista', text: `A ${km.toFixed(1)} km de ti` }) : null),
           el('div', { class: 'parada b' }, el('span', { text: 'B. Entregar en' }), `${e.destino_zona}`),
+          botonVerRuta(e, 'Nuevo envío ' + e.guia),
           resumen, cobro,
           el('div', { class: 'acciones-aceptar' },
             el('button', { class: 'boton cinta accion-principal', type: 'button', text: 'Aceptar envío', onclick: async (ev) => {
@@ -912,6 +916,58 @@
 
     // ---------- Ruta sugerida con varios paquetes ----------
     // Ordena las paradas (recoger antes de entregar) yendo siempre a la más cercana, y arma la ruta para Google Maps
+    // ---------- Ver ruta antes de aceptar: todo el recorrido dibujado por calles, con km y minutos ----------
+    function botonVerRuta(e, titulo) {
+      return el('button', { class: 'boton-ver-ruta', type: 'button', onclick: () => verRuta(e, titulo) },
+        icono('ruta'), el('span', {}, el('strong', { text: 'Ver ruta' }), el('small', { text: 'Todo el recorrido en el mapa, con kilómetros y tiempo' })));
+    }
+    async function verRuta(e, titulo) {
+      ocupado++;
+      const caja = el('div', { class: 'ver-ruta-mapa' });
+      const info = el('div', { class: 'ver-ruta-info' }, el('p', { class: 'pista', text: 'Calculando la ruta…' }));
+      const cerrar = () => $('dlg-p').close();
+      poner($('dlg-p-cuerpo'),
+        el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: cerrar }),
+        el('h2', { style: 'font-size:1.3rem;margin-right:2rem', text: titulo }), caja, info);
+      $('dlg-p').classList.add('dlg-ruta');
+      $('dlg-p').addEventListener('close', () => { $('dlg-p').classList.remove('dlg-ruta'); ocupado = Math.max(0, ocupado - 1); }, { once: true });
+      $('dlg-p').showModal();
+      let pos = ultimaPos;
+      if (!pos) { try { pos = await posicionFresca(); } catch { pos = null; } }
+      let r;
+      try { r = await api(`/api/piloto/envios/${e.id}/ruta${pos && pos.lat != null ? `?lat=${pos.lat}&lng=${pos.lng}` : ''}`); }
+      catch (err) { poner(info, el('div', { class: 'mensaje error', text: err.message })); return; }
+      const mapa = crearMapa(caja, { cooperativo: false });
+      if (mapa) {
+        mapa.linea(r.linea, { color: '#1c3faa', ancho: 5, opacidad: 0.9, punteada: r.fuente === 'estimado' });
+        for (const x of r.paradas) {
+          if (x.tipo === 'yo') mapa.marcador(x.lat, x.lng, { html: htmlPiloto(), ancla: 'center', popup: 'Tú estás aquí' });
+          else mapa.marcador(x.lat, x.lng, { html: htmlPin(x.etiqueta, x.tipo === 'recoger' ? 'recogida' : 'entrega'), popup: `${x.nombre} · ${x.zona || ''}` });
+        }
+        mapa.encuadrar(r.paradas.map((x) => [x.lat, x.lng]), { margen: 40 });
+      }
+      const nombreDe = (x) => x.tipo === 'yo' ? 'Tú' : `${x.etiqueta}. ${x.nombre}`;
+      const totalKm = r.tramos.reduce((t, x) => t + x.km, 0), totalMin = r.tramos.reduce((t, x) => t + x.min, 0);
+      const horas = (m) => m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`;
+      const pts = r.paradas.filter((x) => x.tipo !== 'yo');
+      const ultimo = pts[pts.length - 1], primero = pts[0];
+      const google = ultimo ? `https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=${ultimo.lat},${ultimo.lng}` +
+        (pts.length > 1 ? '&waypoints=' + encodeURIComponent(pts.slice(0, -1).map((x) => `${x.lat},${x.lng}`).join('|')) : '') : null;
+      poner(info,
+        r.tramos.length ? el('div', { class: 'ver-ruta-total' },
+          el('div', {}, el('span', { text: 'Recorrido total' }), el('strong', { text: `${totalKm.toFixed(1)} km` })),
+          el('div', {}, el('span', { text: 'Tiempo aproximado' }), el('strong', { text: horas(totalMin) }))) : null,
+        r.tramos.length ? el('ol', { class: 'ver-ruta-tramos' }, r.tramos.map((t, i) => el('li', {},
+          el('span', { text: `${nombreDe(r.paradas[i])} → ${nombreDe(r.paradas[i + 1])}` }), el('strong', { text: `${t.km.toFixed(1)} km · ${t.min} min` })))) : null,
+        !pos ? el('p', { class: 'pista', text: 'No tenemos tu ubicación: el recorrido empieza en el punto de recogida.' }) : null,
+        ...(r.sin_ubicacion || []).map((t) => el('p', { class: 'pista', text: t + '. El tramo final se conoce cuando quien recibe comparta su ubicación.' })),
+        r.fuente === 'estimado' ? el('p', { class: 'pista', text: 'Distancias aproximadas: no se pudo calcular por calles en este momento.' }) : null,
+        el('div', { class: 'ver-ruta-botones' },
+          google ? el('a', { class: 'boton borde chico', href: google, target: '_blank', rel: 'noopener', text: 'Ver ruta completa en Google Maps' }) : null,
+          primero ? el('a', { class: 'boton borde chico', href: `https://waze.com/ul?ll=${primero.lat},${primero.lng}&navigate=yes`, target: '_blank', rel: 'noopener', text: 'Ver recogida en Waze' }) : null,
+          el('button', { class: 'boton chico', type: 'button', text: 'Volver para aceptar o no', onclick: cerrar })));
+    }
+
     function rutaSugerida() {
       const activos = envios.filter(e => e.asignacion === 'aceptado' && !e.pedido_id && ['pendiente', 'recogido', 'en_camino', 'devolviendo'].includes(e.estado));
       if (activos.length < 2 || !ultimaPos) return '';

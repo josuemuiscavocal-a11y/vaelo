@@ -692,6 +692,14 @@ test('zona preferencial mal elegida: al compartir quien recibe su ubicación rea
   assert.equal((await cliente()('POST', `/api/recibe/${tok}/confirmar`, { nombre: 'Marta López', lat: 14.55, lng: -90.70 })).status, 200);
   const f = fila(e.j.id);
   assert.equal(f.precio, 45); assert.equal(f.tipo_tarifa, 'km');
+  assert.equal(f.destino_zona, 'Otra zona o municipio', 'el nombre de la zona se corrige con la ubicación real');
+  assert.ok(db.prepare("SELECT 1 FROM eventos WHERE envio_id = ? AND nota LIKE 'Zona corregida%eligieron Zona 1%'").get(e.j.id));
+  // El piloto ve la ruta completa (él → recoger → entregar) antes de aceptar
+  db.prepare("UPDATE envios SET mensajero_id = ?, asignacion = 'por_aceptar' WHERE id = ?").run(pilotoId, e.j.id);
+  const r = await piloto('GET', `/api/piloto/envios/${e.j.id}/ruta?lat=14.60&lng=-90.52`);
+  assert.equal(r.status, 200, JSON.stringify(r.j));
+  assert.deepEqual(r.j.paradas.map((x) => x.tipo), ['yo', 'recoger', 'entregar']);
+  assert.equal(r.j.tramos.length, 2); assert.ok(r.j.linea.length >= 3); assert.ok(r.j.tramos.every((t) => t.km > 0 && t.min > 0));
   const ev = db.prepare('SELECT nota FROM eventos WHERE envio_id = ? ORDER BY id DESC LIMIT 1').get(e.j.id).nota;
   db.prepare("UPDATE envios SET estado = 'cancelado' WHERE id = ?").run(e.j.id);
   await admin('PUT', `/api/admin/zonas/${z}`, { poligono: null });

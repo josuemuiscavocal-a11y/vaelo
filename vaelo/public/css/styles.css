@@ -1369,3 +1369,21 @@ body.app-piloto main { padding-bottom: 9rem; }
 .contacto-boton.llamar { background: #fff; color: var(--azul-hondo); border-color: var(--azul-hondo); }
 .contacto-boton.whats { background: #fff; color: #128c4a; border-color: #25a35a; }
 .contacto-boton:active { transform: scale(.98); }
+
+/* Modo mensajero: ver ruta antes de aceptar */
+.boton-ver-ruta { display: flex; align-items: center; gap: .7rem; width: 100%; text-align: left; background: #eef2fd; border: 1.5px solid #c3cff3; color: var(--azul-hondo); border-radius: 12px; padding: .65rem .85rem; margin: .6rem 0; font: inherit; cursor: pointer; }
+.boton-ver-ruta svg { width: 26px; height: 26px; flex: none; }
+.boton-ver-ruta span { display: flex; flex-direction: column; }
+.boton-ver-ruta strong { font-size: 1rem; }
+.boton-ver-ruta small { color: #5b6478; font-size: .8rem; }
+dialog.dlg-ruta { width: min(680px, 96vw); max-width: 96vw; }
+dialog.dlg-ruta .dialogo { padding: 1rem; }
+.ver-ruta-mapa { height: min(52vh, 420px); border-radius: 12px; overflow: hidden; margin: .5rem 0 .8rem; background: #eef0f5; }
+.ver-ruta-total { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; margin-bottom: .6rem; }
+.ver-ruta-total div { background: var(--azul-hondo); color: #fff; border-radius: 10px; padding: .5rem .75rem; }
+.ver-ruta-total span { display: block; font-size: .75rem; color: #c9d3f5; }
+.ver-ruta-total strong { font-size: 1.35rem; font-stretch: 80%; }
+.ver-ruta-tramos { list-style: none; margin: 0 0 .6rem; padding: 0; display: grid; gap: .3rem; }
+.ver-ruta-tramos li { display: flex; justify-content: space-between; gap: .6rem; font-size: .9rem; border-bottom: 1px dashed #d5dbe8; padding: .3rem 0; }
+.ver-ruta-tramos strong { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ver-ruta-botones { display: grid; gap: .45rem; margin-top: .6rem; }
