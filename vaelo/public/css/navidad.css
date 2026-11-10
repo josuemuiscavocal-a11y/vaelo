@@ -1,0 +1,42 @@
+/* Tema de Navidad: solo se carga cuando la administración lo activa (Tarifas y ajustes). */
+.navidad { --nav-rojo: #c8102e; --nav-verde: #1b7a3e; --nav-oro: #f2c14e; }
+
+/* Gorrito sobre el logo */
+.navidad .marca { position: relative; }
+.navidad .marca::before { content: ''; position: absolute; left: -12px; top: -15px; width: 32px; height: 28px; transform: rotate(-22deg); pointer-events: none; z-index: 2;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 34'%3E%3Cpath d='M5 26C9 12 17 4 27 3c5 0 8 4 9 9l-4 1c-2-4-4-5-7-4-5 3-8 9-9 17z' fill='%23c8102e'/%3E%3Crect x='2' y='24' width='22' height='8' rx='4' fill='%23fff'/%3E%3Ccircle cx='34' cy='14' r='4.5' fill='%23fff'/%3E%3C/svg%3E") center/contain no-repeat;
+  filter: drop-shadow(0 1px 1px rgba(0,0,0,.25)); }
+
+/* Guirnalda de luces bajo la barra de arriba */
+.navidad header.barra { position: relative; }
+.navidad header.barra::after, .navidad .panel-cabecera::after {
+  content: ''; position: absolute; left: 0; right: 0; bottom: -9px; height: 14px; pointer-events: none; z-index: 5;
+  background:
+    radial-gradient(circle at 12px 9px, var(--nav-rojo) 3.5px, transparent 4.5px) 0 0 / 96px 14px repeat-x,
+    radial-gradient(circle at 36px 10px, var(--nav-oro) 3.5px, transparent 4.5px) 0 0 / 96px 14px repeat-x,
+    radial-gradient(circle at 60px 9px, var(--nav-verde) 3.5px, transparent 4.5px) 0 0 / 96px 14px repeat-x,
+    radial-gradient(circle at 84px 10px, #4aa3ff 3.5px, transparent 4.5px) 0 0 / 96px 14px repeat-x,
+    radial-gradient(ellipse 52px 7px at 48px 0, transparent 5px, rgba(30,40,30,.55) 6px, transparent 7px) 0 0 / 48px 14px repeat-x;
+  animation: nav-luces 1.6s steps(2) infinite; }
+@keyframes nav-luces { 50% { filter: brightness(1.45) saturate(1.3); } }
+
+/* Toques de fiesta */
+.navidad .boton.cinta { box-shadow: inset 0 -3px 0 rgba(200, 16, 46, .35); }
+.navidad .pestanas [aria-selected="true"], .navidad [role=tab][aria-selected="true"] { box-shadow: inset 0 -3px 0 var(--nav-rojo); }
+.navidad fieldset > legend::after { content: ' ✦'; color: var(--nav-rojo); font-size: .7em; vertical-align: middle; }
+
+/* Franja de saludo (solo en la página de inicio) */
+.nav-saludo { display: flex; align-items: center; justify-content: center; gap: .6rem; padding: .5rem 1rem; font-size: .9rem; font-weight: 600; color: #fff; text-align: center;
+  background: repeating-linear-gradient(-45deg, var(--nav-rojo) 0 14px, #b00d27 14px 28px); }
+.nav-saludo button { background: none; border: 0; color: #fff; font-size: 1.1rem; cursor: pointer; opacity: .8; padding: 0 .2rem; }
+
+/* Nieve */
+.nav-nieve { position: fixed; inset: 0; pointer-events: none; z-index: 9990; }
+.nav-boton-nieve { position: fixed; left: 12px; bottom: 12px; z-index: 9991; width: 38px; height: 38px; border-radius: 50%; border: 1px solid rgba(0,0,0,.08);
+  background: rgba(255,255,255,.92); box-shadow: 0 4px 14px rgba(0,0,0,.15); font-size: 1.05rem; cursor: pointer; display: grid; place-items: center; }
+.nav-boton-nieve[aria-pressed="false"] { opacity: .55; }
+@media print { .nav-nieve, .nav-boton-nieve, .nav-saludo { display: none !important; } .navidad .marca::before, .navidad header.barra::after { display: none; } }
+@media (prefers-reduced-motion: reduce) { .navidad header.barra::after, .navidad .panel-cabecera::after { animation: none; } }
+/* Que el botón de nieve no tape nada: en el panel va a la derecha y en el celular sube sobre la barra de enviar */
+body:has(.panel-cabecera) .nav-boton-nieve { left: auto; right: 14px; }
+@media (max-width: 700px) { body:has(#barra-enviar) .nav-boton-nieve, body:has(.barra-inferior) .nav-boton-nieve { bottom: 88px; } }

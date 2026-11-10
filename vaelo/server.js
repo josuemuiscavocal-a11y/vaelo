@@ -4440,6 +4440,7 @@ ruta('PUT', '/api/admin/ajustes', ({ req, body }) => {
     up.run('recargo_fragil', String(redondear(n)));
   }
   if (body.exigir_receptor !== undefined) up.run('exigir_receptor', body.exigir_receptor === true || body.exigir_receptor === '1' ? '1' : '0');
+  if (body.tema_navidad !== undefined) up.run('tema_navidad', body.tema_navidad === true || body.tema_navidad === '1' ? '1' : '0');
   if (body.auto_asignar !== undefined) up.run('auto_asignar', body.auto_asignar === true || body.auto_asignar === '1' ? '1' : '0');
   if (body.segundos_aceptar !== undefined) {
     const n = numero(body.segundos_aceptar);
@@ -4506,6 +4507,12 @@ const VERSION_ARCHIVOS = Date.now().toString(36);
 const MAPBOX_VERSION = 'v3.8.0';
 function conVersion(html) {
   let out = html.replace(/(\/js\/(?:comun|empresa|qr)\.js|\/css\/styles\.css)\?v=[a-z0-9]+/g, `$1?v=${VERSION_ARCHIVOS}`);
+  // Tema de Navidad: se activa o desactiva en el panel (Tarifas y ajustes) y aparece en todas las páginas
+  if (getAjustes().tema_navidad === '1') {
+    out = out.replace(/<html lang="es"(?: class="([^"]*)")?>/, (m, c) => `<html lang="es" class="${c ? c + ' ' : ''}navidad">`)
+      .replace('</head>', `  <link rel="stylesheet" href="/css/navidad.css?v=${VERSION_ARCHIVOS}">\n</head>`)
+      .replace('</body>', `  <script src="/js/navidad.js?v=${VERSION_ARCHIVOS}" defer></script>\n</body>`);
+  }
   const token = getAjustes().mapbox_token || process.env.MAPBOX_TOKEN || '';
   if (token && /^pk\.[A-Za-z0-9._-]+$/.test(token) && out.includes('/vendor/maplibre/maplibre-gl.js')) {
     out = out.replace(/(<link rel="stylesheet" href="\/vendor\/maplibre\/maplibre-gl\.css[^"]*">)/,
