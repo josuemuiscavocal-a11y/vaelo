@@ -901,7 +901,7 @@
     function dialogoEntrega(e) {
       ocupado++;
       const msg = el('div', { class: 'mensaje', role: 'alert' });
-      const codigo = el('input', { id: 'en-codigo', inputmode: 'numeric', maxlength: 4, autocomplete: 'off', class: 'entrada-codigo', placeholder: '0000' });
+      const codigo = el('input', { id: 'en-codigo', inputmode: 'numeric', pattern: '[0-9]*', maxlength: 4, autocomplete: 'one-time-code', class: 'entrada-codigo', placeholder: '0000', oninput: (ev) => { ev.target.value = ev.target.value.replace(/\D/g, '').slice(0, 4); } });
       const recibio = el('input', { id: 'en-recibio', maxlength: 100, value: e.destino_nombre, placeholder: 'Nombre de quien recibe' });
       const foto = el('input', { id: 'en-foto', type: 'file', accept: 'image/*', capture: 'environment' });
       const vista = el('img', { class: 'vista-previa', alt: '', hidden: true });

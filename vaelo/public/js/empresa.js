@@ -147,6 +147,7 @@ async function panelPedidos(caja, yo, abrirId) {
   const tarjeta = (c) => el('button', { class: 'carpeta-tarjeta' + (c.confirmados >= c.minimo && c.estado === 'abierta' ? ' lista' : ''), type: 'button', onclick: () => abrir(c.id) },
     el('span', { class: 'carpeta-icono', 'aria-hidden': 'true' }, icono('carpeta')),
     el('span', { class: 'carpeta-datos' }, el('strong', { text: c.nombre }), el('small', { text: `Entrega: ${diaEmp(c.dia)}` }),
+      c.estado === 'abierta' && c.dia < r.hoy ? el('small', { class: 'error-texto', text: 'El día ya pasó: abre la carpeta y cambia la fecha.' }) : null,
       c.estado === 'abierta' ? progresoCarpeta(c) : el('small', { class: 'carpeta-lote' }, el('b', { text: { nuevo: 'Vaelo la está preparando', en_ruta: 'En reparto', terminado: 'Terminada' }[c.lote?.estado] || 'Enviada' }),
         c.lote ? ` · ${c.lote.entregados} de ${c.total} entregados${c.lote.en_sede ? ` · ${c.lote.en_sede} en la sede` : ''}` : ''),
       c.estado === 'abierta' ? el('small', { text: [`${c.total} envío${c.total === 1 ? '' : 's'}`, c.esperando ? `${c.esperando} esperando a su cliente` : '', c.no_puede ? `${c.no_puede} no pueden ese día` : ''].filter(Boolean).join(' · ') }) : null),
@@ -256,6 +257,7 @@ async function vistaCarpeta(caja, yo, id) {
   const estadoCaja = abierta
     ? el('section', { class: 'bloque carpeta-estado' + (listo ? ' lista' : '') },
       el('div', {}, el('strong', { class: 'carpeta-cifra', text: `${c.confirmados}` }), el('span', { text: ` de ${c.minimo} confirmados` }), progresoCarpeta(c),
+        c.dia < r.hoy ? el('small', { class: 'error-texto', text: 'El día de entrega ya pasó. Toca «Cambiar día o nombre» y tus clientes confirman la nueva fecha.' }) : null,
         !r.punto ? el('small', { class: 'error-texto', text: 'Marca primero dónde recoge el piloto tus paquetes (en Tus carpetas).' }) : null,
         c.sin_foto ? el('small', { text: `Falta la foto de ${c.sin_foto} paquete(s).` }) : null),
       listo ? el('button', { class: 'boton cinta boton-grande', type: 'button', text: 'Enviar a Vaelo', onclick: () => dialogoEnviar(c, r, recargar) })

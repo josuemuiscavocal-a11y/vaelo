@@ -1070,6 +1070,8 @@ dialog.escaner video { width: 100%; border-radius: 10px; background: #000; aspec
 .lote-tarjeta > div > span { justify-self: start; }
 #empresas-solicitudes[hidden], #empresas-activas[hidden] { display: none; }
 
+[hidden] { display: none !important; }
+
 /* ---------- Carpetas de envíos (empresas) ---------- */
 .carpetas { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: .75rem; margin-top: .75rem; }
 .carpeta-tarjeta { display: grid; grid-template-columns: auto 1fr auto; gap: .85rem; align-items: center; text-align: left; font: inherit; color: inherit;

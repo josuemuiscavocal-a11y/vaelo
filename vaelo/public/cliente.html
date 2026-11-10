@@ -573,7 +573,7 @@
     $('dlg').addEventListener('close', () => { clearInterval(refresco); refresco = null; });
 
     function verGuia(e) {
-      $('dlg-cuerpo').replaceChildren(
+      poner($('dlg-cuerpo'), 
         el('button', { class: 'cerrar no-imprimir', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: cerrarDialogo }),
         el('h2', { class: 'no-imprimir', style: 'font-size:1.3rem', text: 'Guía de envío' }),
         el('p', { class: 'no-imprimir', style: 'color:var(--suave)', text: 'Imprímela y pégala en el paquete, o anota el número de guía en la caja.' }),
@@ -592,7 +592,7 @@
       if (datos.whatsapp_pagos) whatsappPagos = datos.whatsapp_pagos;
       const cajaMapa = el('div', { class: 'mapa alto' });
       const recargar = () => { verDetalle(id); cargarEnvios(); cargarCargos(); };
-      $('dlg-cuerpo').replaceChildren(
+      poner($('dlg-cuerpo'), 
         el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: cerrarDialogo }),
         el('h2', { style: 'font-size:1.4rem;margin-bottom:.3rem', text: e.guia }), chipEstado(e.estado),
         e.estado !== 'cancelado' ? barraPasos(e.estado) : null,
@@ -696,7 +696,7 @@
     ['destino_nombre', 'destino_telefono', 'peso'].forEach(k => $(k).addEventListener('input', () => { if (caja.length) pintarCaja(); }));
     // Después de enviar la caja: el enlace de cada quien recibe, listo para mandarlo por WhatsApp
     function enlacesCaja(envios, total) {
-      $('dlg-cuerpo').replaceChildren(
+      poner($('dlg-cuerpo'), 
         el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: cerrarDialogo }),
         el('h2', { text: `¡Listo! Pediste ${envios.length} envíos` }),
         el('p', { class: 'pista', text: `Total ${dinero(total)}. Ahora manda a cada persona su enlace: ahí comparte su ubicación y confirma sus datos para que el piloto le lleve el paquete.` }),
@@ -845,7 +845,7 @@
       $('vehiculos').addEventListener('change', actualizarPrecio);
       actualizarPrecio();
 
-      if (location.pathname === '/mi-cuenta') abrirTab('lista'); else cargarEnvios();
+      if (location.pathname === '/mi-cuenta') abrirTab(usuario.tipo_cuenta === 'empresa' && !new URLSearchParams(location.search).get('envio') ? 'empresa' : 'lista'); else cargarEnvios();
       // Desde un aviso del celular: abre ese envío
       const abrir = new URLSearchParams(location.search).get('envio');
       if (abrir) verDetalle(Number(abrir));

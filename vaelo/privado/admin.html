@@ -415,7 +415,7 @@
           el('td', {}, e.cliente_nombre, el('br'), sub(e.cliente_telefono)),
           el('td', {}, e.destino_nombre, el('br'), sub(e.destino_zona)),
           el('td', {}, e.vehiculo, el('br'), sub(e.peso + ' lb')),
-          el('td', {}, dinero(e.precio), el('br'), sub(e.tipo_tarifa === 'km' ? `${e.km} km` : 'Tarifa fija')),
+          el('td', {}, dinero(e.precio), el('br'), sub(e.tipo_tarifa === 'km' ? (e.km != null ? `${e.km} km` : 'Por km (falta ubicación)') : 'Tarifa fija')),
           el('td', {}, e.mensajero_nombre ? [e.mensajero_nombre.split(' ')[0], e.asignacion === 'por_aceptar' ? el('br') : null, e.asignacion === 'por_aceptar' ? el('span', { class: 'etiqueta-azul', text: 'Por aceptar' }) : null] : el('span', { class: 'estado pendiente', text: 'Sin asignar' })),
           el('td', {}, chipEstado(e.estado),
             e.estado === 'pendiente' && !e.receptor_listo ? [el('br'), el('span', { class: 'receptor-estado no', text: 'Faltan ubicaciones' })] : null,
