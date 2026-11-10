@@ -704,3 +704,20 @@ test('zona preferencial mal elegida: al compartir quien recibe su ubicación rea
   db.prepare("UPDATE envios SET estado = 'cancelado' WHERE id = ?").run(e.j.id);
   await admin('PUT', `/api/admin/zonas/${z}`, { poligono: null });
 });
+
+test('rutas de empresa: orden sin cruces y respetando mañana → cualquier hora → tarde', () => {
+  const { ordenarParadas } = require('../server');
+  const R = 6371, rad = (x) => (x * Math.PI) / 180;
+  const d = (a, b) => { const h = Math.sin(rad(b.lat - a.lat) / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(rad(b.lng - a.lng) / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(h)); };
+  const O = { lat: 14.6196, lng: -90.5156 };
+  const s = [['z1', 14.6407, -90.5133, 'manana'], ['z10', 14.5990, -90.5070], ['z15', 14.5925, -90.4890], ['z12', 14.5866, -90.5530], ['z7', 14.6380, -90.5520, 'tarde'], ['mixco', 14.6330, -90.6060],
+    ['z18', 14.6560, -90.4740], ['z9', 14.6046, -90.5150, 'manana'], ['z11', 14.6122, -90.5418], ['z16', 14.6100, -90.4720], ['z5', 14.6230, -90.4960], ['z13', 14.5830, -90.5290], ['z6', 14.6560, -90.5070, 'tarde'], ['z14', 14.5800, -90.5100]]
+    .map(([n, lat, lng, horario]) => ({ n, lat, lng, horario: horario || 'cualquiera' }));
+  const largo = (o) => { let t = 0, a = O; for (const p of o) { t += d(a, p); a = p; } return t; };
+  // El orden de antes ("la más cercana primero") hacía 62 km en línea recta con estos 14 puntos
+  const orden = ordenarParadas(O, s);
+  assert.equal(orden.length, 14);
+  assert.ok(largo(orden) < 55, `ruta de ${largo(orden).toFixed(1)} km`);
+  const r = { manana: 0, cualquiera: 1, tarde: 2 };
+  assert.ok(orden.every((p, i) => i === 0 || r[orden[i - 1].horario] <= r[p.horario]), 'mañana primero y tarde al final');
+});

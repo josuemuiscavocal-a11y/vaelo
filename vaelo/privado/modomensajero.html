@@ -652,11 +652,14 @@
       if (e0.asignacion === 'por_aceptar') {
         const km = kmHasta(e0.origen_lat, e0.origen_lng);
         return el('article', { class: 'entrega-tarjeta por-aceptar ruta' }, cab(el('span', { class: 'estado pendiente', text: 'Por aceptar' })),
-          el('div', { class: 'mensaje aviso', text: `${lista.length} entregas en orden. Al aceptar, aceptas toda la ruta.` }),
+          el('div', { class: 'ruta-oferta-resumen' },
+            el('div', {}, el('span', { text: 'Entregas' }), el('strong', { text: String(lista.length) })),
+            el('div', {}, el('span', { text: 'Ganas en total' }), el('strong', { text: dinero(lista.reduce((t, x) => t + (x.ganancia_piloto || 0), 0)) }))),
+          el('div', { class: 'mensaje aviso', text: `Van en orden, ya ordenadas por el camino más rápido. Al aceptar, aceptas toda la ruta.` }),
           e0.programado_para ? el('div', { class: 'mensaje aviso', text: 'Recoger el ' + fechaProgramada(e0.programado_para) }) : null,
           el('div', { class: 'parada' }, el('span', { text: 'Recoger en' }), [e0.origen_zona, e0.origen_direccion].filter(Boolean).join('. '), km != null ? el('div', { class: 'pista', text: `A ${km.toFixed(1)} km de ti` }) : null),
-          paradasResumen(), notaCobro,
           botonVerRuta(e0, `Ruta de ${e0.empresa}`),
+          paradasResumen(), notaCobro,
           el('div', { class: 'acciones-aceptar' },
             el('button', { class: 'boton cinta accion-principal', type: 'button', text: 'Aceptar ruta', onclick: async (ev) => {
               const b = ev.target; b.disabled = true; b.textContent = 'Revisando tu ubicación…'; ocupado++;
@@ -691,6 +694,11 @@
           } catch (err) { mostrarMensaje($('msg'), err.message); boton.disabled = false; boton.textContent = 'Ya recogí los paquetes marcados'; }
           ocupado--; cargarEnvios();
         } });
+        const todos = el('button', { class: 'boton borde chico', type: 'button', text: 'Marcar todos', onclick: () => {
+          const marcar = marcados.size < porRecoger.length;
+          for (const { c, x } of casillas.values()) { c.checked = marcar; if (marcar) marcados.add(x.id); else marcados.delete(x.id); }
+          todos.textContent = marcar ? 'Desmarcar todos' : 'Marcar todos'; actualizar();
+        } });
         const escanear = el('button', { class: 'boton borde', type: 'button', text: 'Escanear etiquetas', onclick: () => {
           ocupado++;
           escanearQR((texto) => {
@@ -705,13 +713,17 @@
           bloquePersona(e0, { titulo: 'Recoges en', nombre: e0.origen_quien === 'sede' ? 'Sede de Vaelo' : e0.empresa, telefono: e0.origen_telefono, chip: null,
             zona: e0.origen_zona, referencias: e0.origen_direccion, punto: 'origen', accion: 'Ir a recoger' }),
           notaCobro,
-          el('div', { class: 'recoger-lista' }, el('p', {}, 'Revisa cada paquete con su etiqueta: ', contador), ...filas),
+          el('div', { class: 'recoger-lista' }, el('div', { class: 'recoger-cab' }, el('p', {}, 'Revisa cada paquete con su etiqueta: ', contador), todos), ...filas),
           el('div', { style: 'display:grid;gap:.5rem' }, escanear, boton));
       }
       // 3) Entregas en orden: la siguiente abierta completa y el resto como lista
-      const actual = abiertos[0];
+      const actual = abiertos[0], siguiente = abiertos[1];
       return el('div', { class: 'ruta-en-curso' },
-        el('article', { class: 'entrega-tarjeta ruta' }, cab(el('span', { class: 'estado en_camino', text: abiertos.length ? `${lista.length - abiertos.length} de ${lista.length} hechas` : 'Ruta terminada' })), paradasResumen()),
+        el('article', { class: 'entrega-tarjeta ruta' }, cab(el('span', { class: 'estado en_camino', text: abiertos.length ? `${lista.length - abiertos.length} de ${lista.length} hechas` : 'Ruta terminada' })),
+          actual ? el('div', { class: 'ruta-progreso' }, el('div', { class: 'barra-progreso' }, el('span', { style: `width:${Math.round(((lista.length - abiertos.length) / lista.length) * 100)}%` })),
+            el('p', {}, el('strong', { text: `Ahora: parada ${actual.parada} · ${actual.destino_nombre}` }), siguiente ? el('small', { text: `Después: parada ${siguiente.parada} · ${siguiente.destino_nombre} (${siguiente.destino_zona})` }) : el('small', { text: 'Es la última entrega' }))) : null,
+          abiertos.length ? botonVerRuta(abiertos[0], `Lo que falta de la ruta de ${e0.empresa}`) : null,
+          el('details', { class: 'ruta-plegada' }, el('summary', { text: `Ver las ${lista.length} paradas` }), paradasResumen())),
         actual ? tarjeta(actual) : null,
         ...lista.filter(x => ['fallido', 'a_sede'].includes(x.estado)).map(tarjeta));
     }
@@ -799,7 +811,7 @@
         e.programado_para && recoger ? el('div', { class: 'mensaje aviso', text: 'Recoger el ' + fechaProgramada(e.programado_para) }) : '',
         e.ayudantes && !cerrado ? el('p', { class: 'flete-ayud-piloto', text: `Van ${e.ayudantes} ayudante${e.ayudantes === 1 ? '' : 's'} contigo para subir y bajar la carga` }) : null,
         fragil,
-        cerrado ? el('p', {}, 'Entregado a ', el('strong', { text: e.recibio || e.destino_nombre })) : [quienEntrega, quienRecibe],
+        cerrado ? el('p', {}, 'Entregado a ', el('strong', { text: e.recibio || e.destino_nombre })) : [e.pedido_id && !recoger ? null : quienEntrega, quienRecibe],
         resumen, cobro,
         cerrado ? el('p', { class: 'pista ok', text: 'Entregado ' + fecha(e.actualizado) })
           : el('div', {}, el('p', { class: 'pista', text: 'El estado se actualiza solo con tu GPS: al salir del punto de recogida pasa a "En camino".' }),

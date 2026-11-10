@@ -3488,21 +3488,87 @@ const pedidoDeEmpresa = (u, id) => db.prepare('SELECT * FROM pedidos_empresa WHE
 const editable = (p) => { if (!['pendiente', 'confirmado', 'vencido', 'no_puede'].includes(p.estado) || p.lote_id) falla(400, 'Este pedido ya se envió a Vaelo y no se puede cambiar.'); };
 const carpetaDe = (p) => (p.carpeta_id ? db.prepare('SELECT * FROM carpetas_empresa WHERE id = ?').get(p.carpeta_id) : null);
 
-// ---------- Rutas: la entrega más cercana primero, respetando el horario del cliente ----------
+// ---------- Rutas: el recorrido más corto, respetando el horario del cliente (mañana → cualquiera → tarde) ----------
+// 1) Se arma con "la más cercana primero". 2) Se mejora quitando cruces (2-opt) y moviendo paradas sueltas a donde
+// queden mejor (or-opt). Con matriz de tiempos reales por calle (Mapbox u OSRM) se ordena por minutos; si no, por distancia.
 const ORDEN_HORARIO = ['manana', 'cualquiera', 'tarde'];
-function ordenarParadas(origen, pedidos) {
-  let actual = origen;
-  const out = [];
-  for (const h of ORDEN_HORARIO) {
-    const resto = pedidos.filter((p) => (HORARIOS[p.horario] ? p.horario : 'cualquiera') === h);
+const rangoHorario = (p) => ORDEN_HORARIO.indexOf(HORARIOS[p.horario] ? p.horario : 'cualquiera');
+function ordenarParadas(origen, pedidos, matriz = null) {
+  const n = pedidos.length;
+  if (n <= 1) return [...pedidos];
+  // Índices: 0 = punto de recogida, i + 1 = pedidos[i]
+  const pts = [origen, ...pedidos];
+  const costo = matriz ? (a, b) => matriz[a][b] : (a, b) => distanciaRecta(pts[a], pts[b]);
+  const rango = [-1, ...pedidos.map(rangoHorario)];
+  // Vecino más cercano por bloques de horario
+  let orden = [], actual = 0;
+  for (let h = 0; h < ORDEN_HORARIO.length; h++) {
+    const resto = pedidos.map((_, i) => i + 1).filter((i) => rango[i] === h);
     while (resto.length) {
       let mejor = 0, menor = Infinity;
-      resto.forEach((p, i) => { const d = distanciaRecta(actual, p); if (d < menor) { menor = d; mejor = i; } });
-      const [p] = resto.splice(mejor, 1);
-      out.push(p); actual = p;
+      resto.forEach((i, k) => { const d = costo(actual, i); if (d < menor) { menor = d; mejor = k; } });
+      actual = resto.splice(mejor, 1)[0]; orden.push(actual);
     }
   }
-  return out;
+  const largo = (o) => { let t = 0, a = 0; for (const i of o) { t += costo(a, i); a = i; } return t; };
+  const valido = (o) => o.every((i, k) => k === 0 || rango[o[k - 1]] <= rango[i]);
+  let mejorLargo = largo(orden);
+  for (let vuelta = 0, mejoro = true; mejoro && vuelta < 60; vuelta++) {
+    mejoro = false;
+    // 2-opt: invertir un tramo
+    for (let i = 0; i < n - 1; i++) for (let j = i + 1; j < n; j++) {
+      const o = [...orden.slice(0, i), ...orden.slice(i, j + 1).reverse(), ...orden.slice(j + 1)];
+      if (!valido(o)) continue;
+      const l = largo(o); if (l < mejorLargo - 1e-9) { orden = o; mejorLargo = l; mejoro = true; }
+    }
+    // or-opt: mover 1 a 3 paradas seguidas a otro lugar
+    for (let tam = 1; tam <= 3; tam++) for (let i = 0; i + tam <= n; i++) {
+      const tramo = orden.slice(i, i + tam), resto = [...orden.slice(0, i), ...orden.slice(i + tam)];
+      for (let j = 0; j <= resto.length; j++) {
+        if (j === i) continue;
+        const o = [...resto.slice(0, j), ...tramo, ...resto.slice(j)];
+        if (!valido(o)) continue;
+        const l = largo(o); if (l < mejorLargo - 1e-9) { orden = o; mejorLargo = l; mejoro = true; }
+      }
+    }
+  }
+  return orden.map((i) => pedidos[i - 1]);
+}
+// Tiempos y distancias reales por calle entre todos los puntos (máx. 25 con Mapbox); null si no se puede
+async function matrizCalles(puntos) {
+  const coords = puntos.map((x) => `${Number(x.lng).toFixed(5)},${Number(x.lat).toFixed(5)}`).join(';');
+  const token = getAjustes().mapbox_token || process.env.MAPBOX_TOKEN || '';
+  if (token && puntos.length <= 25) {
+    try {
+      const r = await fetch(`https://api.mapbox.com/directions-matrix/v1/mapbox/driving/${coords}?annotations=duration,distance&access_token=${encodeURIComponent(token)}`, { signal: AbortSignal.timeout(8000) });
+      const j = await r.json();
+      if (j.code === 'Ok' && j.durations) return { tiempos: j.durations, metros: j.distances };
+    } catch { /* se intenta con OSRM */ }
+  }
+  if (OSRM_URL && puntos.length <= 100) {
+    try {
+      const r = await fetch(`${OSRM_URL}/table/v1/driving/${coords}?annotations=duration,distance`, { signal: AbortSignal.timeout(8000), headers: { 'User-Agent': 'Vaelo-Mensajeria/1.0' } });
+      const j = await r.json();
+      if (j.code === 'Ok' && j.durations) return { tiempos: j.durations, metros: j.distances };
+    } catch { /* sin matriz */ }
+  }
+  return null;
+}
+// Ordena una ruta con tiempos reales si se puede, y la mide (km y minutos por calle)
+async function ordenarYMedir(origen, pedidos, pickup = false) {
+  const m = pedidos.length ? await matrizCalles([origen, ...pedidos]) : null;
+  const ok = m && m.tiempos.every((f) => f.every((x) => x != null));
+  const orden = ordenarParadas(origen, pedidos, ok ? m.tiempos : null);
+  const medida = medirRuta(origen, orden, pickup);
+  if (ok) {
+    const idx = new Map(pedidos.map((p, i) => [p, i + 1]));
+    let seg = 0, met = 0, a = 0;
+    for (const p of orden) { const b = idx.get(p); seg += m.tiempos[a][b]; met += m.metros ? m.metros[a][b] : 0; a = b; }
+    if (met) medida.km = Math.round(met / 100) / 10;
+    medida.minutos = Math.round(seg / 60 + orden.length * 7 + 10);
+    medida.por_calle = true;
+  }
+  return { orden, ...medida };
 }
 function medirRuta(origen, paradas, pickup = false) {
   let km = 0, a = origen;
@@ -4206,7 +4272,7 @@ ruta('GET', '/api/admin/lotes-empresa/:id', ({ req, params }) => {
     cupo: ajNum('cupo_moto', 30), horas: ajNum('horas_ruta_moto', 4), tamanos: TAMANOS, whatsapp_empresa: digitos(db.prepare('SELECT telefono FROM usuarios WHERE id = ?').get(l.usuario_id)?.telefono) };
 });
 // Calcula rutas: una moto, dividir entre N motos o pickup
-ruta('POST', '/api/admin/lotes-empresa/:id/calcular', ({ req, params, body }) => {
+ruta('POST', '/api/admin/lotes-empresa/:id/calcular', async ({ req, params, body }) => {
   requiereStaff(req);
   const l = loteParaPanel(params.id);
   const origen = origenLote(l) || falla(400, 'Falta el punto de recogida.');
@@ -4216,7 +4282,20 @@ ruta('POST', '/api/admin/lotes-empresa/:id/calcular', ({ req, params, body }) =>
   const k = modo === 'motos' ? Math.max(1, Math.min(pedidos.length, Math.round(numero(body.motos)) || 2)) : modo === 'un_paquete' ? pedidos.length : 1;
   const rutas = modo === 'un_paquete' ? pedidos.map((p) => [p]) : dividirEnRutas(origen, pedidos, k);
   const cupo = ajNum('cupo_moto', 30), horas = ajNum('horas_ruta_moto', 4);
-  return { modo, rutas: rutas.map((r) => { const m = medirRuta(origen, r, modo === 'pickup'); return { pedidos: r.map((p) => p.id), ...m, excede_cupo: modo !== 'pickup' && m.puntos > cupo, excede_horas: modo !== 'pickup' && m.minutos > horas * 60 }; }) };
+  const medidas = modo === 'un_paquete' ? rutas.map((r) => ({ orden: r, ...medirRuta(origen, r) }))   // uno por moto: no hay orden que calcular
+    : await Promise.all(rutas.map((r) => ordenarYMedir(origen, r, modo === 'pickup')));
+  return { modo, rutas: medidas.map(({ orden, ...m }) => ({ pedidos: orden.map((p) => p.id), ...m, excede_cupo: modo !== 'pickup' && m.puntos > cupo, excede_horas: modo !== 'pickup' && m.minutos > horas * 60 })) };
+});
+// Reordena una ruta por el camino más rápido (después de mover paradas entre rutas)
+ruta('POST', '/api/admin/lotes-empresa/:id/ordenar', async ({ req, params, body }) => {
+  requiereStaff(req);
+  const l = loteParaPanel(params.id);
+  const origen = origenLote(l) || falla(400, 'Falta el punto de recogida.');
+  const ids = Array.isArray(body.pedidos) ? body.pedidos.map(Number) : [];
+  const pedidos = ids.map((id) => db.prepare('SELECT * FROM pedidos_empresa WHERE id = ? AND lote_id = ?').get(id, l.id)).filter(Boolean);
+  if (!pedidos.length) falla(400, 'Esa ruta no tiene pedidos.');
+  const { orden, ...m } = await ordenarYMedir(origen, pedidos, body.modo === 'pickup');
+  return { pedidos: orden.map((p) => p.id), ...m };
 });
 ruta('POST', '/api/admin/lotes-empresa/:id/medir', ({ req, params, body }) => {
   requiereStaff(req);
@@ -4302,6 +4381,9 @@ ruta('POST', '/api/admin/lotes-empresa/:id/confirmar', ({ req, params, body }) =
   const partes = pagaEmpresa ? pedidos.map((_, i) => { const base = Math.floor((precioTotal / totalEnvios) * 100) / 100; return i === 0 ? redondear(precioTotal - base * (totalEnvios - 1)) : base; }) : null;
   let iParte = 0;
   const creados = [];
+  // Con las zonas dibujadas, el piloto ve la zona real del punto marcado (no la que escribió el cliente)
+  const formasZona = zonasConForma();
+  const zonaReal = (p) => (formasZona.length && p.lat != null ? (formasZona.find((z) => dentroDe({ lat: p.lat, lng: p.lng }, z.puntos))?.nombre || OTRA_ZONA) : p.zona);
   db.exec('BEGIN');
   try {
     rutas.forEach((r, ri) => {
@@ -4319,7 +4401,7 @@ ruta('POST', '/api/admin/lotes-empresa/:id/confirmar', ({ req, params, body }) =
           VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, 'zona', ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${piloto ? "datetime('now')" : 'NULL'}, ?, ?, ?)`).run(
           p.codigo, l.usuario_id, vehiculo.id, p.descripcion, l.origen_direccion || '', l.recogida === 'sede' ? (zonaDePunto(origen) || OTRA_ZONA) : (emp.empresa_zona || zonaDePunto(origen) || OTRA_ZONA),
           emp.telefono || '', origen.lat, origen.lng, l.recogida === 'sede' ? 'sede' : 'cliente', l.recogida === 'sede' ? 'Sede Vaelo' : (emp.empresa_nombre || emp.nombre),
-          p.recibe_nombre, p.recibe_telefono, p.direccion, p.zona, p.lat, p.lng, precio, precio, metodo, [p.referencias, `Cliente de ${emp.empresa_nombre || emp.nombre}`].filter(Boolean).join('. '),
+          p.recibe_nombre, p.recibe_telefono, p.direccion, zonaReal(p), p.lat, p.lng, precio, precio, metodo, [p.referencias, `Cliente de ${emp.empresa_nombre || emp.nombre}`].filter(Boolean).join('. '),
           String(crypto.randomInt(1000, 10000)), programado, crypto.randomBytes(16).toString('hex'), p.recibe_nombre, p.confirmado_en, p.lat, p.lng, p.confirmado_en, pagoEstado,
           p.foto, p.id, l.id, grupo ? i + 1 : null, p.tamano, p.horario, grupo, pagaEmpresa && metodoEmpresa === 'efectivo' ? precioTotal : null,
           piloto ? piloto.id : null, piloto ? 'por_aceptar' : null, piloto ? 'oficina' : null, p.lat, p.lng);
@@ -5055,4 +5137,4 @@ const servidor = http.createServer(async (req, res) => {
 if (require.main === module) {
   servidor.listen(PORT, HOST, () => console.log(`Vaelo funcionando en http://${HOST}:${PORT}`));
 }
-module.exports = { servidor, hashPassword, asignacionAutomatica, decisionesVencidas, push, enviosAtascados };
+module.exports = { servidor, hashPassword, asignacionAutomatica, decisionesVencidas, push, enviosAtascados, ordenarParadas };

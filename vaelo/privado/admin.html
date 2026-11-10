@@ -766,6 +766,8 @@ null))));
       let mapa = null, capa = null;
       const pilotosDe = () => (modo === 'pickup' ? r.pilotos_pickup : r.pilotos_moto);
       const medir = async (ruta) => { try { Object.assign(ruta, await api(`/api/admin/lotes-empresa/${loteId}/medir`, { body: { pedidos: ruta.pedidos, modo } })); } catch { /* sin medida */ } };
+      // Reordena la ruta por el camino más rápido (por calles si hay mapa de rutas)
+      const ordenar = async (ruta) => { try { Object.assign(ruta, await api(`/api/admin/lotes-empresa/${loteId}/ordenar`, { body: { pedidos: ruta.pedidos, modo } })); } catch (e) { mostrarMensaje(msg, e.message); } };
       const calcular = async () => {
         try {
           const x = await api(`/api/admin/lotes-empresa/${loteId}/calcular`, { body: { modo, motos } });
@@ -801,10 +803,11 @@ null))));
           const color = COLORES_RUTA[ri % COLORES_RUTA.length];
           const piloto = el('select', { 'aria-label': `Piloto de la ruta ${ri + 1}`, onchange: (ev) => { q.piloto_id = ev.target.value; } }, opcionesPiloto(q.piloto_id));
           const mover = async (i, d) => { const j = i + d; if (j < 0 || j >= q.pedidos.length) return; [q.pedidos[i], q.pedidos[j]] = [q.pedidos[j], q.pedidos[i]]; await medir(q); pintarRutas(); };
-          const pasarA = async (i, destino) => { const [id] = q.pedidos.splice(i, 1); rutas[destino].pedidos.push(id); await Promise.all([medir(q), medir(rutas[destino])]); rutas = rutas.filter(x => x.pedidos.length); pintarRutas(); };
+          const pasarA = async (i, destino) => { const [id] = q.pedidos.splice(i, 1); rutas[destino].pedidos.push(id); await Promise.all([q.pedidos.length ? ordenar(q) : null, ordenar(rutas[destino])]); rutas = rutas.filter(x => x.pedidos.length); pintarRutas(); };
           return el('div', { class: 'ruta-tarjeta', style: `--color-ruta:${color}` },
             el('div', { class: 'ruta-cab' }, el('span', { class: 'ruta-color' }), el('strong', { text: modo === 'un_paquete' ? `Envío ${ri + 1}` : `Ruta ${ri + 1}` }),
-              el('small', { text: `${q.pedidos.length} parada(s) · ${q.km ?? '?'} km · ~${q.minutos ? (q.minutos / 60).toFixed(1).replace('.0', '') + ' h' : '?'}${modo !== 'pickup' ? ` · cupo ${q.puntos ?? '?'} de ${r.cupo}` : ''}` }),
+              el('small', { text: `${q.pedidos.length} parada(s) · ${q.km ?? '?'} km${q.por_calle ? ' por calle' : ''} · ~${q.minutos ? (q.minutos / 60).toFixed(1).replace('.0', '') + ' h' : '?'}${modo !== 'pickup' ? ` · cupo ${q.puntos ?? '?'} de ${r.cupo}` : ''}` }),
+              modo !== 'un_paquete' && q.pedidos.length > 2 ? el('button', { class: 'boton borde chico', type: 'button', text: 'Ordenar por la ruta más rápida', onclick: async (ev) => { ev.target.disabled = true; ev.target.textContent = 'Ordenando…'; await ordenar(q); pintarRutas(); } }) : null,
               q.excede_cupo || (q.puntos > r.cupo && modo !== 'pickup') ? el('span', { class: 'etiqueta-pendiente', text: 'No cabe en una moto' }) : null,
               q.excede_horas || (q.minutos > r.horas * 60 && modo !== 'pickup') ? el('span', { class: 'etiqueta-pendiente', text: `Más de ${r.horas} h` }) : null),
             el('ol', { class: 'paradas' }, q.pedidos.map((id, i) => {
