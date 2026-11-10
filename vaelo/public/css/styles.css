@@ -1069,3 +1069,60 @@ dialog.escaner video { width: 100%; border-radius: 10px; background: #000; aspec
 @media (max-width: 1100px) { .panel-titulo p { white-space: normal; } }
 .lote-tarjeta > div > span { justify-self: start; }
 #empresas-solicitudes[hidden], #empresas-activas[hidden] { display: none; }
+
+/* ---------- Carpetas de envíos (empresas) ---------- */
+.carpetas { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: .75rem; margin-top: .75rem; }
+.carpeta-tarjeta { display: grid; grid-template-columns: auto 1fr auto; gap: .85rem; align-items: center; text-align: left; font: inherit; color: inherit;
+  background: #fff; border: 1.5px solid var(--linea); border-radius: 10px; padding: 1rem; cursor: pointer; transition: border-color .15s, box-shadow .15s, transform .15s; }
+.carpeta-tarjeta:hover { border-color: var(--tinta); box-shadow: 4px 4px 0 var(--linea); transform: translateY(-1px); }
+.carpeta-tarjeta.lista { border: 2px solid var(--tinta); box-shadow: 4px 4px 0 var(--cinta); }
+.carpeta-icono { width: 3rem; height: 3rem; display: grid; place-items: center; border-radius: 10px; background: var(--gris); color: var(--azul-hondo); }
+.carpeta-icono svg { width: 1.6rem; height: 1.6rem; }
+.carpeta-tarjeta.lista .carpeta-icono { background: var(--cinta); }
+.carpeta-datos { display: grid; gap: .2rem; min-width: 0; }
+.carpeta-datos strong { font-size: 1.05rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.carpeta-datos small { color: var(--suave); }
+.carpeta-datos small::first-letter { text-transform: uppercase; }
+.carpeta-abrir { font-weight: 700; color: var(--azul); font-size: .9rem; }
+.carpeta-progreso { margin-top: .3rem; }
+.carpeta-progreso small { font-size: .82rem; color: var(--suave); }
+.progreso-barra.completo i { background: var(--ok, #157f3b); }
+.carpeta-lote b { color: var(--tinta); }
+.carpetas-vacio { border: 1.5px dashed var(--linea); border-radius: 10px; padding: 1.2rem 1.4rem; margin-top: .75rem; background: var(--gris); }
+.carpetas-vacio h3 { margin: 0 0 .6rem; }
+.pasos-carpeta { margin: 0; padding-left: 1.3rem; display: grid; gap: .45rem; }
+.pasos-carpeta li strong { margin-right: .3rem; }
+.pasos-carpeta li span { color: var(--suave); }
+.carpeta-cabecera { margin-bottom: .75rem; }
+.enlace-volver { background: none; border: 0; padding: .3rem 0; font: inherit; font-weight: 700; color: var(--azul); cursor: pointer; }
+.carpeta-titulo { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; }
+.carpeta-titulo h2 { margin: .2rem 0 0; }
+.carpeta-titulo p::first-letter { text-transform: uppercase; }
+.carpeta-estado { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.carpeta-estado > div { display: grid; gap: .25rem; min-width: 240px; flex: 1; }
+.carpeta-estado.lista { border: 2px solid var(--tinta); box-shadow: 5px 5px 0 var(--cinta); }
+.carpeta-cifra { font-family: var(--titulos, inherit); font-size: 2.4rem; line-height: 1; }
+.carpeta-acciones { display: flex; justify-content: space-between; align-items: center; gap: .75rem; flex-wrap: wrap; margin: 1rem 0; }
+.boton-grande { font-size: 1.05rem; padding: .85rem 1.5rem; display: inline-flex; align-items: center; gap: .4rem; }
+.boton-grande svg, .cab-bloque .boton svg { width: 1.15rem; height: 1.15rem; }
+.cab-bloque .boton { display: inline-flex; align-items: center; gap: .35rem; }
+
+/* ---------- Caja de envíos (varios destinatarios) ---------- */
+.botones-envio { display: flex; gap: .6rem; flex-wrap: wrap; }
+.botones-envio .boton { flex: 1 1 220px; }
+#pista-caja { margin-top: .6rem; }
+.caja-envios { border: 2px solid var(--tinta); border-radius: 10px; padding: .9rem 1rem; margin: 0 0 1rem; background: #fff; box-shadow: 4px 4px 0 var(--cinta); }
+.caja-cab { display: flex; justify-content: space-between; align-items: baseline; gap: .5rem; flex-wrap: wrap; margin-bottom: .5rem; }
+.caja-cab h3 { margin: 0; display: inline-flex; align-items: center; gap: .4rem; font-size: 1.05rem; }
+.caja-cab h3 svg { width: 1.2rem; height: 1.2rem; }
+.caja-cab small { color: var(--suave); }
+.caja-lista { list-style: none; margin: 0; padding: 0; display: grid; gap: .45rem; counter-reset: caja; }
+.caja-lista li { display: grid; grid-template-columns: 2.6rem 1fr auto auto; gap: .7rem; align-items: center; padding: .45rem .5rem; border-radius: 8px; background: var(--gris); }
+.caja-lista img { width: 2.6rem; height: 2.6rem; object-fit: cover; border-radius: 6px; }
+.caja-lista li > span:nth-child(2) { display: grid; min-width: 0; }
+.caja-lista small { color: var(--suave); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.caja-precio { font-weight: 700; font-variant-numeric: tabular-nums; }
+.caja-enlaces { list-style: none; padding: 0; margin: 1rem 0; display: grid; gap: .5rem; }
+.caja-enlaces li { display: flex; justify-content: space-between; align-items: center; gap: .75rem; padding: .6rem .75rem; border: 1px solid var(--linea); border-radius: 8px; }
+.caja-enlaces li span { display: grid; }
+.caja-enlaces small { color: var(--suave); }

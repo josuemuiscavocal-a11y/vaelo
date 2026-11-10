@@ -64,7 +64,8 @@ Página web y app (instalable en el celular) de Vaelo, mensajería en moto y pic
 
 - De cada envío **Vaelo cobra Q5** y el resto es para el piloto (Tarifas y ajustes > Asignación y pago de pilotos).
 - **Foto del paquete obligatoria** al pedir: la ven el piloto, la oficina y el cliente.
-- **Transferencias:** el cliente manda el comprobante al WhatsApp oficial (+502 3773 1793, editable). El envío **no se manda a ningún piloto** hasta que la oficina marca «Pago recibido» (en el envío o en Caja).
+- **Solo efectivo:** el envío se paga en efectivo al piloto (o paga quien recibe, en cuentas de empresa). Ya no hay transferencias ni pago a fin de mes; los pendientes viejos pasaron solos a efectivo.
+- **Sin valor del contenido:** si pasa algo con un envío, la administración lo revisa con la foto del paquete, la foto de entrega y el recorrido.
 - **Efectivo de los pilotos:** si un piloto no entrega el efectivo en la sede en 3 días (editable), no puede conectarse hasta liquidar.
 - **Reclamos:** el cliente reporta desde el envío (3 días después de la entrega, editable). En Caja > Reclamos se decide cuánto se le devuelve al cliente y cuánto paga el piloto; eso se descuenta solo de su próximo pago.
 
@@ -80,13 +81,13 @@ Página web y app (instalable en el celular) de Vaelo, mensajería en moto y pic
 
 1. La empresa entra a **vaelomensajeria.com/empresas** (en el menú principal), crea su cuenta y llena la solicitud: datos de la empresa, representante, fotos de la sede, DPI del representante y patente de comercio.
 2. La oficina la revisa en el panel (**Empresas**), pone la **cita para firmar** (la empresa recibe aviso y correo) y, ya firmado, **activa la empresa**.
-3. Ya activa, en **Mi empresa** tiene dos pestañas: **Mandar varios pedidos** y **Analítica**. En su panel **no aparece dinero**: Vaelo solo le presta los pilotos y cobra el envío.
+3. Ya activa, en **Mi empresa** tiene dos pestañas: **Carpetas de envíos** y **Analítica**. En su panel **no aparece dinero**: Vaelo solo le presta los pilotos y cobra el envío.
 
-### Mandar varios pedidos
-- La empresa registra cada pedido: qué es, **tamaño** (sobre, pequeño, mediano, grande), **foto** y el nombre y WhatsApp de su cliente. También puede subir un Excel (hay plantilla).
-- Llena ella los datos de entrega o toca **«Mandar enlace»**: su cliente abre `/pedido/...`, elige **día**, **horario** (mañana, tarde o cualquier hora), marca su **ubicación**, quién recibe y cómo paga el envío (efectivo al recibir o transferencia a Vaelo). Ahí mismo activa **«Avísame cuando el piloto salga»** (notificación del navegador).
-- Con **10 pedidos confirmados para el mismo día** (se cambia en Tarifas y ajustes) aparece **«Enviar a Vaelo»** con tres opciones y una recomendada según tamaños, cupo y tiempo de ruta: **una moto para todo**, **varias motos** o **pickup**. Elige si Vaelo recoge en su local o ella los lleva a la sede.
-- **Pickup:** lo paga la empresa (habla primero por WhatsApp con Vaelo: precio y promoción) o cada cliente (Q35 en zonas preferenciales, Q45 fuera).
+### Carpetas de envíos
+- La empresa crea una **carpeta** con el **día de entrega** (y un nombre si quiere). Adentro toca **«Añadir envío»**: qué es, **tamaño** (sobre, pequeño, mediano, grande), **foto** y el nombre y WhatsApp de su cliente. Se pueden añadir varios seguidos, o subir un Excel (hay plantilla).
+- Por cada envío elige **«Le mando el enlace»** (se abre WhatsApp con el mensaje listo) o **«Lo lleno yo»**. Su cliente abre `/pedido/...`, ve que su pedido llega ese día y confirma **horario** (mañana, tarde o cualquier hora), **ubicación** y **quién recibe**; paga el envío en efectivo al recibir. Si no puede ese día toca **«No puedo ese día»** y la empresa recibe el aviso. Ahí mismo activa **«Avísame cuando el piloto salga»**.
+- Con **10 confirmados** (se cambia en Tarifas y ajustes) aparece **«Enviar a Vaelo»** en la carpeta, con tres opciones y una recomendada según tamaños, cupo y tiempo de ruta: **una moto para todo**, **varias motos** o **pickup**. Los que no confirmaron pasan solos a una carpeta nueva.
+- **Pickup:** lo paga la empresa en efectivo al piloto (habla primero por WhatsApp con Vaelo: precio y promoción) o cada cliente (Q35 en zonas preferenciales, Q45 fuera).
 - Cada pedido tiene su código, que es también la guía, y la empresa imprime **etiquetas con código QR** para pegarlas en los paquetes.
 - Si un pedido no se entrega, **queda en la sede de Vaelo**: la empresa manda a alguien a recogerlo con el código y la bodega se le cobra por día por WhatsApp.
 
@@ -120,7 +121,7 @@ Página web y app (instalable en el celular) de Vaelo, mensajería en moto y pic
 - Clientes, pilotos y oficina activan los avisos con el botón **Activar avisos**. Llegan aunque Vaelo esté cerrado.
 - Cliente: piloto aceptó, recogido, llegando, entregado, no se pudo entregar, precio actualizado, devuelto, en la sede. Los importantes también por correo (con Resend configurado).
 - Piloto: envío nuevo asignado, envío cancelado, devolver o llevar a la sede.
-- Oficina: pedido nuevo, entrega fallida, envío sin piloto, comprobante de transferencia.
+- Oficina: pedido nuevo, entrega fallida, envío sin piloto.
 - En iPhone los avisos funcionan solo con Vaelo instalado en la pantalla de inicio (iOS 16.4 o más nuevo).
 - **Límite que sigue igual:** el GPS del piloto solo funciona con la app abierta y la pantalla encendida.
 
@@ -128,9 +129,8 @@ Página web y app (instalable en el celular) de Vaelo, mensajería en moto y pic
 
 - **Olvidé mi contraseña** para clientes y pilotos (`/recuperar`, necesita Resend). La administración cambia la suya con `actualizar.sh --clave-admin`.
 - **Mis ganancias** del piloto: por cobrar, hoy, semana, mes, efectivo que debe entregar y pagos anteriores.
-- **Valor declarado:** opcional; sirve para evaluar un reclamo.
 - **Calificación del cliente:** el piloto califica al cliente al terminar; la oficina ve el promedio.
-- **Varias entregas en un viaje:** los envíos por archivo se ofrecen juntos al mismo piloto.
+- **Caja de envíos** (cualquier cliente): en «Enviar paquete», **«+ Agregar otro destinatario»** guarda ese envío en la caja y deja el formulario listo para el siguiente. «Enviar la caja» los manda juntos desde el mismo lugar (hasta 10) y se ofrecen al mismo piloto. Al final sale el enlace de cada quien recibe para mandarlo por WhatsApp: ahí comparte su ubicación y sus datos.
 - **Términos** (`/terminos`) y **privacidad** (`/privacidad`). Al registrarse se aceptan. Conviene que un abogado los revise.
 
 ## Seguridad y servidor

@@ -436,6 +436,12 @@ if (!db.prepare("SELECT 1 FROM ajustes WHERE clave = 'v4_migrado'").get()) {
   db.exec("INSERT INTO ajustes (clave, valor) VALUES ('v4_migrado', datetime('now'))");
 }
 agregarColumnas('envios', [['flete_token', 'TEXT'], ['flete_configurado_en', 'TEXT']]);
+// Sin transferencias ni crédito: lo pendiente pasa a efectivo (una sola vez)
+if (!db.prepare("SELECT 1 FROM ajustes WHERE clave = 'v6_solo_efectivo'").get()) {
+  db.exec("UPDATE envios SET metodo_pago = 'efectivo', pago_estado = NULL WHERE metodo_pago IN ('transferencia', 'credito') AND COALESCE(pago_estado, '') != 'verificado' AND estado IN ('pendiente', 'recogido', 'en_camino')");
+  db.exec("UPDATE usuarios SET credito_permitido = 0");
+  db.exec("INSERT INTO ajustes (clave, valor) VALUES ('v6_solo_efectivo', datetime('now'))");
+}
 agregarColumnas('usuarios', [['renovacion_pendiente', 'TEXT']]);   // licencia o antecedentes renovados que la oficina todavía no confirma
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_envios_flete_token ON envios(flete_token)');
 insAj.run('whatsapp_pagos', '50237731793');   // WhatsApp oficial donde se mandan los comprobantes de transferencia
@@ -521,5 +527,34 @@ insAj.run('min_pedidos_lote', '10');          // pedidos confirmados del mismo d
 insAj.run('cupo_moto', '30');                 // cupo de una moto: sobre 1, pequeño 5, mediano 15
 insAj.run('horas_ruta_moto', '4');            // más que esto en una sola moto: se recomienda partir la ruta
 insAj.run('horas_recordatorio', '24');        // si el cliente no llena su enlace en este tiempo, se avisa a la empresa
+
+// ---------- Versión 6: carpetas de envíos de empresa ----------
+// La empresa arma una carpeta con un día de entrega y adentro va añadiendo envíos; cada cliente confirma con su enlace.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS carpetas_empresa (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_id INTEGER NOT NULL REFERENCES usuarios(id),
+    nombre TEXT NOT NULL,
+    dia TEXT NOT NULL,                              -- AAAA-MM-DD: día en que se entregan
+    estado TEXT NOT NULL DEFAULT 'abierta',          -- abierta | enviada | cancelada
+    lote_id INTEGER,
+    creado TEXT NOT NULL DEFAULT (datetime('now')), actualizado TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_carpetas_usuario ON carpetas_empresa(usuario_id, estado);
+`);
+agregarColumnas('pedidos_empresa', [['carpeta_id', 'INTEGER'], ['no_puede_nota', 'TEXT']]);
+db.exec('CREATE INDEX IF NOT EXISTS idx_pedidos_carpeta ON pedidos_empresa(carpeta_id)');
+if (!db.prepare("SELECT 1 FROM ajustes WHERE clave = 'v6_carpetas'").get()) {
+  // Sin transferencias: lo que quedó pendiente se paga en efectivo al recibir
+  db.exec("UPDATE pedidos_empresa SET metodo_pago = 'efectivo' WHERE metodo_pago = 'transferencia' AND estado IN ('pendiente', 'confirmado', 'vencido')");
+  // Los pedidos sueltos que todavía no se mandan quedan en una carpeta por día
+  const sueltos = db.prepare("SELECT usuario_id, COALESCE(dia, date('now', '-6 hours', '+1 day')) AS dia, COUNT(*) AS n FROM pedidos_empresa WHERE carpeta_id IS NULL AND lote_id IS NULL AND estado IN ('pendiente', 'confirmado', 'vencido') GROUP BY usuario_id, 2").all();
+  for (const g of sueltos) {
+    const id = Number(db.prepare('INSERT INTO carpetas_empresa (usuario_id, nombre, dia) VALUES (?, ?, ?)').run(g.usuario_id, 'Envíos del ' + g.dia, g.dia).lastInsertRowid);
+    db.prepare("UPDATE pedidos_empresa SET carpeta_id = ?, dia = ? WHERE usuario_id = ? AND COALESCE(dia, date('now', '-6 hours', '+1 day')) = ? AND carpeta_id IS NULL AND lote_id IS NULL AND estado IN ('pendiente', 'confirmado', 'vencido')")
+      .run(id, g.dia, g.usuario_id, g.dia);
+  }
+  db.exec("INSERT INTO ajustes (clave, valor) VALUES ('v6_carpetas', datetime('now'))");
+}
 
 module.exports = { db, DB_PATH, DATA_DIR };

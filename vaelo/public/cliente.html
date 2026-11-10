@@ -42,11 +42,6 @@
       <section id="panel-nuevo" role="tabpanel" aria-labelledby="tab-nuevo">
         <form id="form-envio" class="bloque" novalidate>
           <div id="msg-envio" class="mensaje" role="alert"></div>
-          <div class="modo-envio" id="modo-envio" role="tablist" hidden>
-            <button type="button" role="tab" aria-selected="true" data-modo="uno">Un envío</button>
-            <button type="button" role="tab" aria-selected="false" data-modo="lote">Varios envíos (archivo)</button>
-          </div>
-
           <fieldset>
             <legend>¿En qué lo enviamos?</legend>
             <div class="vehiculos" id="vehiculos" role="radiogroup" aria-label="Vehículo"></div>
@@ -67,7 +62,6 @@
               </label>
             </div>
             <div class="fila">
-              <div class="campo"><label for="valor_declarado">Valor del contenido (Q) <span class="ayuda">Opcional. Sirve para evaluar si hay un reclamo</span></label><input id="valor_declarado" type="number" min="0" step="1" inputmode="decimal" placeholder="0"></div>
               <div class="campo" id="campo-paquetes" hidden><label for="paquetes">Paquetes para esta dirección <span class="ayuda">Mismo precio</span></label><input id="paquetes" type="number" min="1" max="30" step="1" value="1"></div>
             </div>
             <label class="casilla opcion-fragil" for="fragil"><input type="checkbox" id="fragil" style="width:auto"><span><strong>Es frágil: cuidado especial</strong> <span id="recargo-fragil-texto">(+Q10.00)</span><br><small style="color:var(--suave)">El piloto lo maneja con cuidado extra y la guía lo marca como frágil.</small></span></label>
@@ -86,16 +80,6 @@
             </div>
             <div class="campo"><label for="origen_direccion">Referencias <span class="ayuda">Opcional: casa, apartamento, color de puerta</span></label><input id="origen_direccion" maxlength="300" placeholder="Edificio azul, apartamento 5"></div>
             <p class="pista" id="pista-origen">Al enviar te pediremos tu ubicación. Deja Vaelo abierto hasta que el piloto recoja tu paquete: así te encuentra donde estés.</p>
-          </fieldset>
-
-          <fieldset id="fs-lote" hidden>
-            <legend>Envíos desde un archivo</legend>
-            <p class="pista">Sube un archivo de Excel guardado como CSV con una fila por envío. Todos salen del punto de recogida de arriba. Solo zonas con tarifa fija; máximo 100 envíos.</p>
-            <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">
-              <button class="boton borde chico" type="button" id="plantilla">Descargar plantilla</button>
-              <label class="boton chico doc-boton">Subir archivo CSV<input type="file" id="archivo-lote" accept=".csv,text/csv"></label>
-            </div>
-            <div id="vista-lote" style="margin-top:.75rem"></div>
           </fieldset>
 
           <fieldset id="fs-destino">
@@ -127,12 +111,9 @@
             <div class="campo">
               <div class="opciones" role="radiogroup" aria-label="Cómo pagas el envío">
                 <label class="opcion"><input type="radio" name="metodo_pago" value="efectivo" checked><span>Efectivo<small>Al mensajero</small></span></label>
-                <label class="opcion"><input type="radio" name="metodo_pago" value="transferencia"><span>Transferencia<small>Comprobante por WhatsApp</small></span></label>
-                <label class="opcion" id="opcion-credito" hidden><input type="radio" name="metodo_pago" value="credito"><span>A fin de mes<small>Cuenta de empresa</small></span></label>
                 <label class="opcion" id="opcion-recibe" hidden><input type="radio" name="metodo_pago" value="recibe"><span>Paga quien recibe<small>El piloto cobra el envío al entregar</small></span></label>
               </div>
             </div>
-            <div class="mensaje aviso" id="datos-transferencia" hidden></div>
             <div class="campo"><label for="cupon">Cupón de descuento <span class="ayuda">Opcional</span></label>
               <div class="cupon-fila"><input id="cupon" maxlength="30" autocomplete="off" style="text-transform:uppercase"><button class="boton borde chico" type="button" id="aplicar-cupon">Aplicar</button></div>
               <small id="cupon-msg" class="pista"></small></div>
@@ -142,9 +123,14 @@
             </div>
           </fieldset>
 
+          <section class="caja-envios" id="caja-envios" hidden aria-live="polite"></section>
           <div class="resumen-precio"><span>Precio del envío<span class="desglose" id="desglose"></span><span class="desglose" id="desglose-cargos"></span></span><span class="precio-final"><del id="precio-antes"></del><strong id="precio" aria-live="polite">—</strong></span></div>
           <p class="pista" style="margin:-.4rem 0 1rem">Al enviar aceptas los <a href="/terminos" target="_blank">términos del servicio</a>.</p>
-          <button class="boton" type="submit">Enviar paquete</button>
+          <div class="botones-envio">
+            <button class="boton" type="submit" id="boton-enviar">Enviar paquete</button>
+            <button class="boton borde" type="button" id="agregar-caja">+ Agregar otro destinatario</button>
+          </div>
+          <p class="pista" id="pista-caja">¿Mandas a varias personas desde el mismo lugar? Agrega cada destinatario a la caja y envíalos juntos: a cada uno le mandas su enlace para que comparta su ubicación.</p>
         </form>
       </section>
 
@@ -227,7 +213,7 @@
       return {
         vehiculo_id: document.querySelector('input[name="vehiculo_id"]:checked')?.value,
         peso: $('peso').value, origen_zona: $('origen_zona').value, destino_zona: $('destino_zona').value, fragil: $('fragil').checked,
-        cupon: $('cupon').value.trim(), valor_declarado: $('valor_declarado').value, paquetes: $('paquetes').value,
+        cupon: $('cupon').value.trim(), paquetes: $('paquetes').value,
       };
     }
     let temporizador = null, turno = 0;
@@ -287,17 +273,7 @@
       }
       return null;
     }
-    // Transferencia: el comprobante se manda al WhatsApp oficial de Vaelo; el envío sale cuando la oficina confirma el pago
-    let whatsappPagos = '50237731793';
-    function cajaComprobante(e) {
-      if (e.metodo_pago !== 'transferencia' || e.estado === 'cancelado' || e.pago_estado === 'verificado') return null;
-      const total = dinero(e.precio + (e.cargos_extra || 0));
-      const texto = `Hola Vaelo, adjunto el comprobante de la transferencia del envío ${e.guia} por ${total}.`;
-      return el('div', { class: 'cargos-aviso' },
-        el('span', {}, el('strong', { style: 'font-size:1rem', text: `Transferencia de ${total}` }), el('br'),
-          el('small', { text: e.pago_estado === 'rechazado' ? `Revisa tu comprobante: ${e.pago_nota || 'no lo pudimos verificar'}. Mándalo de nuevo por WhatsApp.` : 'Manda la foto del comprobante al WhatsApp de Vaelo. Tu envío sale con el piloto cuando confirmemos el pago.' })),
-        el('a', { class: 'boton cinta chico', href: `https://wa.me/${whatsappPagos}?text=${encodeURIComponent(texto)}`, target: '_blank', rel: 'noopener', text: 'Mandar comprobante por WhatsApp' }));
-    }
+    let whatsappPagos = '50237731793';   // WhatsApp de Vaelo (fletes)
     async function cancelarEnvio(e, boton) {
       if (!confirm(`¿Cancelar el envío ${e.guia}?`)) return;
       boton.disabled = true;
@@ -330,7 +306,6 @@
           e.cargos_extra > 0 ? el('small', { class: 'pista', text: `+ ${dinero(e.cargos_extra)} de cargos` }) : null),
         e.estado !== 'cancelado' ? barraPasos(e.estado) : null,
         cajaDecision(e, () => { cargarEnvios(); cargarCargos(); }),
-        e.metodo_pago === 'transferencia' && e.pago_estado !== 'verificado' && e.estado !== 'cancelado' ? el('div', { style: 'grid-column:1/-1' }, cajaComprobante(e)) : null,
         acciones);
     }
 
@@ -486,38 +461,6 @@
       actualizarPrecio();
     }
 
-    // Empresas: varios envíos desde un archivo CSV (Excel → Guardar como CSV)
-    const COLUMNAS_LOTE = ['destino_nombre', 'destino_telefono', 'destino_direccion', 'destino_zona', 'peso', 'descripcion', 'cobro_destinatario', 'notas'];
-    const TITULOS_LOTE = ['Nombre de quien recibe', 'Teléfono', 'Dirección', 'Zona', 'Peso (lb)', 'Contenido', 'Cobrar al recibir (Q)', 'Indicaciones'];
-    let filasLote = [], modo = 'uno';
-    function leerCsv(texto) {
-      texto = texto.replace(/^\ufeff/, '');
-      const sep = (texto.split('\n')[0].match(/;/g) || []).length > (texto.split('\n')[0].match(/,/g) || []).length ? ';' : ',';
-      const filas = []; let fila = [], celda = '', comillas = false;
-      for (let i = 0; i < texto.length; i++) {
-        const c = texto[i];
-        if (comillas) { if (c === '"' && texto[i + 1] === '"') { celda += '"'; i++; } else if (c === '"') comillas = false; else celda += c; }
-        else if (c === '"') comillas = true;
-        else if (c === sep) { fila.push(celda.trim()); celda = ''; }
-        else if (c === '\n' || c === '\r') { if (c === '\r' && texto[i + 1] === '\n') i++; fila.push(celda.trim()); if (fila.some(Boolean)) filas.push(fila); fila = []; celda = ''; }
-        else celda += c;
-      }
-      fila.push(celda.trim()); if (fila.some(Boolean)) filas.push(fila);
-      return filas;
-    }
-    function pintarLote() {
-      if (!filasLote.length) { $('vista-lote').replaceChildren(); return; }
-      $('vista-lote').replaceChildren(el('p', {}, el('strong', { text: `${filasLote.length} envíos listos` }), ' para enviar.'),
-        el('div', { class: 'tabla-envoltura' }, el('table', {}, el('thead', {}, el('tr', {}, TITULOS_LOTE.slice(0, 5).map(t => el('th', { text: t })))),
-          el('tbody', {}, filasLote.slice(0, 50).map(f => el('tr', {}, COLUMNAS_LOTE.slice(0, 5).map(k => el('td', { text: f[k] || '' }))))))));
-    }
-    function cambiarModo(nuevo) {
-      modo = nuevo;
-      document.querySelectorAll('#modo-envio button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.modo === modo)));
-      $('fs-lote').hidden = modo !== 'lote'; $('fs-destino').hidden = modo === 'lote'; $('fs-paquete').hidden = modo === 'lote';
-      document.querySelector('.resumen-precio').hidden = modo === 'lote';
-      $('form-envio').querySelector('button[type="submit"]').textContent = modo === 'lote' ? 'Enviar todos' : 'Enviar paquete';
-    }
 
     // Piloto asignado: se muestra cuando ya aceptó el envío
     function tarjetaPiloto(e, p) {
@@ -610,11 +553,9 @@
       const q = new URLSearchParams(location.search);
       if (q.get('correo') === 'confirmado') avisos.push(el('div', { class: 'mensaje exito', text: 'Listo, tu correo quedó confirmado.' }));
       if (yoCliente.rol === 'cliente') {
-        $('opcion-credito').hidden = !yoCliente.credito_permitido;
         $('opcion-recibe').hidden = yoCliente.tipo_cuenta !== 'empresa';
         $('campo-paquetes').hidden = yoCliente.tipo_cuenta !== 'empresa';
         $('tab-empresa').hidden = yoCliente.tipo_cuenta !== 'empresa';
-        $('modo-envio').hidden = yoCliente.tipo_cuenta !== 'empresa';
         if (yoCliente.tipo_cuenta === 'empresa') avisos.push(el('div', { class: 'mensaje exito' }, `Cuenta de empresa${yoCliente.empresa_nombre ? ': ' + yoCliente.empresa_nombre : ''}.`,
           yoCliente.descuento_empresa > 0 ? ` Tienes ${yoCliente.descuento_empresa}% de descuento en tus envíos.` : ''));
         if (correoActivo && !yoCliente.email_verificado) avisos.push(el('div', { class: 'mensaje aviso aviso-accion' },
@@ -659,7 +600,6 @@
         e.tiene_foto_fallo ? el('a', { class: 'prueba-img', href: `/api/envios/${e.id}/entrega/fallo`, target: '_blank', rel: 'noopener', style: 'margin:.5rem 0' },
           el('img', { src: `/api/envios/${e.id}/entrega/fallo`, alt: 'Foto del intento de entrega' }), el('small', { text: 'Foto del intento de entrega' })) : null,
         e.reenviado_como ? el('p', { class: 'mensaje exito' }, 'Este paquete salió de nuevo con la guía ', el('a', { href: '#', text: e.reenviado_como.guia, onclick: (ev) => { ev.preventDefault(); verDetalle(e.reenviado_como.id); } }), '.') : null,
-        cajaComprobante(e),
         e.tiene_foto_paquete ? el('a', { class: 'prueba-img', href: `/api/envios/${e.id}/entrega/paquete`, target: '_blank', rel: 'noopener', style: 'margin:.5rem 0' },
           el('img', { src: `/api/envios/${e.id}/entrega/paquete`, alt: 'Foto del paquete' }), el('small', { text: 'Tu foto del paquete' })) : null,
         cajaEntrega(e),
@@ -679,10 +619,8 @@
             e.precio_por_confirmar ? el('small', { style: 'display:block;color:var(--suave)', text: 'Se calcula por km cuando quien entrega y quien recibe compartan su ubicación.' }) : '',
             e.descuento > 0 ? el('small', { style: 'display:block;color:var(--ok)', text: `Ahorraste ${dinero(e.descuento)}` }) : ''),
           e.programado_para ? el('div', {}, el('span', { text: 'Recogida programada' }), fechaProgramada(e.programado_para)) : '',
-          el('div', {}, el('span', { text: 'Pago' }), PAGOS[e.metodo_pago] || e.metodo_pago,
-            e.metodo_pago === 'transferencia' && datos.datos_transferencia && e.pago_estado !== 'verificado' ? el('small', { style: 'display:block;color:var(--suave);white-space:pre-line', text: datos.datos_transferencia }) : ''),
+          el('div', {}, el('span', { text: 'Pago' }), PAGOS[e.metodo_pago] || e.metodo_pago),
           e.cargos_extra > 0 ? el('div', {}, el('span', { text: 'Cargos pendientes incluidos' }), dinero(e.cargos_extra)) : null,
-          e.valor_declarado > 0 ? el('div', {}, el('span', { text: 'Valor declarado' }), dinero(e.valor_declarado)) : null,
           e.paquetes > 1 ? el('div', {}, el('span', { text: 'Paquetes' }), `${e.paquetes} para la misma dirección`) : null,
           Number(e.cobro_destinatario) > 0 ? el('div', {}, el('span', { text: 'Cobrar al recibir' }), dinero(e.cobro_destinatario)) : null),
         e.estado === 'entregado' ? pruebaEntrega(e) : '',
@@ -705,59 +643,128 @@
       if (['pendiente', 'recogido', 'en_camino', 'fallido', 'devolviendo', 'a_sede'].includes(e.estado)) refresco = setInterval(() => verDetalle(id), 30000);
     }
 
+    // ---------- Caja de envíos: varios destinatarios desde el mismo lugar, en un solo viaje ----------
+    // Cada envío lleva su foto y su destinatario; a cada quien recibe se le manda su enlace para compartir ubicación y datos.
+    const caja = [], MAX_CAJA = 10;
+    const CAMPOS_ENVIO = ['peso', 'descripcion', 'destino_nombre', 'destino_telefono', 'destino_direccion', 'cobro_destinatario', 'notas'];
+    const hayDestinoEscrito = () => !!($('destino_nombre').value.trim() || $('destino_telefono').value.trim() || $('peso').value || $('foto_paquete').files[0]);
+    function leerEnvioActual() {
+      const f = $('form-envio');
+      if (!f.peso.value) throw new Error('Escribe el peso aproximado del paquete.');
+      if (!$('foto_paquete').files[0]) { $('caja-foto-paquete').scrollIntoView({ behavior: 'smooth', block: 'center' }); throw new Error('Toma una foto del paquete.'); }
+      if (f.destino_nombre.value.trim().length < 2) throw new Error('Escribe el nombre de quien recibe.');
+      if (f.destino_telefono.value.replace(/\D/g, '').length < 8) throw new Error('Escribe el teléfono de quien recibe (8 dígitos).');
+      if (!f.destino_zona.value) throw new Error('Elige la zona de quien recibe.');
+      return { peso: f.peso.value, descripcion: f.descripcion.value, fragil: $('fragil').checked, paquetes: $('paquetes').value, archivo: $('foto_paquete').files[0],
+        vista: URL.createObjectURL($('foto_paquete').files[0]), destino_nombre: f.destino_nombre.value.trim(), destino_telefono: f.destino_telefono.value, destino_zona: f.destino_zona.value,
+        destino_direccion: f.destino_direccion.value, cobro_destinatario: f.cobro_destinatario.value, notas: f.notas.value, precio: $('precio').textContent };
+    }
+    function limpiarEnvioActual() {
+      const f = $('form-envio');
+      CAMPOS_ENVIO.forEach(k => { f[k].value = ''; });
+      $('paquetes').value = 1; $('foto_paquete').value = ''; $('vista-paquete').hidden = true; $('foto-paquete-vacio').hidden = false;
+      $('fragil').checked = false; $('guardar-destino').value = ''; $('dir-destino').value = '';
+      $('precio').textContent = '—'; $('desglose').textContent = ''; $('precio-antes').textContent = '';
+    }
+    function pintarCaja() {
+      const c = $('caja-envios');
+      c.hidden = !caja.length;
+      $('boton-enviar').textContent = caja.length ? `Enviar la caja (${caja.length + (hayDestinoEscrito() ? 1 : 0)})` : 'Enviar paquete';
+      $('pista-caja').textContent = caja.length ? 'Si llenaste otro destinatario arriba, también se manda con la caja.' : '¿Mandas a varias personas desde el mismo lugar? Agrega cada destinatario a la caja y envíalos juntos: a cada uno le mandas su enlace para que comparta su ubicación.';
+      if (!caja.length) { c.replaceChildren(); return; }
+      if (!hayDestinoEscrito()) {
+        const suma = caja.reduce((t, x) => t + (Number(String(x.precio).replace(/[^\d.]/g, '')) || 0), 0);
+        $('precio').textContent = suma ? dinero(suma) : '—'; $('desglose').textContent = `Total de la caja (${caja.length} envíos)`;
+      }
+      c.replaceChildren(
+        el('div', { class: 'caja-cab' }, el('h3', {}, icono('paquete'), ` Caja de envíos (${caja.length})`), el('small', { text: 'Salen juntos del mismo lugar, con el mismo piloto.' })),
+        el('ol', { class: 'caja-lista' }, caja.map((x, i) => el('li', {},
+          el('img', { src: x.vista, alt: '' }),
+          el('span', {}, el('strong', { text: x.destino_nombre }), el('small', { text: [x.destino_zona, `${x.peso} lb`, x.descripcion].filter(Boolean).join(' · ') })),
+          el('span', { class: 'caja-precio', text: x.precio }),
+          el('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Quitar ' + x.destino_nombre, title: 'Quitar de la caja', onclick: () => { caja.splice(i, 1); pintarCaja(); } }, '×')))));
+    }
+    $('agregar-caja').addEventListener('click', () => {
+      try {
+        if (caja.length >= MAX_CAJA - 1 && hayDestinoEscrito()) throw new Error(`La caja lleva hasta ${MAX_CAJA} envíos.`);
+        caja.push(leerEnvioActual());
+        limpiarEnvioActual(); pintarCaja();
+        mostrarMensaje($('msg-envio'), `Listo: ${caja[caja.length - 1].destino_nombre} va en la caja (${caja.length}). Llena el paquete y los datos del siguiente destinatario.`, 'exito');
+        $('fs-paquete').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } catch (e) { mostrarMensaje($('msg-envio'), e.message); $('msg-envio').scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+    });
+    ['destino_nombre', 'destino_telefono', 'peso'].forEach(k => $(k).addEventListener('input', () => { if (caja.length) pintarCaja(); }));
+    // Después de enviar la caja: el enlace de cada quien recibe, listo para mandarlo por WhatsApp
+    function enlacesCaja(envios, total) {
+      $('dlg-cuerpo').replaceChildren(
+        el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: cerrarDialogo }),
+        el('h2', { text: `¡Listo! Pediste ${envios.length} envíos` }),
+        el('p', { class: 'pista', text: `Total ${dinero(total)}. Ahora manda a cada persona su enlace: ahí comparte su ubicación y confirma sus datos para que el piloto le lleve el paquete.` }),
+        el('ul', { class: 'caja-enlaces' }, envios.map(x => {
+          const e = { ...x, receptor: { enlace: x.enlace_receptor } };
+          return el('li', {}, el('span', {}, el('strong', { text: x.destino_nombre }), el('small', { text: `${x.guia} · código de entrega ${x.codigo_entrega}` })),
+            el('a', { class: 'boton cinta chico', href: whatsappReceptor(e), target: '_blank', rel: 'noopener', text: 'Mandar enlace' }));
+        })),
+        el('button', { class: 'boton', type: 'button', text: 'Ver mis envíos', onclick: () => { cerrarDialogo(); abrirTab('lista'); } }));
+      if (!$('dlg').open) $('dlg').showModal();
+    }
+
     $('form-envio').addEventListener('submit', async (ev) => {
       ev.preventDefault();
       const f = ev.target;
-      const boton = f.querySelector('button[type="submit"]');
+      const boton = $('boton-enviar');
       boton.disabled = true; boton.classList.add('cargando');
       try {
         const programado = f.cuando.value === 'programar' ? $('programado').value : '';
         if (f.cuando.value === 'programar' && !programado) throw new Error('Elige la fecha y hora de recogida.');
-        if (modo === 'lote') { await enviarLote(f, programado); boton.disabled = false; boton.classList.remove('cargando'); return; }
         const quien = f.origen_quien.value;
-        if (!$('foto_paquete').files[0]) { $('caja-foto-paquete').scrollIntoView({ behavior: 'smooth', block: 'center' }); throw new Error('Toma una foto del paquete antes de enviarlo.'); }
-        const fotoPaquete = await prepararArchivo($('foto_paquete').files[0], false);
-        let pos = {};
-        if (quien === 'cliente') { boton.textContent = 'Buscando tu ubicación…'; pos = await miUbicacion(); }
-        const r = await api('/api/envios', { body: {
-          ...datosCotizacion(), programado_para: programado, origen_quien: quien, origen_nombre: f.origen_nombre.value,
-          origen_lat: pos.lat, origen_lng: pos.lng, origen_precision: pos.precision, guardar_destino: $('guardar-destino').value.trim(),
-          descripcion: f.descripcion.value, origen_telefono: f.origen_telefono.value, origen_direccion: f.origen_direccion.value,
-          destino_nombre: f.destino_nombre.value, destino_telefono: f.destino_telefono.value, destino_direccion: f.destino_direccion.value,
-          cobro_destinatario: f.cobro_destinatario.value, metodo_pago: f.metodo_pago.value, notas: f.notas.value, foto_paquete: fotoPaquete,
-        } });
-        $('valor_declarado').value = ''; $('paquetes').value = 1; $('foto_paquete').value = ''; $('vista-paquete').hidden = true; $('foto-paquete-vacio').hidden = false; cargarCargos();
-        ['peso', 'descripcion', 'destino_nombre', 'destino_telefono', 'destino_direccion', 'cobro_destinatario', 'notas'].forEach(k => { f[k].value = ''; });
-        $('fragil').checked = false; $('cupon').value = ''; $('cupon-msg').textContent = ''; $('precio-antes').textContent = '';
-        if ($('guardar-destino').value) cargarDirecciones();
-        $('guardar-destino').value = ''; f.origen_nombre.value = ''; f.origen_direccion.value = '';
-        if (quien === 'tercero') f.origen_telefono.value = '';
-        mostrarMensaje($('msg-envio'), '');
-        $('precio').textContent = '—'; $('desglose').textContent = '';
-        await celebrarPedido(r.guia, r.precio, r.codigo_entrega, r.exige_receptor);
-        cargarEnvios();
-        abrirTab('lista');
-        verDetalle(r.id);
-      } catch (e) { mostrarMensaje($('msg-envio'), e.message); }
-      boton.disabled = false; boton.classList.remove('cargando'); boton.textContent = modo === 'lote' ? 'Enviar todos' : 'Enviar paquete';
+        if (caja.length) {
+          const lista = [...caja];
+          if (hayDestinoEscrito()) lista.push(leerEnvioActual());
+          const envios = [];
+          boton.textContent = 'Preparando fotos…';
+          for (const x of lista) {
+            const { archivo, vista, precio, ...resto } = x;
+            envios.push({ ...resto, foto_paquete: await prepararArchivo(archivo, false) });
+          }
+          let pos = {};
+          if (quien === 'cliente') { boton.textContent = 'Buscando tu ubicación…'; pos = await miUbicacion(); }
+          const r = await api('/api/envios/caja', { body: {
+            vehiculo_id: document.querySelector('input[name="vehiculo_id"]:checked')?.value, metodo_pago: f.metodo_pago.value, cupon: $('cupon').value.trim(), programado_para: programado,
+            origen_quien: quien, origen_nombre: f.origen_nombre.value, origen_telefono: f.origen_telefono.value, origen_zona: f.origen_zona.value, origen_direccion: f.origen_direccion.value,
+            origen_lat: pos.lat, origen_lng: pos.lng, origen_precision: pos.precision, envios } });
+          caja.length = 0; limpiarEnvioActual(); pintarCaja(); cargarCargos();
+          $('cupon').value = ''; $('cupon-msg').textContent = ''; f.origen_nombre.value = ''; f.origen_direccion.value = '';
+          if (quien === 'tercero') f.origen_telefono.value = '';
+          mostrarMensaje($('msg-envio'), '');
+          cargarEnvios();
+          enlacesCaja(r.envios, r.total);
+        } else {
+          const actual = leerEnvioActual();
+          const fotoPaquete = await prepararArchivo(actual.archivo, false);
+          let pos = {};
+          if (quien === 'cliente') { boton.textContent = 'Buscando tu ubicación…'; pos = await miUbicacion(); }
+          const r = await api('/api/envios', { body: {
+            ...datosCotizacion(), programado_para: programado, origen_quien: quien, origen_nombre: f.origen_nombre.value,
+            origen_lat: pos.lat, origen_lng: pos.lng, origen_precision: pos.precision, guardar_destino: $('guardar-destino').value.trim(),
+            descripcion: f.descripcion.value, origen_telefono: f.origen_telefono.value, origen_direccion: f.origen_direccion.value,
+            destino_nombre: f.destino_nombre.value, destino_telefono: f.destino_telefono.value, destino_direccion: f.destino_direccion.value,
+            cobro_destinatario: f.cobro_destinatario.value, metodo_pago: f.metodo_pago.value, notas: f.notas.value, foto_paquete: fotoPaquete,
+          } });
+          if ($('guardar-destino').value) cargarDirecciones();
+          limpiarEnvioActual(); cargarCargos();
+          $('cupon').value = ''; $('cupon-msg').textContent = ''; f.origen_nombre.value = ''; f.origen_direccion.value = '';
+          if (quien === 'tercero') f.origen_telefono.value = '';
+          mostrarMensaje($('msg-envio'), '');
+          await celebrarPedido(r.guia, r.precio, r.codigo_entrega, r.exige_receptor);
+          cargarEnvios();
+          abrirTab('lista');
+          verDetalle(r.id);
+        }
+      } catch (e) { mostrarMensaje($('msg-envio'), e.message); $('msg-envio').scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+      boton.disabled = false; boton.classList.remove('cargando'); pintarCaja();
     });
 
-    async function enviarLote(f, programado) {
-      if (!filasLote.length) throw new Error('Sube el archivo con los envíos.');
-      const o = await miUbicacion();
-      const r = await fetch('/api/envios/lote', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
-        origen_direccion: f.origen_direccion.value, origen_telefono: f.origen_telefono.value, origen_zona: f.origen_zona.value, origen_lat: o.lat, origen_lng: o.lng, origen_precision: o.precision,
-        vehiculo_id: document.querySelector('input[name="vehiculo_id"]:checked')?.value, metodo_pago: f.metodo_pago.value, cupon: $('cupon').value.trim(),
-        programado_para: programado, filas: filasLote }) });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) {
-        if (d.errores) { $('vista-lote').prepend(el('div', { class: 'mensaje error' }, el('strong', { text: 'Corrige el archivo y vuelve a subirlo:' }), el('ul', {}, d.errores.slice(0, 15).map(x => el('li', { text: x }))))); throw new Error('El archivo tiene errores. No se creó ningún envío.'); }
-        throw new Error(d.error || 'No se pudieron crear los envíos.');
-      }
-      filasLote = []; $('archivo-lote').value = ''; pintarLote();
-      await celebrarPedido(`${d.creados} envíos`, d.total);
-      cambiarModo('uno'); abrirTab('lista'); cargarEnvios();
-    }
 
     $('form-datos').addEventListener('submit', async (ev) => {
       ev.preventDefault();
@@ -823,21 +830,6 @@
       }));
       $('dir-destino').addEventListener('change', (ev) => usarDireccion('destino', ev.target.value));
       cargarDirecciones();
-      document.querySelectorAll('#modo-envio button').forEach(b => b.addEventListener('click', () => cambiarModo(b.dataset.modo)));
-      $('plantilla').addEventListener('click', () => {
-        const ejemplo = [TITULOS_LOTE, ['Ana López', '5555-0000', '5a avenida 3-20', cfg.zonas[0] || 'Zona 1', '2', 'Ropa', '150', 'Llamar al llegar']];
-        const csv = '\ufeff' + ejemplo.map(f => f.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\r\n');
-        const a = el('a', { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv' })), download: 'plantilla-envios-vaelo.csv' });
-        document.body.append(a); a.click(); a.remove();
-      });
-      $('archivo-lote').addEventListener('change', async (ev) => {
-        const f = ev.target.files[0]; if (!f) return;
-        const filas = leerCsv(await f.text());
-        const datos = /nombre/i.test(filas[0]?.[0] || '') ? filas.slice(1) : filas;
-        filasLote = datos.map(c => Object.fromEntries(COLUMNAS_LOTE.map((k, i) => [k, c[i] || ''])));
-        if (filasLote.length > 100) { mostrarMensaje($('msg-envio'), 'Máximo 100 envíos por archivo.'); filasLote = []; }
-        pintarLote();
-      });
       $('recargo-fragil-texto').textContent = cfg.recargo_fragil ? `(+${dinero(cfg.recargo_fragil)})` : '';
       whatsappPagos = cfg.whatsapp_pagos || whatsappPagos;
       if (cfg.fletes && cfg.fletes.length) {
@@ -850,11 +842,6 @@
         const f = $('foto_paquete').files[0];
         if (f) { $('vista-paquete').src = URL.createObjectURL(f); $('vista-paquete').hidden = false; $('foto-paquete-vacio').hidden = true; }
       });
-      document.querySelectorAll('input[name="metodo_pago"]').forEach(r => r.addEventListener('change', () => {
-        const t = document.querySelector('input[name="metodo_pago"]:checked').value === 'transferencia';
-        $('datos-transferencia').hidden = !t || !cfg.datos_transferencia;
-        $('datos-transferencia').textContent = cfg.datos_transferencia ? 'Datos para la transferencia: ' + cfg.datos_transferencia + '. Después de enviar, sube la foto del comprobante en el envío.' : '';
-      }));
       $('vehiculos').addEventListener('change', actualizarPrecio);
       actualizarPrecio();
 

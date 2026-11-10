@@ -150,22 +150,13 @@
         </div>
         <div class="bloque">
           <h2>Reclamos y devoluciones a clientes</h2>
-          <p class="bloque-nota">Reportes de paquetes perdidos, dañados o incompletos. Evalúa según lo que llevaba el paquete (foto del cliente, valor declarado, foto de entrega y recorrido) y decide cuánto se le devuelve y cuánto paga el piloto.</p>
+          <p class="bloque-nota">Reportes de paquetes perdidos, dañados o incompletos. Evalúa según lo que llevaba el paquete (foto del paquete, foto de entrega y recorrido) y decide cuánto se le devuelve y cuánto paga el piloto.</p>
           <div id="caja-reclamos"></div>
-        </div>
-        <div class="bloque">
-          <h2>Transferencias por confirmar</h2>
-          <p class="bloque-nota">El cliente manda el comprobante al WhatsApp de Vaelo. Revisa que el dinero entró a la cuenta y márcalo recibido: hasta entonces el envío no se manda a ningún piloto.</p>
-          <div id="caja-transferencias"></div>
         </div>
         <div class="bloque">
           <h2>Cobros contra entrega por devolver a clientes</h2>
           <p class="bloque-nota">Dinero que los pilotos cobraron a quien recibe y que hay que entregar a la tienda o cliente que mandó el paquete.</p>
           <div id="caja-cobros"></div>
-        </div>
-        <div class="bloque">
-          <h2>Crédito de empresas por cobrar</h2>
-          <div id="caja-credito"></div>
         </div>
         <div class="bloque">
           <h2>Cargos a clientes</h2>
@@ -316,7 +307,7 @@
         <form class="bloque" id="form-seguro" novalidate>
           <h2>Pagos, pilotos, reclamos y empresas</h2>
           <div class="fila">
-            <div class="campo"><label for="aj-whatsapp_pagos">WhatsApp para comprobantes <span class="ayuda">Con 502, ej. 50237731793</span></label><input id="aj-whatsapp_pagos" type="tel" maxlength="15"></div>
+            <div class="campo"><label for="aj-whatsapp_pagos">WhatsApp de Vaelo <span class="ayuda">Fletes y pickups. Con 502, ej. 50237731793</span></label><input id="aj-whatsapp_pagos" type="tel" maxlength="15"></div>
             <div class="campo"><label for="aj-dias_liquidar">Días para que el piloto entregue el efectivo <span class="ayuda">Después no puede conectarse</span></label><input id="aj-dias_liquidar" type="number" min="1" max="60" step="1"></div>
             <div class="campo"><label for="aj-dias_reclamo">Días para reportar un problema</label><input id="aj-dias_reclamo" type="number" min="1" max="60" step="1"></div>
             <div class="campo"><label for="aj-km_max_tarifa_fija">Km máximos con tarifa fija <span class="ayuda">Solo si no hay zonas dibujadas</span></label><input id="aj-km_max_tarifa_fija" type="number" min="1" max="200" step="1"></div>
@@ -325,7 +316,6 @@
             <div class="campo"><label for="aj-cargo_bodega_empresa">Empresas: bodega por paquete por día (Q)</label><input id="aj-cargo_bodega_empresa" type="number" min="0" step="0.5"></div>
             <div class="campo"><label for="aj-min_paquetes_sede">Empresas: mínimo de paquetes a la sede</label><input id="aj-min_paquetes_sede" type="number" min="1" step="1"></div>
           </div>
-          <div class="campo"><label for="aj-datos_transferencia">Datos de la cuenta para transferencias <span class="ayuda">Los ve el cliente al elegir transferencia</span></label><textarea id="aj-datos_transferencia" maxlength="600" rows="3" placeholder="Banco Industrial, cuenta monetaria 000-000000-0, a nombre de Vaelo, S.A."></textarea></div>
           <button class="boton" type="submit">Guardar</button>
         </form>
         <form class="bloque" id="form-respaldos" novalidate>
@@ -365,7 +355,7 @@
 
     const tabs = ['envios', 'mensajeros', 'clientes', 'empresas', 'caja', 'descuentos', 'reportes', 'tarifas'];
     const TITULOS = { envios: ['Envíos', 'Pedidos y su estado'], mensajeros: ['Pilotos', 'Flota en vivo, documentos y aprobaciones'], clientes: ['Clientes', 'Identidad, empresas y calificaciones'],
-      caja: ['Caja', 'Efectivo, transferencias, pagos a pilotos, reembolsos y cargos'], empresas: ['Empresas', 'Contratos y paquetes en la sede'], descuentos: ['Descuentos', 'Promociones y cupones'], reportes: ['Reportes', 'Cómo va el negocio'],
+      caja: ['Caja', 'Efectivo, pagos a pilotos, reembolsos y cargos'], empresas: ['Empresas', 'Contratos y paquetes en la sede'], descuentos: ['Descuentos', 'Promociones y cupones'], reportes: ['Reportes', 'Cómo va el negocio'],
       tarifas: ['Tarifas y ajustes', 'Precios, zonas, sede y equipo'] };
     function abrirTab(nombre) {
       tabs.forEach(t => { $('tab-' + t).setAttribute('aria-selected', String(t === nombre)); $('panel-' + t).hidden = t !== nombre; });
@@ -431,7 +421,7 @@
             e.estado === 'pendiente' && !e.receptor_listo ? [el('br'), el('span', { class: 'receptor-estado no', text: 'Faltan ubicaciones' })] : null,
             e.estado === 'fallido' && e.fallo?.decidir_antes ? [el('br'), sub(`El cliente elige en ${faltaPara(e.fallo.decidir_antes)}`)] : null,
             e.estado === 'en_sede' && e.sede ? [el('br'), sub(`${e.sede.dias} día(s) · ${dinero(e.sede.cargo)}`)] : null,
-            e.metodo_pago === 'transferencia' && e.pago_estado === 'por_revisar' ? [el('br'), el('span', { class: 'etiqueta-azul', text: 'Comprobante por revisar' })] : null))));
+null))));
       } catch (e) { poner(cuerpo, el('tr', {}, el('td', { colspan: 8, class: 'mensaje error', text: e.message }))); }
     }
 
@@ -501,32 +491,17 @@
             } }),
             accion(`Enviar de nuevo (${dinero(f ? f.cargo_reentrega : 0)})`, { accion: 'reenviar' }, 'boton borde chico', 'Se crea un envío nuevo desde la sede hacia quien recibe. ¿Continuar?')] : null));
     }
-    function bloqueComprobantePanel(e, guardar) {
-      const estado = { sin_comprobante: ['Sin comprobante todavía', 'etiqueta-gris'], por_revisar: ['Por revisar', 'etiqueta-azul'], verificado: ['Verificada', 'etiqueta-completa'], rechazado: ['Rechazado', 'etiqueta-pendiente'] }[e.pago_estado] || ['—', 'etiqueta-gris'];
-      return el('div', { class: 'bloque', style: 'background:var(--gris);border:0' },
-        el('h3', {}, 'Transferencia ', el('span', { class: estado[1], text: e.pago_estado === 'verificado' ? 'Pago recibido' : 'Esperando comprobante por WhatsApp' })),
-        el('p', { class: 'pista', text: `Monto: ${dinero(e.precio + (e.cargos_extra || 0))}${e.pago_nota ? '. Nota: ' + e.pago_nota : ''}` }),
-        e.tiene_comprobante ? el('a', { class: 'prueba-img', href: `/api/admin/envios/${e.id}/comprobante`, target: '_blank', rel: 'noopener' },
-          el('img', { src: `/api/admin/envios/${e.id}/comprobante`, alt: 'Comprobante', onerror: (ev) => ev.target.replaceWith(el('span', { class: 'doc-pdf', text: 'Ver PDF del comprobante' })) })) : null,
-        e.pago_estado !== 'verificado' ? el('div', { class: 'navegar' },
-          el('button', { class: 'boton chico', type: 'button', text: 'Pago recibido: mandar al piloto', onclick: (ev) => guardar(ev.target, () => api(`/api/admin/pagos/${e.id}`, { body: { estado: 'verificado' } })) }),
-          e.tiene_comprobante ? el('button', { class: 'boton peligro chico', type: 'button', text: 'Rechazar comprobante', onclick: (ev) => {
-            const nota = prompt('¿Qué está mal? El cliente lo verá. Ej. El monto no coincide.');
-            if (nota) guardar(ev.target, () => api(`/api/admin/pagos/${e.id}`, { body: { estado: 'rechazado', nota } }));
-          } }) : null) : null);
-    }
 
     // ---------- Reclamos del cliente ----------
     function bloqueReclamosPanel(e, guardar) {
       if (!e.reclamos || !e.reclamos.length) return null;
       return el('div', { class: 'bloque bloque-fallido' }, el('h3', {}, icono('alerta'), ' Reclamo del cliente'),
-        ...e.reclamos.map(r => formReclamo({ ...r, guia: e.guia, valor_declarado: e.valor_declarado, piloto: r.piloto }, () => abrirEnvio(e.id))));
+        ...e.reclamos.map(r => formReclamo({ ...r, guia: e.guia, piloto: r.piloto }, () => abrirEnvio(e.id))));
     }
     function formReclamo(r, alListo) {
       const msg = el('div', { class: 'mensaje', role: 'alert' });
       const caja = el('div', { class: 'reclamo' },
         el('p', {}, el('strong', { text: r.tipo_texto }), ` · ${r.guia} · ${fecha(r.creado)}`, el('br'), r.descripcion),
-        r.valor_declarado > 0 ? el('p', { class: 'pista', text: `Valor declarado al pedir: ${dinero(r.valor_declarado)}` }) : null,
         r.tiene_foto ? el('a', { class: 'prueba-img', href: `/api/admin/reclamos/${r.id}/foto`, target: '_blank', rel: 'noopener' }, el('img', { src: `/api/admin/reclamos/${r.id}/foto`, alt: 'Foto del reclamo' }), el('small', { text: 'Foto del cliente' })) : null);
       if (r.estado !== 'abierto') {
         caja.append(el('p', { class: r.estado === 'aprobado' ? 'mensaje exito' : 'mensaje error' }, `${r.estado === 'aprobado' ? 'Aprobado' : 'Rechazado'} por ${r.resuelto_por}: ${r.resolucion}`,
@@ -752,7 +727,7 @@
               q.excede_horas || (q.minutos > r.horas * 60 && modo !== 'pickup') ? el('span', { class: 'etiqueta-pendiente', text: `Más de ${r.horas} h` }) : null),
             el('ol', { class: 'paradas' }, q.pedidos.map((id, i) => {
               const p = porId.get(id);
-              return el('li', {}, el('div', {}, el('strong', { text: p.recibe_nombre || p.cliente_nombre }), el('small', { text: `${p.codigo} · ${p.zona} · ${p.horario_texto} · ${p.tamano_texto}${p.metodo_pago === 'transferencia' ? ' · transferencia' : ''}` })),
+              return el('li', {}, el('div', {}, el('strong', { text: p.recibe_nombre || p.cliente_nombre }), el('small', { text: `${p.codigo} · ${p.zona} · ${p.horario_texto} · ${p.tamano_texto}` })),
                 modo === 'un_paquete' ? null : el('div', { class: 'parada-acciones' },
                   el('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Subir', text: '↑', disabled: i === 0, onclick: () => mover(i, -1) }),
                   el('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Bajar', text: '↓', disabled: i === q.pedidos.length - 1, onclick: () => mover(i, 1) }),
@@ -772,26 +747,17 @@
       // Pickup: precio acordado por WhatsApp, pago y piloto
       const pickup = el('div');
       const precio = el('input', { type: 'number', min: 1, step: '0.01', placeholder: '0.00' });
-      const metodo = el('select', {}, el('option', { value: 'efectivo', text: 'Efectivo: el piloto cobra al recoger' }), el('option', { value: 'transferencia', text: 'Transferencia a Vaelo' }));
-      const pagado = el('input', { type: 'checkbox', style: 'width:auto' });
       const pintarPickup = () => poner(pickup, modo === 'pickup' && l.paga === 'empresa' ? el('div', { class: 'bloque', style: 'background:var(--gris);border:0' },
-        el('h3', { text: 'Pickup que paga la empresa' }), el('p', { class: 'pista', text: 'Pon el precio y la promoción que acordaron por WhatsApp. Si es transferencia, el piloto sale cuando llegue el pago.' }),
-        el('div', { class: 'fila' }, el('div', { class: 'campo' }, el('label', { text: 'Precio acordado (Q)' }), precio), el('div', { class: 'campo' }, el('label', { text: 'Pago' }), metodo)),
-        el('label', { class: 'casilla' }, pagado, 'La transferencia de la empresa ya llegó'),
+        el('h3', { text: 'Pickup que paga la empresa' }), el('p', { class: 'pista', text: 'Pon el precio y la promoción que acordaron por WhatsApp. La empresa le paga al piloto en efectivo al recoger.' }),
+        el('div', { class: 'campo', style: 'max-width:260px' }, el('label', { text: 'Precio acordado (Q)' }), precio),
         r.whatsapp_empresa ? el('a', { class: 'boton cinta chico', href: `https://wa.me/${waTel(r.whatsapp_empresa)}`, target: '_blank', rel: 'noopener', text: 'WhatsApp de la empresa' }) : null)
-        : modo === 'pickup' ? el('p', { class: 'mensaje aviso', text: 'Pickup que pagan los clientes: cada uno paga Q35 en zonas preferenciales o Q45 fuera, al recibir o por transferencia.' }) : null);
-      // Transferencias de clientes por confirmar
-      const transferencias = l.pedidos.filter(p => p.metodo_pago === 'transferencia' && !p.transferencia_ok);
-      const bloqueTransf = transferencias.length && !(l.modo === 'pickup' && l.paga === 'empresa') ? el('div', { class: 'mensaje aviso' },
-        el('strong', { text: 'Transferencias por confirmar: ' }), 'el cliente manda el comprobante al WhatsApp de Vaelo.',
-        el('ul', { class: 'lista-simple' }, transferencias.map(p => el('li', {}, `${p.codigo} · ${p.recibe_nombre || p.cliente_nombre}${p.precio ? ' · ' + dinero(p.precio) : ''} `,
-          rolPanel === 'admin' ? el('button', { class: 'boton chico', type: 'button', text: 'Llegó', onclick: async () => { await api(`/api/admin/pedidos/${p.id}/pago`, { body: { accion: 'transferencia_ok' } }).catch(e => alert(e.message)); abrirLote(loteId, empresaId); } }) : null, ' ',
-          rolPanel === 'admin' ? el('button', { class: 'boton borde chico', type: 'button', text: 'Que pague al recibir', onclick: async () => { await api(`/api/admin/pedidos/${p.id}/pago`, { body: { accion: 'efectivo' } }).catch(e => alert(e.message)); abrirLote(loteId, empresaId); } }) : null)))) : null;
+        : modo === 'pickup' ? el('p', { class: 'mensaje aviso', text: 'Pickup que pagan los clientes: cada uno paga Q35 en zonas preferenciales o Q45 fuera, en efectivo al recibir.' }) : null);
+      const bloqueTransf = null;
       const confirmar = el('button', { class: 'boton accion-principal', type: 'button', text: 'Confirmar rutas y avisar a los pilotos', disabled: !l.se_puede_asignar || (l.recogida === 'sede' && !l.recibido_en), onclick: async () => {
         if (!rutas.length) { mostrarMensaje(msg, 'Primero calcula las rutas.'); return; }
         confirmar.disabled = true;
         try {
-          const x = await api(`/api/admin/lotes-empresa/${loteId}/confirmar`, { body: { modo, rutas: rutas.map(q => ({ pedidos: q.pedidos, piloto_id: q.piloto_id })), pickup_precio: precio.value, pickup_metodo: metodo.value, pickup_pagado: pagado.checked } });
+          const x = await api(`/api/admin/lotes-empresa/${loteId}/confirmar`, { body: { modo, rutas: rutas.map(q => ({ pedidos: q.pedidos, piloto_id: q.piloto_id })), pickup_precio: precio.value } });
           mostrarMensaje(msg, `Listo: ${x.envios} envíos en ${x.rutas} ruta(s). Los pilotos ya tienen el aviso.`, 'exito');
           cargarEmpresas(); cargarEnvios(); setTimeout(() => abrirEmpresa(empresaId, 'ruta'), 1200);
         } catch (e) { mostrarMensaje(msg, e.message); confirmar.disabled = false; }
@@ -821,7 +787,6 @@
       const fechaCita = el('input', { type: 'datetime-local', value: x.cita_fecha || '' });
       const lugar = el('input', { maxlength: 200, value: x.cita_lugar || '', placeholder: 'Sede de Vaelo' });
       const nota = el('input', { maxlength: 500, placeholder: 'Ej. Traer copia de la patente' });
-      const credito = el('input', { type: 'checkbox', style: 'width:auto' });
       const accion = (body, pregunta) => async (ev) => {
         if (pregunta && !confirm(pregunta)) return;
         ev.target.disabled = true;
@@ -843,9 +808,8 @@
           el('div', { class: 'campo' }, el('label', { text: 'Nota para la empresa' }), nota),
           el('button', { class: 'boton chico', type: 'button', text: x.estado === 'cita' ? 'Cambiar la cita' : 'Poner cita y avisar', onclick: (ev) => accion({ accion: 'cita', fecha: fechaCita.value, lugar: lugar.value, nota: nota.value })(ev) })) : null,
         abierta ? el('div', { class: 'bloque', style: 'background:var(--gris);border:0' }, el('h3', { text: '2. Contrato firmado' }),
-          el('label', { class: 'casilla' }, credito, 'Puede pagar a fin de mes (crédito)'),
           el('div', { class: 'navegar' },
-            el('button', { class: 'boton', type: 'button', text: 'Contrato firmado: activar empresa', onclick: (ev) => accion({ accion: 'aprobar', credito: credito.checked }, `¿${x.empresa_nombre} ya firmó el contrato?`)(ev) }),
+            el('button', { class: 'boton', type: 'button', text: 'Contrato firmado: activar empresa', onclick: (ev) => accion({ accion: 'aprobar' }, `¿${x.empresa_nombre} ya firmó el contrato?`)(ev) }),
             el('button', { class: 'boton peligro', type: 'button', text: 'Rechazar', onclick: (ev) => { const motivo = prompt('¿Qué tiene que corregir la empresa?'); if (motivo) accion({ accion: 'rechazar', motivo })(ev); } }))) : null,
         x.motivo_rechazo ? el('p', { class: 'mensaje error', text: 'Motivo del rechazo: ' + x.motivo_rechazo }) : null);
       $('dlg').showModal();
@@ -890,7 +854,6 @@
             e.recibio ? dato('Recibió', `${e.recibio}${e.entregado_en ? ' · ' + fecha(e.entregado_en) : ''}`) : null,
             e.notas ? dato('Indicaciones', e.notas) : null,
             e.calificacion ? dato('El cliente calificó al piloto', `${e.calificacion} de 5${e.calificacion_comentario ? '. ' + e.calificacion_comentario : ''}`) : null,
-            e.valor_declarado > 0 ? dato('Valor declarado', `${dinero(e.valor_declarado)}${e.seguro > 0 ? `, asegurado (${dinero(e.seguro)})` : ', sin seguro'}`) : null,
             e.cargos_extra > 0 ? dato('Cargos cobrados con este envío', dinero(e.cargos_extra)) : null,
             e.metodo_pago === 'transferencia' ? dato('Transferencia', { sin_comprobante: 'Sin comprobante', por_revisar: 'Comprobante por revisar', verificado: 'Verificada', rechazado: 'Comprobante rechazado' }[e.pago_estado] || '—') : null,
             cliente && cliente.calif_cliente ? dato('Calificación de los pilotos a este cliente', `${cliente.calif_cliente} de 5 (${cliente.calif_cliente_n})`) : null,
@@ -902,7 +865,6 @@
           msg,
           bloqueReclamosPanel(e, guardar),
           bloqueFallidoPanel(e, guardar),
-          e.metodo_pago === 'transferencia' && rolPanel === 'admin' ? bloqueComprobantePanel(e, guardar) : null,
           enCurso ? bloqueReceptorPanel(e, msg, guardar) : null,
           el('div', { class: 'bloque', style: 'background:var(--gris);border:0' },
             el('h3', {}, 'Piloto ', estadoPiloto),
@@ -1215,15 +1177,13 @@
       tipo.value = c.tipo_cuenta || 'personal';
       const nombre = el('input', { id: 'emp-nombre', maxlength: 100, value: c.empresa_nombre || '', placeholder: 'Nombre de la empresa' });
       const desc = el('input', { id: 'emp-desc', type: 'number', min: 0, max: 90, step: 1, value: c.descuento_empresa || 0 });
-      const credito = el('input', { type: 'checkbox', style: 'width:auto', checked: c.credito_permitido });
       return el('div', { class: 'bloque', style: 'background:var(--gris);border:0;margin:1rem 0' }, el('h3', { text: 'Cuenta de empresa' }),
-        el('p', { class: 'pista', text: 'Las empresas pueden subir varios envíos con un archivo, tener precio especial y pagar a fin de mes.' }), msg,
+        el('p', { class: 'pista', text: 'Las empresas mandan sus envíos en carpetas, pueden tener precio especial y «paga quien recibe».' }), msg,
         el('div', { class: 'fila' }, el('div', { class: 'campo' }, el('label', { for: 'emp-tipo', text: 'Tipo de cuenta' }), tipo),
           el('div', { class: 'campo' }, el('label', { for: 'emp-nombre', text: 'Empresa' }), nombre), el('div', { class: 'campo' }, el('label', { for: 'emp-desc', text: 'Descuento (%)' }), desc)),
-        el('label', { class: 'casilla' }, credito, 'Puede pagar a fin de mes (crédito)'),
         el('button', { class: 'boton chico', type: 'button', text: 'Guardar cuenta', onclick: async () => {
           try {
-            await api(`/api/admin/clientes/${c.id}/empresa`, { method: 'PUT', body: { tipo_cuenta: tipo.value, empresa_nombre: nombre.value, descuento_empresa: desc.value, credito_permitido: credito.checked } });
+            await api(`/api/admin/clientes/${c.id}/empresa`, { method: 'PUT', body: { tipo_cuenta: tipo.value, empresa_nombre: nombre.value, descuento_empresa: desc.value } });
             mostrarMensaje(msg, 'Cuenta actualizada.', 'exito'); cargarClientes();
           } catch (e) { mostrarMensaje(msg, e.message); }
         } }));
@@ -1307,7 +1267,7 @@
 
     // ---------- Zonas dibujadas en el mapa ----------
     const CAMPOS_AJUSTES = ['cargo_devolucion', 'cargo_bodega_dia', 'cargo_reentrega', 'horas_decidir_fallido', 'cargo_cancelacion', 'pct_piloto_cancelacion', 'sede_direccion',
-      'whatsapp_pagos', 'dias_liquidar', 'dias_reclamo', 'cargo_bodega_empresa', 'min_paquetes_sede', 'km_max_tarifa_fija', 'datos_transferencia', 'correo_respaldos'];
+      'whatsapp_pagos', 'dias_liquidar', 'dias_reclamo', 'cargo_bodega_empresa', 'min_paquetes_sede', 'km_max_tarifa_fija', 'correo_respaldos'];
     let mapaZonas = null, capaZonas = [], selectorSede = null;
     const COLORES_ZONA = ['#1c3faa', '#d9480f', '#17824a', '#7b2cbf', '#0e7490', '#b4261c', '#a16207', '#be185d'];
     function pintarMapaZonas(zonas) {
@@ -1365,7 +1325,7 @@
     });
     guardarAjustes($('form-fallidos'), ['cargo_devolucion', 'cargo_bodega_dia', 'cargo_reentrega', 'horas_decidir_fallido', 'cargo_cancelacion', 'pct_piloto_cancelacion', 'sede_direccion'],
       () => { const p = selectorSede && selectorSede.obtener(); return p ? { sede_lat: p.lat, sede_lng: p.lng } : {}; });
-    guardarAjustes($('form-seguro'), ['whatsapp_pagos', 'dias_liquidar', 'dias_reclamo', 'km_max_tarifa_fija', 'cargo_bodega_empresa', 'min_paquetes_sede', 'datos_transferencia']);
+    guardarAjustes($('form-seguro'), ['whatsapp_pagos', 'dias_liquidar', 'dias_reclamo', 'km_max_tarifa_fija', 'cargo_bodega_empresa', 'min_paquetes_sede']);
     guardarAjustes($('form-respaldos'), ['correo_respaldos']);
 
     $('form-zona').addEventListener('submit', async (ev) => {
@@ -1453,16 +1413,8 @@
             el('span', { class: r.estado === 'abierto' ? 'etiqueta-pendiente' : 'etiqueta-azul', text: r.estado === 'abierto' ? 'Por evaluar' : `Devolver ${dinero(r.monto_cliente)}` })),
           formReclamo(r, cargarCaja))) : [vacio('No hay reclamos pendientes.')]));
       } catch (e) { mostrarMensaje($('msg-caja'), e.message); }
-      // Transferencias por revisar y cargos a clientes
+      // Cargos a clientes
       try {
-        const { pagos } = await api('/api/admin/pagos');
-        const porRevisar = pagos.filter(x => x.pago_estado === 'por_revisar').length;
-        $('insignia-caja').textContent = String(porRevisar); $('insignia-caja').hidden = !porRevisar;
-        const ETQ = { sin_comprobante: ['Sin comprobante', 'etiqueta-gris'], por_revisar: ['Por revisar', 'etiqueta-azul'], rechazado: ['Rechazado', 'etiqueta-pendiente'] };
-        poner($('caja-transferencias'), ...(pagos.length ? pagos.map(x => el('div', { class: 'caja-fila' },
-          el('div', {}, el('strong', { text: x.guia }), ' ', el('span', { class: (ETQ[x.pago_estado] || ETQ.sin_comprobante)[1], text: (ETQ[x.pago_estado] || ETQ.sin_comprobante)[0] }), el('br'), sub(`${x.empresa_nombre || x.cliente} · ${fecha(x.creado)}`)),
-          el('strong', { class: 'caja-monto', text: dinero(x.precio + (x.cargos_extra || 0)) }),
-          el('button', { class: 'boton chico' + (x.pago_estado === 'por_revisar' ? '' : ' borde'), type: 'button', text: 'Revisar', onclick: () => abrirEnvio(x.id) }))) : [vacio('No hay transferencias pendientes.')]));
         const { cargos } = await api('/api/admin/cargos');
         const abiertos = cargos.filter(x => !x.pagado_en && !x.anulado_en);
         poner($('caja-cargos'), ...(abiertos.length ? abiertos.map(x => el('div', { class: 'caja-fila' },
@@ -1486,7 +1438,6 @@
           try { await api(ruta, { body: { cliente_id: x.id } }); cargarCaja(); } catch (e) { mostrarMensaje($('msg-caja'), e.message); }
         } }))) : [vacio('Nada pendiente.')];
       poner($('caja-cobros'), ...lista(c.cobros, 'Marcar pagado', '/api/admin/caja/pagar-cobros', x => `¿Ya le entregaste ${dinero(x.monto)} a ${x.empresa_nombre || x.nombre}?`));
-      poner($('caja-credito'), ...lista(c.credito, 'Marcar cobrado', '/api/admin/caja/cobrar-credito', x => `¿${x.empresa_nombre || x.nombre} ya pagó ${dinero(x.monto)}?`));
       poner($('caja-historial'), c.historial.length ? el('div', { class: 'tabla-envoltura' }, el('table', {},
         el('thead', {}, el('tr', {}, ['Fecha', 'Movimiento', 'Piloto', 'Monto', 'Nota'].map(t => el('th', { text: t })))),
         el('tbody', {}, c.historial.map(h => el('tr', {}, el('td', { text: fecha(h.creado) }),
@@ -1507,7 +1458,7 @@
         el('div', { class: 'sueldo-cuentas' },
           el('div', {}, el('span', { text: 'Envíos' }), el('strong', { text: String(p.envios) }), el('small', { text: `hoy ${p.hoy.envios}` })),
           el('div', {}, el('span', { text: 'Ganó' }), el('strong', { text: dinero(p.ganancia) }), el('small', { text: `hoy ${dinero(p.hoy.ganancia)}` })),
-          el('div', {}, el('span', { text: 'Trae en efectivo' }), el('strong', { text: '− ' + dinero(p.efectivo) }), el('small', { text: `transferencias ${dinero(p.transferencias)}` })),
+          el('div', {}, el('span', { text: 'Trae en efectivo' }), el('strong', { text: '− ' + dinero(p.efectivo) })),
           p.descuentos ? el('div', {}, el('span', { text: 'Reclamos' }), el('strong', { text: '− ' + dinero(p.descuentos) })) : null,
           el('div', { class: 'sueldo-neto ' + (neto >= 0 ? 'paga' : 'recibe') }, el('span', { text: neto >= 0 ? 'Vaelo le paga' : 'Debe entregar' }), el('strong', { text: dinero(Math.abs(neto)) }))),
         p.detalle ? el('details', {}, el('summary', { text: 'Ver envíos' }), el('ul', { class: 'lista-simple' }, p.detalle.map(d => el('li', { text: `${d.guia} · ${d.destino_zona} · ${fecha(d.piloto_cerro_en)} · gana ${dinero(d.ganancia)}${d.efectivo ? ` · cobró ${dinero(d.efectivo)}` : ''}` })))) : null,

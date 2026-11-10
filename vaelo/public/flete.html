@@ -39,9 +39,6 @@
           el('a', { class: 'boton cinta chico', href: `https://wa.me/${wa(d.telefono)}?text=${encodeURIComponent(enlaceTxt(rol, d.nombre, url))}`, target: '_blank', rel: 'noopener', text: 'Mandarle su enlace por WhatsApp' })) : null);
       poner(app, cab,
         el('div', { class: 'mensaje aviso', text: f.estado === 'pendiente' ? 'Para que el piloto salga, quien entrega y quien recibe tienen que compartir su ubicación en vivo con su enlace. El piloto llega a donde estén.' : 'El flete va en camino. Puedes seguirlo con la guía.' }),
-        f.metodo_pago === 'transferencia' && f.pago_estado !== 'verificado' ? el('div', { class: 'cargos-aviso' },
-          el('span', {}, el('strong', { style: 'font-size:1rem', text: `Transferencia de ${dinero(f.precio)}` }), el('br'), el('small', { text: (f.datos_transferencia ? f.datos_transferencia + '. ' : '') + 'Manda el comprobante por WhatsApp: el flete sale cuando confirmemos el pago.' })),
-          el('a', { class: 'boton cinta chico', href: `https://wa.me/${f.whatsapp_pagos}?text=${encodeURIComponent('Hola Vaelo, adjunto el comprobante del flete ' + f.guia + ' por ' + dinero(f.precio) + '.')}`, target: '_blank', rel: 'noopener', text: 'Mandar comprobante' })) : null,
         persona('Quien entrega la carga', f.origen, f.enlace_entrega, 'entrega'),
         persona('Quien recibe', f.destino, f.enlace_recibe, 'recibe'),
         f.codigo_entrega ? el('div', { class: 'codigo-entrega' }, el('div', {}, el('span', { text: 'Código de entrega' }), el('strong', { text: f.codigo_entrega })),
@@ -67,7 +64,7 @@
         sec('3', '¿Quién la recibe?', el('div', { class: 'fila' }, c('destino_nombre', 'Nombre', { maxlength: 100 }), c('destino_telefono', 'Teléfono', { type: 'tel', maxlength: 30 })),
           el('div', { class: 'fila' }, c('destino_zona', 'Zona o municipio', zonas()), c('destino_direccion', 'Referencias', { maxlength: 300 }))),
         sec('4', 'Pago', el('div', { class: 'fila' },
-          c('metodo_pago', '¿Cómo pagas?', { tag: 'select', opciones: [el('option', { value: 'efectivo', text: 'Efectivo al piloto' }), el('option', { value: 'transferencia', text: 'Transferencia (comprobante por WhatsApp)' })] }),
+          el('p', { class: 'pista', text: 'El flete se paga en efectivo al piloto.' }),
           c('cobro_destinatario', 'Cobrar a quien recibe (Q)', { type: 'number', min: 0, step: '0.01', placeholder: '0.00' }, 'Opcional')),
           c('notas', 'Indicaciones para el piloto', { maxlength: 300 }, 'Opcional')),
         msg, el('button', { class: 'boton accion-principal', type: 'submit', text: 'Guardar datos del flete' }));

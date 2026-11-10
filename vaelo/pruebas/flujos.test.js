@@ -205,16 +205,30 @@ test('asignación automática: si todos lo rechazan, se vuelve a ofrecer', async
   ajuste('auto_asignar', 0);
 });
 
-test('comprobante de transferencia y revisión en el panel', async () => {
-  const r = await ana('POST', '/api/envios', { vehiculo_id: 1, peso: 2, origen_zona: 'Zona 1', destino_zona: 'Zona 16', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng,
-    destino_nombre: 'Luis', destino_telefono: '55554444', destino_direccion: 'x', metodo_pago: 'transferencia', foto_paquete: FOTO });
-  assert.equal(fila(r.j.id).pago_estado, 'sin_comprobante');
-  assert.equal((await ana('POST', `/api/envios/${r.j.id}/comprobante`, { archivo: FOTO })).status, 200);
-  assert.ok((await admin('GET', '/api/admin/pagos')).j.pagos.some((p) => p.id === r.j.id && p.pago_estado === 'por_revisar'));
-  const sinPago = await admin('POST', `/api/admin/envios/${r.j.id}/asignar`, { mensajero_id: pilotoId });
-  assert.equal(sinPago.status, 400, 'no se manda al piloto sin confirmar el pago');
-  assert.equal((await admin('POST', `/api/admin/pagos/${r.j.id}`, { estado: 'verificado' })).status, 200);
+test('solo efectivo: ya no hay transferencia ni pago a fin de mes', async () => {
+  const base = { vehiculo_id: 1, peso: 2, origen_zona: 'Zona 1', destino_zona: 'Zona 16', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng,
+    destino_nombre: 'Luis', destino_telefono: '55554444', destino_direccion: 'x', foto_paquete: FOTO };
+  assert.equal((await ana('POST', '/api/envios', { ...base, metodo_pago: 'transferencia' })).status, 400);
+  assert.equal((await ana('POST', '/api/envios', { ...base, metodo_pago: 'credito' })).status, 400);
+  const r = await ana('POST', '/api/envios', { ...base, metodo_pago: 'efectivo', valor_declarado: 900 });
+  assert.equal(r.status, 201);
+  assert.equal(fila(r.j.id).valor_declarado, 0, 'ya no se guarda el valor del contenido');
   assert.equal((await admin('POST', `/api/admin/envios/${r.j.id}/asignar`, { mensajero_id: pilotoId })).status, 200);
+});
+
+test('caja de envíos: varios destinatarios en un solo viaje, cada uno con su enlace', async () => {
+  const comun = { vehiculo_id: 1, metodo_pago: 'efectivo', origen_zona: 'Zona 1', origen_telefono: '55551111', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng, origen_quien: 'cliente' };
+  const uno = { peso: 1, foto_paquete: FOTO, destino_nombre: 'Luis', destino_telefono: '55554444', destino_zona: 'Zona 16' };
+  const sinFoto = await ana('POST', '/api/envios/caja', { ...comun, envios: [uno, { ...uno, foto_paquete: null, destino_nombre: 'Marta' }] });
+  assert.equal(sinFoto.status, 400); assert.match(sinFoto.j.error, /Marta/);
+  const r = await ana('POST', '/api/envios/caja', { ...comun, envios: [uno, { ...uno, destino_nombre: 'Marta', destino_telefono: '55553333' }] });
+  assert.equal(r.status, 201, JSON.stringify(r.j));
+  assert.equal(r.j.envios.length, 2);
+  assert.ok(r.j.envios.every((e) => /^\/recibe\/[a-f0-9]+$/.test(e.enlace_receptor)), 'cada quien recibe tiene su enlace');
+  const [a, b] = r.j.envios.map((e) => fila(e.id));
+  assert.ok(a.grupo && a.grupo === b.grupo, 'van juntos en un solo viaje');
+  assert.equal(b.destino_nombre, 'Marta');
+  db.prepare("UPDATE envios SET estado = 'cancelado' WHERE grupo = ?").run(a.grupo);
 });
 
 test('contraseña nueva con el enlace del correo', async () => {
@@ -358,7 +372,7 @@ test('empresa: solicitud de contrato, cita, aprobación y envío de 10 paquetes 
   assert.equal(st.j.general.envios, 9);
 });
 
-test('pedidos de empresa: enlace del cliente, enviar a Vaelo, dividir en rutas, avisos y sede', async () => {
+test('carpetas de empresa: añadir envíos, enlace del cliente, enviar a Vaelo, dividir en rutas, avisos y sede', async () => {
   const { crearExcel } = require('../lib/xlsx');
   db.prepare('UPDATE usuarios SET vehiculo_id = 1 WHERE id = ?').run(pilotoId);
   db.prepare("UPDATE envios SET estado = 'cancelado' WHERE estado IN ('pendiente','recogido','en_camino') AND mensajero_id = ?").run(pilotoId);
@@ -367,36 +381,48 @@ test('pedidos de empresa: enlace del cliente, enviar a Vaelo, dividir en rutas, 
   const hoy = new Date(Date.now() - 6 * 3600_000).toISOString().slice(0, 10);
   const LOCAL = { lat: 14.6420, lng: -90.5150 };
   assert.equal((await beto('PUT', '/api/empresa/punto', { lat: LOCAL.lat, lng: LOCAL.lng, direccion: 'Bodega de Tienda Beto, 6a av' })).status, 200);
-  // Excel con dos pedidos (quedan esperando que el cliente llene su enlace)
+  // Carpeta para hoy
+  const cr = await beto('POST', '/api/empresa/carpetas', { dia: hoy });
+  assert.equal(cr.status, 201, JSON.stringify(cr.j));
+  const carpeta = cr.j.carpeta.id;
+  // Excel con dos envíos (quedan esperando que el cliente llene su enlace) y uno que no podrá ese día
   const xls = crearExcel([{ nombre: 'Pedidos', columnas: [{ titulo: 'Descripción' }, { titulo: 'Tamaño' }, { titulo: 'Cliente' }, { titulo: 'WhatsApp' }],
     filas: [['Camisa', 'Pequeño', 'Rosa Díaz', '55557001'], ['Factura', 'Sobre', 'Juan Paz', '55557002']] }]);
-  const sub = await beto('POST', '/api/empresa/pedidos/archivo', { archivo: 'data:application/octet-stream;base64,' + xls.toString('base64') });
+  const sub = await beto('POST', `/api/empresa/carpetas/${carpeta}/archivo`, { archivo: 'data:application/octet-stream;base64,' + xls.toString('base64') });
   assert.equal(sub.status, 201, JSON.stringify(sub.j)); assert.equal(sub.j.creados, 2);
   // 9 pedidos que llena la empresa, cerca de su local (Zona 1: Q35)
   const puntos = Array.from({ length: 9 }, (_, i) => ({ lat: 14.632 + (i % 3) * 0.006, lng: -90.528 + Math.floor(i / 3) * 0.009 }));
   for (const [i, pt] of puntos.entries()) {
-    const r = await beto('POST', '/api/empresa/pedidos', { descripcion: 'Paquete ' + i, tamano: i === 0 ? 'mediano' : 'sobre', cliente_nombre: 'Cliente ' + i, cliente_telefono: '5555800' + i,
+    const r = await beto('POST', `/api/empresa/carpetas/${carpeta}/pedidos`, { descripcion: 'Paquete ' + i, tamano: i === 0 ? 'mediano' : 'sobre', cliente_nombre: 'Cliente ' + i, cliente_telefono: '5555800' + i,
       foto: FOTO, llenar: true, dia: hoy, horario: i === 1 ? 'tarde' : 'cualquiera', direccion: 'Casa ' + i, zona: 'Zona 1', lat: pt.lat, lng: pt.lng, recibe_nombre: 'Recibe ' + i, recibe_telefono: '5555900' + i, metodo_pago: 'efectivo' });
     assert.equal(r.status, 201, JSON.stringify(r.j));
     assert.equal(r.j.pedido.estado, 'confirmado'); assert.equal(r.j.pedido.precio, undefined, 'la empresa no ve dinero');
   }
-  let lista = (await beto('GET', '/api/empresa/pedidos')).j;
-  const rosa = lista.pedidos.find((p) => p.cliente_nombre === 'Rosa Díaz');
+  let lista = (await beto('GET', `/api/empresa/carpetas/${carpeta}`)).j.carpeta;
+  assert.equal(lista.confirmados, 9); assert.equal(lista.total, 11);
+  const rosa = lista.pedidos.find((p) => p.cliente_nombre === 'Rosa Díaz'), juan = lista.pedidos.find((p) => p.cliente_nombre === 'Juan Paz');
   assert.equal(rosa.estado, 'pendiente');
-  assert.equal((await beto('POST', '/api/empresa/enviar', { dia: hoy, modo: 'una_moto' })).status, 400, 'solo 9 confirmados');
-  // Rosa llena su enlace: fuera de las zonas con tarifa fija (Q45) y paga por transferencia
-  const token = rosa.enlace.split('/').pop();
+  assert.equal((await beto('POST', `/api/empresa/carpetas/${carpeta}/enviar`, { modo: 'una_moto' })).status, 400, 'solo 9 confirmados');
+  // Juan no puede ese día
   const anon = cliente();
-  assert.equal((await anon('GET', `/api/pedido/${token}`)).j.empresa, 'Tienda Beto');
-  const conf = await anon('POST', `/api/pedido/${token}`, { dia: hoy, horario: 'manana', direccion: 'Colonia lejana', zona: 'Otra zona o municipio', lat: CERCA.lat, lng: CERCA.lng, recibe_nombre: 'Rosa Díaz', recibe_telefono: '55557001', metodo_pago: 'transferencia' });
+  assert.equal((await anon('POST', `/api/pedido/${juan.enlace.split('/').pop()}/no-puedo`, { nota: 'Mejor el viernes' })).status, 200);
+  // Rosa confirma con su enlace: el día es el de la carpeta (aunque mande otro), fuera de las zonas con tarifa fija (Q45), paga en efectivo
+  const token = rosa.enlace.split('/').pop();
+  const vistaRosa = (await anon('GET', `/api/pedido/${token}`)).j;
+  assert.equal(vistaRosa.empresa, 'Tienda Beto'); assert.equal(vistaRosa.dia_fijo, hoy);
+  const conf = await anon('POST', `/api/pedido/${token}`, { dia: '2099-01-01', horario: 'manana', direccion: 'Colonia lejana', zona: 'Otra zona o municipio', lat: CERCA.lat, lng: CERCA.lng, recibe_nombre: 'Rosa Díaz', recibe_telefono: '55557001' });
   assert.equal(conf.status, 200, JSON.stringify(conf.j)); assert.equal(conf.j.precio.precio, 45);
-  assert.equal((await beto('POST', '/api/empresa/enviar', { dia: hoy, modo: 'una_moto' })).status, 400, 'falta la foto del pedido de Rosa');
+  assert.equal(db.prepare('SELECT dia, metodo_pago FROM pedidos_empresa WHERE id = ?').get(rosa.id).dia, hoy);
+  assert.equal((await beto('POST', `/api/empresa/carpetas/${carpeta}/enviar`, { modo: 'una_moto' })).status, 400, 'falta la foto del pedido de Rosa');
   assert.equal((await beto('POST', `/api/empresa/pedidos/${rosa.id}/foto`, { foto: FOTO })).status, 200);
-  const rec = await beto('GET', `/api/empresa/recomendacion?dia=${hoy}`);
+  const rec = await beto('GET', `/api/empresa/carpetas/${carpeta}/recomendacion`);
   assert.equal(rec.status, 200); assert.ok(['una_moto', 'motos'].includes(rec.j.recomendacion.modo));
-  const env = await beto('POST', '/api/empresa/enviar', { dia: hoy, modo: 'motos', recogida: 'empresa' });
-  assert.equal(env.status, 201, JSON.stringify(env.j)); assert.equal(env.j.pedidos, 10);
-  assert.equal((await anon('POST', `/api/pedido/${token}`, { dia: hoy, horario: 'tarde', direccion: 'x', zona: 'Zona 16', lat: CERCA.lat, lng: CERCA.lng, recibe_nombre: 'Rosa', recibe_telefono: '55557001', metodo_pago: 'efectivo' })).status, 400, 'ya no se cambia');
+  const env = await beto('POST', `/api/empresa/carpetas/${carpeta}/enviar`, { modo: 'motos', recogida: 'empresa' });
+  assert.equal(env.status, 201, JSON.stringify(env.j)); assert.equal(env.j.pedidos, 10); assert.equal(env.j.pendientes, 1, 'Juan pasa a una carpeta nueva');
+  const carpetas = (await beto('GET', '/api/empresa/carpetas')).j;
+  assert.equal(carpetas.enviadas[0].id, carpeta);
+  assert.ok(carpetas.abiertas.some((c) => c.nombre.includes('pendientes') && c.no_puede === 1));
+  assert.equal((await anon('POST', `/api/pedido/${token}`, { horario: 'tarde', direccion: 'x', zona: 'Zona 16', lat: CERCA.lat, lng: CERCA.lng, recibe_nombre: 'Rosa', recibe_telefono: '55557001' })).status, 400, 'ya no se cambia');
   // Panel: la empresa aparece primero, se calculan 2 rutas y se confirman
   const emp = (await admin('GET', '/api/admin/empresas-activas')).j;
   assert.equal(emp.empresas[0].empresa_nombre, 'Tienda Beto'); assert.equal(emp.empresas[0].lotes_nuevos, 1);
@@ -404,13 +430,10 @@ test('pedidos de empresa: enlace del cliente, enviar a Vaelo, dividir en rutas, 
   assert.equal(calc.j.rutas.length, 2);
   assert.equal(calc.j.rutas.reduce((t, r) => t + r.pedidos.length, 0), 10);
   const rutas = calc.j.rutas.map((r, i) => ({ pedidos: r.pedidos, piloto_id: i === 0 ? pilotoId : null }));
-  const sinPago = await admin('POST', `/api/admin/lotes-empresa/${env.j.lote}/confirmar`, { modo: 'motos', rutas });
-  assert.equal(sinPago.status, 400); assert.match(sinPago.j.error, /transferencia/);
-  assert.equal((await admin('POST', `/api/admin/pedidos/${rosa.id}/pago`, { accion: 'transferencia_ok' })).status, 200);
   const ok = await admin('POST', `/api/admin/lotes-empresa/${env.j.lote}/confirmar`, { modo: 'motos', rutas });
   assert.equal(ok.status, 200, JSON.stringify(ok.j)); assert.equal(ok.j.envios, 10);
   const rosaEnvio = db.prepare('SELECT * FROM envios WHERE pedido_id = ?').get(rosa.id);
-  assert.equal(rosaEnvio.guia, rosa.codigo, 'el código del pedido es la guía'); assert.equal(rosaEnvio.precio, 45); assert.equal(rosaEnvio.metodo_pago, 'transferencia');
+  assert.equal(rosaEnvio.guia, rosa.codigo, 'el código del pedido es la guía'); assert.equal(rosaEnvio.precio, 45); assert.equal(rosaEnvio.metodo_pago, 'recibe');
   // Ruta del piloto: la acepta completa, recoge escaneando y entrega en orden
   const ruta1 = db.prepare('SELECT * FROM envios WHERE lote_empresa_id = ? AND mensajero_id = ? ORDER BY parada').all(env.j.lote, pilotoId);
   assert.equal(ruta1.length, rutas[0].pedidos.length);
