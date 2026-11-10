@@ -50,6 +50,7 @@
 
           <fieldset id="fs-paquete">
             <legend>El paquete</legend>
+            <p class="paquete-num" id="titulo-paquete1" hidden><span>1</span> Paquete 1</p>
             <div class="fila">
               <div class="campo"><label for="peso">Peso aproximado (libras)</label><input id="peso" type="number" min="0.1" step="0.1" inputmode="decimal" placeholder="Ej. 5" required></div>
               <div class="campo"><label for="descripcion">¿Qué contiene? <span class="ayuda">Opcional</span></label><input id="descripcion" maxlength="200" placeholder="Documentos, ropa, repuestos…"></div>
@@ -61,6 +62,11 @@
                 <input id="foto_paquete" type="file" accept="image/*" capture="environment">
               </label>
             </div>
+            <div id="paquetes-extra"></div>
+            <button type="button" class="agregar-paquete" id="agregar-paquete">
+              <span class="agregar-paquete-mas" aria-hidden="true">+</span>
+              <span><strong>Agregar otro paquete</strong><small id="agregar-paquete-pista">Para la misma persona y dirección. Hasta 3 paquetes por el mismo precio.</small></span>
+            </button>
             <div class="fila">
               <div class="campo" id="campo-paquetes" hidden><label for="paquetes">Paquetes para esta dirección <span class="ayuda">Mismo precio</span></label><input id="paquetes" type="number" min="1" max="30" step="1" value="1"></div>
             </div>
@@ -220,7 +226,7 @@
     function datosCotizacion() {
       return {
         vehiculo_id: document.querySelector('input[name="vehiculo_id"]:checked')?.value,
-        peso: $('peso').value, origen_zona: $('origen_zona').value, destino_zona: $('destino_zona').value, fragil: $('fragil').checked,
+        peso: pesoTotal(), origen_zona: $('origen_zona').value, destino_zona: $('destino_zona').value, fragil: $('fragil').checked,
         cupon: $('cupon').value.trim(), paquetes: $('paquetes').value,
       };
     }
@@ -651,8 +657,10 @@
         e.tiene_foto_fallo ? el('a', { class: 'prueba-img', href: `/api/envios/${e.id}/entrega/fallo`, target: '_blank', rel: 'noopener', style: 'margin:.5rem 0' },
           el('img', { src: `/api/envios/${e.id}/entrega/fallo`, alt: 'Foto del intento de entrega' }), el('small', { text: 'Foto del intento de entrega' })) : null,
         e.reenviado_como ? el('p', { class: 'mensaje exito' }, 'Este paquete salió de nuevo con la guía ', el('a', { href: '#', text: e.reenviado_como.guia, onclick: (ev) => { ev.preventDefault(); verDetalle(e.reenviado_como.id); } }), '.') : null,
-        e.tiene_foto_paquete ? el('a', { class: 'prueba-img', href: `/api/envios/${e.id}/entrega/paquete`, target: '_blank', rel: 'noopener', style: 'margin:.5rem 0' },
-          el('img', { src: `/api/envios/${e.id}/entrega/paquete`, alt: 'Foto del paquete' }), el('small', { text: 'Tu foto del paquete' })) : null,
+        el('div', { class: e.paquetes_extra ? 'fotos-paquetes' : '' }, e.tiene_foto_paquete ? el('a', { class: 'prueba-img', href: `/api/envios/${e.id}/entrega/paquete`, target: '_blank', rel: 'noopener', style: 'margin:.5rem 0' },
+          el('img', { src: `/api/envios/${e.id}/entrega/paquete`, alt: 'Foto del paquete' }), el('small', { text: e.paquetes_extra ? `Paquete 1 · ${e.peso_paquete1} lb` : 'Tu foto del paquete' })) : null,
+        ...(e.paquetes_extra || []).map(x => el('a', { class: 'prueba-img', href: `/api/envios/${e.id}/paquete/${x.n}`, target: '_blank', rel: 'noopener', style: 'margin:.5rem 0' },
+          el('img', { src: `/api/envios/${e.id}/paquete/${x.n}`, alt: `Foto del paquete ${x.n}` }), el('small', { text: [`Paquete ${x.n}`, `${x.peso} lb`, x.descripcion].filter(Boolean).join(' · ') })))),
         cajaEntrega(e),
         cajaReceptor(e),
         cajaCodigo(e),
@@ -697,6 +705,54 @@
     // Cada envío lleva su foto y su destinatario; a cada quien recibe se le manda su enlace para compartir ubicación y datos.
     const caja = [], MAX_CAJA = 10;
     const CAMPOS_ENVIO = ['peso', 'descripcion', 'destino_nombre', 'destino_telefono', 'destino_direccion', 'cobro_destinatario', 'notas'];
+    // ---------- Hasta 3 paquetes para la misma persona y dirección (mismo precio) ----------
+    const extras = [], MAX_PAQUETES = 3;
+    function pesoTotal() {
+      const base = Number($('peso').value) || 0;
+      if (!extras.length) return $('peso').value;
+      const t = extras.reduce((s, x) => s + (Number(x.peso) || 0), base);
+      return t ? String(Math.round(t * 100) / 100) : '';
+    }
+    function pintarExtras() {
+      $('titulo-paquete1').hidden = !extras.length;
+      $('paquetes-extra').replaceChildren(...extras.map((x, i) => {
+        const n = i + 2;
+        const foto = el('input', { type: 'file', accept: 'image/*', capture: 'environment' });
+        const vista = el('img', { alt: '', hidden: !x.vista, src: x.vista || '' });
+        const vacio = el('span', { class: 'foto-paquete-vacio', hidden: !!x.vista }, el('strong', { text: 'Tomar foto' }), el('small', { text: 'Obligatoria' }));
+        foto.addEventListener('change', () => { const f = foto.files[0]; if (!f) return; x.archivo = f; x.vista = URL.createObjectURL(f); vista.src = x.vista; vista.hidden = false; vacio.hidden = true; });
+        const peso = el('input', { type: 'number', min: '0.1', step: '0.1', inputmode: 'decimal', placeholder: 'Ej. 3', value: x.peso || '', 'aria-label': `Peso del paquete ${n} (libras)` });
+        peso.addEventListener('input', () => { x.peso = peso.value; actualizarPrecio(); });
+        const cont = el('input', { maxlength: '200', placeholder: 'Documentos, ropa…', value: x.descripcion || '', 'aria-label': `Qué contiene el paquete ${n}` });
+        cont.addEventListener('input', () => { x.descripcion = cont.value; });
+        return el('div', { class: 'paquete-extra' },
+          el('div', { class: 'paquete-extra-cab' }, el('p', { class: 'paquete-num' }, el('span', { text: String(n) }), ` Paquete ${n}`),
+            el('button', { type: 'button', class: 'boton-icono', 'aria-label': `Quitar el paquete ${n}`, title: 'Quitar paquete', text: '×', onclick: () => { extras.splice(i, 1); pintarExtras(); actualizarPrecio(); } })),
+          el('div', { class: 'paquete-extra-cuerpo' },
+            el('label', { class: 'foto-paquete-boton foto-mini' }, vista, vacio, foto),
+            el('div', { class: 'paquete-extra-campos' },
+              el('div', { class: 'campo' }, el('label', { text: 'Peso (libras)' }), peso),
+              el('div', { class: 'campo' }, el('label', {}, '¿Qué contiene? ', el('span', { class: 'ayuda', text: 'Opcional' })), cont))));
+      }));
+      const lleno = extras.length >= MAX_PAQUETES - 1;
+      $('agregar-paquete').hidden = lleno;
+      $('agregar-paquete-pista').textContent = extras.length ? `Puedes agregar ${MAX_PAQUETES - 1 - extras.length} más. Mismo precio.` : 'Para la misma persona y dirección. Hasta 3 paquetes por el mismo precio.';
+    }
+    $('agregar-paquete').addEventListener('click', () => {
+      if (extras.length >= MAX_PAQUETES - 1) return;
+      extras.push({ peso: '', descripcion: '', archivo: null, vista: '' });
+      pintarExtras();
+      const ult = $('paquetes-extra').lastElementChild;
+      ult.scrollIntoView({ behavior: 'smooth', block: 'center' }); ult.querySelector('input[type=number]').focus({ preventScroll: true });
+    });
+    function leerExtras() {
+      extras.forEach((x, i) => {
+        if (!(Number(x.peso) > 0)) throw new Error(`Escribe el peso del paquete ${i + 2}.`);
+        if (!x.archivo) { $('paquetes-extra').children[i].scrollIntoView({ behavior: 'smooth', block: 'center' }); throw new Error(`Toma la foto del paquete ${i + 2}.`); }
+      });
+      return extras.map(x => ({ peso: x.peso, descripcion: x.descripcion, archivo: x.archivo }));
+    }
+    const fotosExtras = async (lista) => { const out = []; for (const x of lista || []) out.push({ peso: x.peso, descripcion: x.descripcion, foto: await prepararArchivo(x.archivo, false) }); return out; };
     const hayDestinoEscrito = () => !!($('destino_nombre').value.trim() || $('destino_telefono').value.trim() || $('peso').value || $('foto_paquete').files[0]);
     function leerEnvioActual() {
       const f = $('form-envio');
@@ -705,7 +761,7 @@
       if (f.destino_nombre.value.trim().length < 2) throw new Error('Escribe el nombre de quien recibe.');
       if (f.destino_telefono.value.replace(/\D/g, '').length < 8) throw new Error('Escribe el teléfono de quien recibe (8 dígitos).');
       if (!f.destino_zona.value) throw new Error('Elige la zona de quien recibe.');
-      return { peso: f.peso.value, descripcion: f.descripcion.value, fragil: $('fragil').checked, paquetes: $('paquetes').value, archivo: $('foto_paquete').files[0],
+      return { peso: f.peso.value, descripcion: f.descripcion.value, fragil: $('fragil').checked, paquetes: $('paquetes').value, archivo: $('foto_paquete').files[0], extras: leerExtras(),
         vista: URL.createObjectURL($('foto_paquete').files[0]), destino_nombre: f.destino_nombre.value.trim(), destino_telefono: f.destino_telefono.value, destino_zona: f.destino_zona.value,
         destino_direccion: f.destino_direccion.value, cobro_destinatario: f.cobro_destinatario.value, notas: f.notas.value, precio: $('precio').textContent };
     }
@@ -714,6 +770,7 @@
       CAMPOS_ENVIO.forEach(k => { f[k].value = ''; });
       $('paquetes').value = 1; $('foto_paquete').value = ''; $('vista-paquete').hidden = true; $('foto-paquete-vacio').hidden = false;
       $('fragil').checked = false; $('guardar-destino').value = ''; $('dir-destino').value = '';
+      extras.length = 0; pintarExtras();
       $('precio').textContent = '—'; $('desglose').textContent = ''; $('precio-antes').textContent = '';
     }
     function pintarCaja() {
@@ -730,7 +787,7 @@
         el('div', { class: 'caja-cab' }, el('h3', {}, icono('paquete'), ` Caja de envíos (${caja.length})`), el('small', { text: 'Salen juntos del mismo lugar, con el mismo piloto.' })),
         el('ol', { class: 'caja-lista' }, caja.map((x, i) => el('li', {},
           el('img', { src: x.vista, alt: '' }),
-          el('span', {}, el('strong', { text: x.destino_nombre }), el('small', { text: [x.destino_zona, `${x.peso} lb`, x.descripcion].filter(Boolean).join(' · ') })),
+          el('span', {}, el('strong', { text: x.destino_nombre }), el('small', { text: [x.destino_zona, x.extras && x.extras.length ? `${x.extras.length + 1} paquetes` : null, `${x.extras && x.extras.length ? Math.round(x.extras.reduce((t, p) => t + Number(p.peso), Number(x.peso)) * 100) / 100 : x.peso} lb`, x.descripcion].filter(Boolean).join(' · ') })),
           el('span', { class: 'caja-precio', text: x.precio }),
           el('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Quitar ' + x.destino_nombre, title: 'Quitar de la caja', onclick: () => { caja.splice(i, 1); pintarCaja(); } }, '×')))));
     }
@@ -774,8 +831,8 @@
           const envios = [];
           boton.textContent = 'Preparando fotos…';
           for (const x of lista) {
-            const { archivo, vista, precio, ...resto } = x;
-            envios.push({ ...resto, foto_paquete: await prepararArchivo(archivo, false) });
+            const { archivo, vista, precio, extras: ex, ...resto } = x;
+            envios.push({ ...resto, foto_paquete: await prepararArchivo(archivo, false), extras: await fotosExtras(ex) });
           }
           let pos = {};
           if (quien === 'cliente') { boton.textContent = 'Buscando tu ubicación…'; pos = await miUbicacion(); await zonaDeMiUbicacion(pos); }
@@ -792,6 +849,7 @@
         } else {
           const actual = leerEnvioActual();
           const fotoPaquete = await prepararArchivo(actual.archivo, false);
+          const fotosEx = await fotosExtras(actual.extras);
           let pos = {};
           if (quien === 'cliente') { boton.textContent = 'Buscando tu ubicación…'; pos = await miUbicacion(); await zonaDeMiUbicacion(pos); }
           const r = await api('/api/envios', { body: {
@@ -800,6 +858,7 @@
             descripcion: f.descripcion.value, origen_telefono: f.origen_telefono.value, origen_direccion: f.origen_direccion.value,
             destino_nombre: f.destino_nombre.value, destino_telefono: f.destino_telefono.value, destino_direccion: f.destino_direccion.value,
             cobro_destinatario: f.cobro_destinatario.value, metodo_pago: f.metodo_pago.value, notas: f.notas.value, foto_paquete: fotoPaquete,
+            peso: f.peso.value, extras: fotosEx,
           } });
           if ($('guardar-destino').value) cargarDirecciones();
           limpiarEnvioActual(); cargarCargos();

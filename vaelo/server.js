@@ -412,6 +412,7 @@ const CAMPOS_INTERNOS = ['foto_paquete', 'foto_entrega', 'firma_entrega', 'liqui
 function infoExtra(e) {
   const aj = getAjustes();
   const out = { tiene_comprobante: !!e.comprobante, tiene_foto_paquete: !!e.foto_paquete };
+  if ((e.paquetes || 1) > 1 && !e.pedido_id) { const x = paquetesExtra(e.id); if (x.length) { out.paquetes_extra = x; out.peso_paquete1 = redondear(e.peso - x.reduce((t, p) => t + (p.peso || 0), 0)); } }
   if (e.fallo_en) {
     out.fallo = { motivo: e.fallo_motivo, motivo_texto: MOTIVOS_FALLO[e.fallo_motivo] || '', nota: e.fallo_nota, en: e.fallo_en, tiene_foto: !!e.fallo_foto,
       decision: e.fallo_decision, decidido_por: e.fallo_decidido_por,
@@ -1030,6 +1031,7 @@ ruta('GET', '/api/piloto/envios', ({ req }) => {
     if (e.estado === 'a_sede') { const sede = sedeUbicacion(); out.sede = { lat: sede?.lat ?? null, lng: sede?.lng ?? null, direccion: getAjustes().sede_direccion || '' }; }
     out.ya_califique_cliente = !!e.calif_cliente;
     out.tiene_foto_paquete = !!e.foto_paquete;
+    if (extra.paquetes_extra) { out.paquetes_extra = extra.paquetes_extra; out.peso_paquete1 = extra.peso_paquete1; }
     out.flete_pendiente = !!e.flete && !e.flete_configurado_en;
     if (e.pedido_id) {
       const ped = db.prepare('SELECT id, cliente_nombre FROM pedidos_empresa WHERE id = ?').get(e.pedido_id);
@@ -1215,6 +1217,12 @@ ruta('GET', '/api/piloto/envios/:id/foto-paquete', ({ req, res, params }) => {
   if (!e) falla(404, 'No hay foto.');
   return enviarArchivoEnvio(res, e, 'paquete');
 });
+ruta('GET', '/api/piloto/envios/:id/paquete/:n', ({ req, res, params }) => {
+  const p = requierePiloto(req);
+  const e = db.prepare('SELECT id FROM envios WHERE id = ? AND mensajero_id = ?').get(Number(params.id), p.id);
+  if (!e) falla(404, 'No hay foto.');
+  return enviarFotoExtra(res, e.id, params.n);
+});
 ruta('GET', '/api/piloto/envios/:id/foto-cliente', ({ req, res, params }) => {
   const p = requierePiloto(req);
   const e = db.prepare(`SELECT usuario_id FROM envios WHERE id = ? AND mensajero_id = ? AND estado IN ${SQL_PILOTO_ACTIVO}`).get(Number(params.id), p.id);
@@ -1393,6 +1401,10 @@ ruta('GET', '/api/admin/usuarios/:id/documento/:tipo', ({ req, res, params }) =>
   return enviarDocumento(res, Number(params.id), params.tipo);
 });
 
+ruta('GET', '/api/admin/envios/:id/paquete/:n', ({ req, res, params }) => {
+  requiereStaff(req);
+  return enviarFotoExtra(res, Number(params.id), params.n);
+});
 ruta('GET', '/api/admin/envios/:id/entrega/:tipo', ({ req, res, params }) => {
   requiereStaff(req);
   const e = db.prepare('SELECT * FROM envios WHERE id = ?').get(Number(params.id));
@@ -1524,6 +1536,53 @@ function enviarArchivoEnvio(res, envio, tipo) {
   res.end(datos);
   return { _enviado: true };
 }
+// ---------- Varios paquetes en un envío (hasta 3, misma dirección, mismo precio) ----------
+const MAX_PAQUETES_ENVIO = 3;
+// Revisa los paquetes 2 y 3 y suma su peso al del primero (el precio se calcula con el peso total)
+function prepararExtras(body) {
+  const lista = Array.isArray(body.extras) ? body.extras : [];
+  if (lista.length > MAX_PAQUETES_ENVIO - 1) falla(400, `Un envío lleva hasta ${MAX_PAQUETES_ENVIO} paquetes.`);
+  const extras = lista.map((x, i) => {
+    const peso = numero(x && x.peso);
+    if (!Number.isFinite(peso) || peso <= 0) falla(400, `Escribe el peso del paquete ${i + 2}.`);
+    if (!x.foto) falla(400, `Toma la foto del paquete ${i + 2}.`);
+    return { n: i + 2, peso: redondear(peso), descripcion: texto(x.descripcion, 200) || null, foto: x.foto };
+  });
+  if (extras.length) {
+    const base = numero(body.peso);
+    body.peso = redondear((Number.isFinite(base) ? base : 0) + extras.reduce((t, x) => t + x.peso, 0));
+    body.peso_paquete1 = Number.isFinite(base) ? redondear(base) : null;
+  }
+  return extras;
+}
+function guardarExtras(envioId, extras) {
+  for (const x of extras) {
+    const m = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(String(x.foto || ''));
+    if (!m) falla(400, `La foto del paquete ${x.n} no es válida.`);
+    const datos = Buffer.from(m[2], 'base64');
+    if (datos.length < 300) falla(400, `La foto del paquete ${x.n} está vacía.`);
+    if (datos.length > 700_000) falla(413, `La foto del paquete ${x.n} es demasiado grande (máximo 700 KB).`);
+    const ext = m[1] === 'jpeg' ? 'jpg' : m[1];
+    if (!FIRMAS[ext].every((b, i) => datos[i] === b)) falla(400, `La foto del paquete ${x.n} no es válida.`);
+    fs.mkdirSync(DOCS_DIR, { recursive: true, mode: 0o750 });
+    const nombre = `envio-${envioId}-paquete${x.n}-${crypto.randomBytes(6).toString('hex')}.${ext}`;
+    fs.writeFileSync(path.join(DOCS_DIR, nombre), datos, { mode: 0o640 });
+    db.prepare('INSERT INTO paquetes_envio (envio_id, n, peso, descripcion, foto) VALUES (?, ?, ?, ?, ?)').run(envioId, x.n, x.peso, x.descripcion, nombre);
+  }
+}
+const paquetesExtra = (envioId) => db.prepare('SELECT n, peso, descripcion, foto IS NOT NULL AS tiene_foto FROM paquetes_envio WHERE envio_id = ? ORDER BY n').all(envioId)
+  .map((x) => ({ n: x.n, peso: x.peso, descripcion: x.descripcion, tiene_foto: !!x.tiene_foto }));
+function enviarFotoExtra(res, envioId, n) {
+  const f = db.prepare('SELECT foto FROM paquetes_envio WHERE envio_id = ? AND n = ?').get(envioId, Number(n));
+  if (!f || !f.foto) falla(404, 'No hay foto.');
+  let datos; const archivo = path.join(DOCS_DIR, path.basename(f.foto));
+  try { datos = fs.readFileSync(archivo); } catch { falla(404, 'No hay foto.'); }
+  res.writeHead(200, { 'Content-Type': TIPOS[path.extname(archivo)] || 'application/octet-stream', 'Content-Length': datos.length,
+    'Cache-Control': 'private, no-store', 'Content-Security-Policy': 'sandbox', ...CABECERAS_SEGURIDAD });
+  res.end(datos);
+  return { _enviado: true };
+}
+
 // Lo que gana el piloto por envío: porcentaje, monto fijo, o el precio menos lo que cobra Vaelo (Q5 por envío)
 const gananciaPiloto = (precio) => {
   const a = getAjustes(), v = Number(a.comision_valor) || 0;
@@ -1603,6 +1662,7 @@ function validarPedido(u, body) {
   if (d.metodo_pago === 'recibe' && cuenta.tipo_cuenta !== 'empresa') falla(400, '"Paga quien recibe" es para cuentas de empresa.');
   // Varios paquetes a la misma dirección (empresas): mismo precio
   d.paquetes = cuenta.tipo_cuenta === 'empresa' ? Math.min(30, Math.max(1, Math.round(numero(body.paquetes)) || 1)) : 1;
+  if (Array.isArray(body.extras) && body.extras.length) d.paquetes = Math.max(d.paquetes, 1 + Math.min(body.extras.length, MAX_PAQUETES_ENVIO - 1));
   if (!Number.isFinite(d.cobro_destinatario) || d.cobro_destinatario < 0 || d.cobro_destinatario > 50000) falla(400, 'El monto a cobrar a quien recibe no es válido.');
   return d;
 }
@@ -1634,6 +1694,7 @@ function insertarEnvio(u, body, d, c, desc, programado, grupo = null) {
   // Foto del paquete que tomó el cliente: muestra qué lleva desde antes de recogerlo
   if (body.foto_paquete) guardarArchivoEnvio(Number(r.lastInsertRowid), 'paquete', body.foto_paquete);
   const id = Number(r.lastInsertRowid);
+  if (body._extras && body._extras.length) guardarExtras(id, body._extras);
   // Los cargos pendientes del cliente (cancelación, devolución, sede) se cobran junto con este envío
   const extra = sumarCargosPendientes(u.id, id);
   const nota = programado ? 'Solicitud recibida (programada)' : 'Solicitud recibida';
@@ -1658,6 +1719,7 @@ ruta('POST', '/api/envios', async ({ req, body }) => {
   delete body._lote_sede_id;
   const u = requiereUsuario(req);
   revisarClienteParaEnviar(u);
+  body._extras = prepararExtras(body);
   const d = validarPedido(u, body);
   if (!body.foto_paquete) falla(400, 'Toma una foto del paquete: así queda registrado qué lleva antes de recogerlo.');
   const programado = programadoUtc(body.programado_para);
@@ -1688,11 +1750,12 @@ ruta('POST', '/api/envios/caja', async ({ req, body }) => {
     origen_zona: body.origen_zona, origen_direccion: body.origen_direccion, origen_lat: body.origen_lat, origen_lng: body.origen_lng, origen_precision: body.origen_precision, cupon: body.cupon };
   const preparados = [], errores = [];
   for (const [i, x] of lista.entries()) {
-    const b = { ...comun, peso: x.peso, descripcion: x.descripcion, fragil: x.fragil, paquetes: x.paquetes, foto_paquete: x.foto_paquete,
+    const b = { ...comun, peso: x.peso, descripcion: x.descripcion, fragil: x.fragil, paquetes: x.paquetes, foto_paquete: x.foto_paquete, extras: x.extras,
       destino_nombre: x.destino_nombre, destino_telefono: x.destino_telefono, destino_zona: x.destino_zona, destino_direccion: x.destino_direccion,
       cobro_destinatario: x.cobro_destinatario, notas: x.notas };
     try {
       if (!b.foto_paquete) falla(400, 'falta la foto del paquete');
+      b._extras = prepararExtras(b);
       const d = validarPedido(u, b);
       const c = await cotizar(b);
       const desc = mejorDescuento(c.precio, u.id, i === 0 ? body.cupon : null);
@@ -1713,6 +1776,12 @@ ruta('POST', '/api/envios/caja', async ({ req, body }) => {
   return { _status: 201, ok: true, envios: creados, total: redondear(creados.reduce((t, x) => t + x.precio, 0)) };
 }, { limite: 9_000_000 });
 
+ruta('GET', '/api/envios/:id/paquete/:n', ({ req, res, params }) => {
+  const u = requiereUsuario(req);
+  const e = db.prepare('SELECT id FROM envios WHERE id = ? AND usuario_id = ?').get(Number(params.id), u.id);
+  if (!e) falla(404, 'No encontramos ese envío.');
+  return enviarFotoExtra(res, e.id, params.n);
+});
 ruta('GET', '/api/envios/:id/entrega/:tipo', ({ req, res, params }) => {
   const u = requiereUsuario(req);
   const e = db.prepare('SELECT * FROM envios WHERE id = ? AND usuario_id = ?').get(Number(params.id), u.id);

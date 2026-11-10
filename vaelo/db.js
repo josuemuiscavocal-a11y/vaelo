@@ -543,6 +543,16 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_carpetas_usuario ON carpetas_empresa(usuario_id, estado);
 `);
 agregarColumnas('pedidos_empresa', [['carpeta_id', 'INTEGER'], ['no_puede_nota', 'TEXT']]);
+// Hasta 3 paquetes en un mismo envío: el primero vive en el envío; el 2.º y el 3.º aquí, cada uno con su peso, contenido y foto
+db.exec(`
+  CREATE TABLE IF NOT EXISTS paquetes_envio (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    envio_id INTEGER NOT NULL REFERENCES envios(id),
+    n INTEGER NOT NULL,                              -- 2 o 3
+    peso REAL, descripcion TEXT, foto TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_paquetes_envio ON paquetes_envio(envio_id);
+`);
 db.exec('CREATE INDEX IF NOT EXISTS idx_pedidos_carpeta ON pedidos_empresa(carpeta_id)');
 if (!db.prepare("SELECT 1 FROM ajustes WHERE clave = 'v6_carpetas'").get()) {
   // Sin transferencias: lo que quedó pendiente se paga en efectivo al recibir

@@ -231,6 +231,26 @@ test('caja de envíos: varios destinatarios en un solo viaje, cada uno con su en
   db.prepare("UPDATE envios SET estado = 'cancelado' WHERE grupo = ?").run(a.grupo);
 });
 
+test('hasta 3 paquetes en un envío: mismo precio, peso sumado y foto de cada uno', async () => {
+  const base = { vehiculo_id: 1, peso: 2, origen_zona: 'Zona 1', destino_zona: 'Zona 16', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng, metodo_pago: 'efectivo',
+    destino_nombre: 'Luis', destino_telefono: '55554444', foto_paquete: FOTO };
+  const solo = await ana('POST', '/api/envios', base);
+  const sinFoto = await ana('POST', '/api/envios', { ...base, extras: [{ peso: 3 }] });
+  assert.equal(sinFoto.status, 400); assert.match(sinFoto.j.error, /paquete 2/);
+  const cuatro = await ana('POST', '/api/envios', { ...base, extras: [1, 2, 3].map(() => ({ peso: 1, foto: FOTO })) });
+  assert.equal(cuatro.status, 400);
+  const r = await ana('POST', '/api/envios', { ...base, extras: [{ peso: 3, descripcion: 'ropa', foto: FOTO }, { peso: 1, foto: FOTO }] });
+  assert.equal(r.status, 201, JSON.stringify(r.j));
+  assert.equal(r.j.precio, solo.j.precio, 'mismo precio');
+  const e = fila(r.j.id);
+  assert.equal(e.peso, 6); assert.equal(e.paquetes, 3);
+  const d = await ana('GET', `/api/envios/${r.j.id}`);
+  assert.deepEqual(d.j.envio.paquetes_extra.map((x) => [x.n, x.peso, x.descripcion]), [[2, 3, 'ropa'], [3, 1, null]]);
+  assert.equal(d.j.envio.peso_paquete1, 2);
+  assert.equal((await ana('GET', `/api/envios/${r.j.id}/paquete/2`)).status, 200);
+  db.prepare("UPDATE envios SET estado = 'cancelado' WHERE id IN (?, ?)").run(r.j.id, solo.j.id);
+});
+
 test('oficina: asignar al piloto en línea más cercano con un toque', async () => {
   const r = await ana('POST', '/api/envios', { vehiculo_id: 1, peso: 1, origen_zona: 'Zona 1', destino_zona: 'Zona 16', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng,
     destino_nombre: 'Luis', destino_telefono: '55554444', metodo_pago: 'efectivo', foto_paquete: FOTO });

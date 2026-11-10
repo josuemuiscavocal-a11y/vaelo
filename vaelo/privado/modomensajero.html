@@ -694,7 +694,9 @@
       const cobraEnvio = e.metodo_pago === 'recibe' ? `Cobra el envío (${dinero(e.precio)}) a quien recibe` : e.metodo_pago === 'efectivo' ? `Cobra ${dinero(e.precio + (e.cargos_extra || 0))} en efectivo` : PAGOS[e.metodo_pago] || e.metodo_pago;
       const resumen = el('div', { style: 'font-size:.92rem;color:var(--suave)' },
         e.tiene_foto_paquete ? el('div', { class: 'foto-lleva', style: 'margin-bottom:.5rem' }, el('img', { src: `/api/piloto/envios/${e.id}/foto-paquete`, alt: 'Foto del paquete', onclick: (ev) => window.open(ev.target.src, '_blank') }),
-          el('div', {}, el('strong', { style: 'color:var(--tinta)', text: 'Lo que llevas' }), el('br'), 'Revisa que el paquete sea el de la foto.')) : null,
+          el('div', {}, el('strong', { style: 'color:var(--tinta)', text: e.paquetes_extra ? `Paquete 1 de ${e.paquetes_extra.length + 1}` : 'Lo que llevas' }), el('br'), e.paquetes_extra ? `${e.peso_paquete1} lb. Revisa que sea el de la foto.` : 'Revisa que el paquete sea el de la foto.')) : null,
+        ...(e.paquetes_extra || []).map(x => el('div', { class: 'foto-lleva', style: 'margin-bottom:.5rem' }, el('img', { src: `/api/piloto/envios/${e.id}/paquete/${x.n}`, alt: `Foto del paquete ${x.n}`, onclick: (ev) => window.open(ev.target.src, '_blank') }),
+          el('div', {}, el('strong', { style: 'color:var(--tinta)', text: `Paquete ${x.n} de ${e.paquetes_extra.length + 1}` }), el('br'), [`${x.peso} lb`, x.descripcion].filter(Boolean).join('. ')))),
         `${e.vehiculo}, ${e.peso} lb${e.paquetes > 1 ? `, ${e.paquetes} paquetes` : ''}${e.descripcion ? '. ' + e.descripcion : ''}. ${cobraEnvio}. Ganas ${dinero(e.ganancia_piloto ?? 0)}`,
         e.notas ? el('div', { style: 'color:var(--tinta)', text: 'Indicaciones: ' + e.notas }) : null);
 
