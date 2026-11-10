@@ -856,9 +856,9 @@ body.app-piloto main { padding-bottom: 7rem; }
 .graficas-empresa { display: grid; grid-template-columns: 1.4fr 1fr; gap: 1rem; margin-bottom: 1rem; }
 .graficas-empresa .bloque { margin: 0; }
 .barras { display: flex; align-items: flex-end; gap: 3px; height: 160px; padding-top: .5rem; border-bottom: 1px solid var(--linea); }
-.barra { flex: 1; height: 100%; display: flex; align-items: flex-end; min-width: 3px; }
-.barra i { display: flex; align-items: flex-end; width: 100%; background: #c9d3f5; border-radius: 3px 3px 0 0; min-height: 0; }
-.barra b { display: block; width: 100%; background: var(--azul); border-radius: 3px 3px 0 0; }
+.barras .barra { background: none; color: inherit; flex: 1; height: 100%; display: flex; align-items: flex-end; min-width: 3px; }
+.barras .barra i { display: flex; align-items: flex-end; width: 100%; background: #c9d3f5; border-radius: 3px 3px 0 0; min-height: 0; }
+.barras .barra b { display: block; width: 100%; background: var(--azul); border-radius: 3px 3px 0 0; }
 .barras-h { display: grid; gap: .45rem; }
 .barras-h div { display: grid; grid-template-columns: 7rem 1fr 2.5rem; gap: .5rem; align-items: center; font-size: .9rem; }
 .barras-h i { display: block; height: 12px; border-radius: 6px; background: var(--azul); }
@@ -918,3 +918,154 @@ body.app-piloto main { padding-bottom: 7rem; }
 .flete-cabecera h1 { font-size: clamp(1.6rem, 4vw, 2.2rem); font-stretch: 112%; margin: .4rem 0 .1rem; }
 .flete-precio { background: var(--azul-hondo); color: #fff; border-radius: var(--radio); padding: .7rem 1rem; text-align: right; }
 .flete-precio span { display: block; color: #c9d3f5; font-size: .8rem; } .flete-precio strong { font-size: 1.7rem; font-stretch: 75%; }
+
+/* ---------- v5: pedidos de empresas, rutas, sueldos, cierre y buscador ---------- */
+/* Enlace del cliente de la empresa */
+.pedido-cabecera { display: flex; justify-content: space-between; gap: 1rem; align-items: flex-start; margin-bottom: 1rem; }
+.pedido-cabecera h1 { font-size: clamp(1.7rem, 4.5vw, 2.4rem); margin: .4rem 0 .3rem; }
+.pedido-qr { flex: none; border: 2px solid var(--tinta); border-radius: 8px; padding: 4px; background: #fff; }
+.pedido-qr svg { width: 88px; height: 88px; }
+.pedido-datos { display: grid; grid-template-columns: max-content 1fr; gap: .45rem 1rem; margin: 0; }
+.pedido-datos dt { color: var(--suave); font-size: .88rem; }
+.pedido-datos dd { margin: 0; font-weight: 600; }
+.pedido-precio { display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap; background: var(--azul-hondo); color: #fff; border-radius: 8px; padding: .7rem 1rem; margin-top: .5rem; }
+.pedido-precio strong { font-size: 1.6rem; font-stretch: 75%; }
+.pedido-precio small { color: #c9d3f5; flex-basis: 100%; }
+.pedido-precio[hidden] { display: none; }
+.pedido-proximo { background: var(--cinta); border: 2px solid var(--tinta); border-radius: 8px; padding: .9rem 1rem; margin: .75rem 0; display: grid; gap: .2rem; }
+.pedido-proximo strong { font-size: 1.3rem; font-stretch: 112%; }
+.pedido-cobro { font-size: 1.05rem; }
+.avisos-push.pedido-avisos { margin: 1rem 0; }
+.seccion-paso .opciones .opcion span { min-width: 7.5rem; }
+
+/* Panel de la empresa */
+.recogida-empresa { display: flex; align-items: center; gap: .9rem; flex-wrap: wrap; }
+.recogida-empresa > div { flex: 1 1 220px; display: grid; }
+.recogida-empresa > div span { color: var(--suave); }
+.recogida-empresa .icono { width: 28px; height: 28px; color: var(--azul); }
+.dias-envio { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: .75rem; }
+.dia-envio { border: 1.5px solid var(--linea); border-radius: 8px; padding: .9rem 1rem; display: grid; gap: .6rem; background: #fff; }
+.dia-envio.listo { border: 2px solid var(--tinta); box-shadow: 4px 4px 0 var(--cinta); }
+.dia-envio > div { display: grid; gap: .25rem; }
+.dia-envio .dia-nombre { color: var(--suave); font-size: .88rem; }
+.dia-envio .dia-nombre::first-letter, .lote-tarjeta > div > strong::first-letter { text-transform: uppercase; }
+.dia-envio strong { font-size: 1.25rem; }
+.pedidos-lista { list-style: none; margin: 0; padding: 0; display: grid; gap: .5rem; }
+.pedido-fila { display: grid; grid-template-columns: auto 1fr auto; gap: .75rem; align-items: start; border: 1px solid var(--linea); border-radius: 8px; padding: .75rem .85rem; background: #fff; }
+.pedido-fila > input { width: auto; margin-top: .3rem; }
+.pedido-info { display: grid; gap: .15rem; min-width: 0; }
+.pedido-info small { color: var(--suave); }
+.pedido-info small:first-letter { text-transform: uppercase; }
+.pedido-envio b { color: var(--azul-hondo); }
+.pedido-acciones { display: flex; gap: .35rem; flex-wrap: wrap; justify-content: flex-end; }
+.foto-paquete-chica .foto-paquete-boton { min-height: 110px; max-width: 320px; }
+.campos-entrega { border-top: 1px dashed var(--linea); margin-top: 1rem; padding-top: 1rem; }
+.campos-entrega .opcion span { padding: .45rem .7rem; }
+.modos-envio { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: .6rem; margin: 1rem 0; }
+.modo-tarjeta { position: relative; display: grid; gap: .35rem; align-content: start; border: 1.5px solid var(--linea); border-radius: 10px; padding: .9rem; cursor: pointer; background: #fff; }
+.modo-tarjeta input { position: absolute; opacity: 0; inset: 0; cursor: pointer; }
+.modo-tarjeta ul { margin: 0; padding-left: 1.1rem; font-size: .88rem; color: var(--suave); }
+.modo-tarjeta.activa { border: 2px solid var(--azul); background: #eef2ff; }
+.modo-tarjeta.bloqueada { opacity: .55; cursor: not-allowed; }
+.modo-tarjeta:focus-within { outline: 3px solid var(--cinta); outline-offset: 2px; }
+.modo-recomendado { justify-self: start; background: var(--cinta); color: var(--tinta); font-size: .72rem; font-weight: 800; padding: .1rem .5rem; border-radius: 999px; text-transform: uppercase; letter-spacing: .04em; }
+
+/* Panel de Vaelo: empresas, rutas y sueldos */
+.empresas-lista { display: grid; gap: .6rem; }
+.empresa-tarjeta { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; text-align: left; font: inherit; color: var(--tinta); background: #fff; border: 1px solid var(--linea); border-radius: 10px; padding: .95rem 1.1rem; cursor: pointer; box-shadow: var(--sombra-1); }
+.empresa-tarjeta:hover { border-color: var(--azul); }
+.empresa-tarjeta.prioridad { border: 2px solid var(--tinta); box-shadow: 4px 4px 0 var(--cinta); }
+.empresa-tarjeta > div:first-child { display: grid; }
+.empresa-tarjeta small { color: var(--suave); }
+.empresa-cuentas { display: flex; gap: .35rem; flex-wrap: wrap; align-items: center; }
+.lotes-lista { display: grid; gap: .6rem; }
+.lote-tarjeta { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; border: 1px solid var(--linea); border-radius: 10px; padding: .9rem 1rem; }
+.lote-tarjeta.nuevo { border: 2px solid var(--tinta); }
+.lote-tarjeta > div { display: grid; gap: .15rem; flex: 1 1 280px; }
+
+.lote-tarjeta small { color: var(--suave); }
+dialog.hoja.ancha { width: min(1180px, 100%); }
+.rutas-lista { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: .75rem; margin: 1rem 0; }
+.ruta-tarjeta { border: 1px solid var(--linea); border-top: 5px solid var(--color-ruta); border-radius: 10px; padding: .8rem .9rem; background: #fff; }
+.ruta-cab { display: flex; align-items: center; gap: .45rem; flex-wrap: wrap; margin-bottom: .5rem; }
+.ruta-cab small { color: var(--suave); flex-basis: 100%; }
+.ruta-color { width: 12px; height: 12px; border-radius: 50%; background: var(--color-ruta); }
+.paradas { margin: 0; padding-left: 1.3rem; display: grid; gap: .35rem; }
+.paradas li { padding-left: .2rem; }
+.paradas li > div:first-child { display: grid; }
+.paradas small { color: var(--suave); font-size: .8rem; }
+.parada-acciones { display: flex; gap: .25rem; margin-top: .2rem; }
+.parada-acciones .boton-icono { padding: .15rem .5rem; }
+.parada-acciones select { font-size: .82rem; padding: .15rem .3rem; width: auto; }
+.pin-parada { width: 26px; height: 26px; border-radius: 50%; background: var(--suave); color: #fff; font-weight: 800; font-size: .8rem; display: grid; place-items: center; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.35); }
+.sueldos-lista { display: grid; gap: .75rem; }
+.sueldo-tarjeta { border: 1px solid var(--linea); border-radius: 10px; padding: .95rem 1rem; background: #fff; }
+.sueldo-tarjeta.le-toca { border: 2px solid var(--tinta); }
+.sueldo-cab { display: flex; justify-content: space-between; gap: .75rem; flex-wrap: wrap; align-items: flex-start; }
+.sueldo-cab > div:first-child { display: grid; }
+.sueldo-cab small { color: var(--suave); }
+.sueldo-chips { display: flex; gap: .3rem; flex-wrap: wrap; }
+.sueldo-cuentas { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: .5rem; margin: .8rem 0 .4rem; }
+.sueldo-cuentas > div { display: grid; background: var(--gris); border-radius: 8px; padding: .55rem .7rem; }
+.sueldo-cuentas span { font-size: .8rem; color: var(--suave); }
+.sueldo-cuentas strong { font-size: 1.15rem; font-stretch: 75%; }
+.sueldo-cuentas small { font-size: .78rem; color: var(--suave); }
+.sueldo-neto { grid-column: span 2; color: #fff; }
+.sueldo-neto.paga { background: var(--azul-hondo) !important; }
+.sueldo-neto.recibe { background: var(--alerta) !important; }
+.sueldo-neto span { color: #dfe5ff !important; }
+.sueldo-neto strong { font-size: 1.7rem !important; }
+.cierre-dia { border-left: 6px solid var(--cinta) !important; }
+
+/* Buscador general del panel */
+.buscador-global { position: relative; flex: 1 1 320px; max-width: 520px; display: flex; gap: .35rem; }
+.buscador-global input { flex: 1; }
+.resultados-globales { position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 40; background: #fff; border: 1px solid var(--linea); border-radius: 10px; box-shadow: var(--sombra-2); max-height: 70vh; overflow: auto; padding: .35rem; }
+.resultado-grupo { font-size: .72rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--suave); padding: .5rem .6rem .25rem; }
+.resultado-global { display: flex; justify-content: space-between; align-items: center; gap: .75rem; width: 100%; text-align: left; font: inherit; background: none; border: 0; border-radius: 8px; padding: .55rem .6rem; cursor: pointer; color: var(--tinta); }
+.resultado-global:hover, .resultado-global:focus { background: #eef2ff; outline: none; }
+.resultado-global > span:first-child { display: grid; min-width: 0; }
+.resultado-global small { color: var(--suave); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.resultado-neto { font-weight: 800; font-size: .85rem; white-space: nowrap; padding: .15rem .5rem; border-radius: 999px; }
+.resultado-neto.paga { background: #eef2ff; color: var(--azul-hondo); }
+.resultado-neto.recibe { background: #fdecea; color: var(--alerta); }
+@media (max-width: 760px) { .buscador-global { order: 3; flex-basis: 100%; max-width: none; } }
+
+/* Escáner de códigos QR */
+dialog.escaner { width: min(480px, 100% - 1rem); }
+dialog.escaner video { width: 100%; border-radius: 10px; background: #000; aspect-ratio: 1; object-fit: cover; }
+.escaner-manual { display: flex; gap: .4rem; margin-top: .75rem; }
+.escaner-manual input { flex: 1; text-transform: uppercase; }
+
+/* App del piloto: rutas y su cuenta */
+.entrega-tarjeta.ruta .cab .guia { font-size: 1.05rem; }
+.paradas-ruta { list-style: none; margin: .5rem 0; padding: 0; display: grid; gap: .35rem; }
+.paradas-ruta li { display: grid; grid-template-columns: auto 1fr auto; gap: .6rem; align-items: center; padding: .4rem .5rem; border-radius: 8px; background: var(--gris); }
+.paradas-ruta li.hecha { opacity: .6; }
+.paradas-ruta .num { width: 26px; height: 26px; border-radius: 50%; background: var(--azul-hondo); color: #fff; display: grid; place-items: center; font-weight: 800; font-size: .8rem; }
+.paradas-ruta li > div { display: grid; }
+.paradas-ruta small { color: var(--suave); font-size: .8rem; }
+.recoger-lista { display: grid; gap: .35rem; margin: .75rem 0; }
+.paquete-recoger { border: 1px solid var(--linea); border-radius: 8px; padding: .55rem .65rem; margin: 0; }
+.paquete-recoger small { display: block; color: var(--suave); }
+.ruta-en-curso { display: grid; gap: .75rem; }
+.aviso-cliente { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin-top: .4rem; }
+.cuenta-piloto { background: #fff; border: 2px solid var(--tinta); border-radius: 12px; padding: 1rem; margin-bottom: 1rem; }
+.cuenta-neto { display: grid; color: #fff; border-radius: 10px; padding: .9rem 1rem; }
+.cuenta-neto.paga { background: var(--azul-hondo); }
+.cuenta-neto.recibe { background: var(--alerta); }
+.cuenta-neto span { color: #dfe5ff; font-size: .9rem; }
+.cuenta-neto strong { font-size: 2.3rem; font-stretch: 75%; line-height: 1.1; }
+.cuenta-neto small { color: #dfe5ff; }
+.cuenta-desglose { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: .5rem; margin-top: .6rem; }
+.cuenta-desglose > div { display: grid; background: var(--gris); border-radius: 8px; padding: .5rem .65rem; }
+.cuenta-desglose span { font-size: .78rem; color: var(--suave); }
+
+.cab-bloque { display: flex; justify-content: space-between; align-items: flex-start; gap: .75rem 1rem; flex-wrap: wrap; margin-bottom: .75rem; }
+.cab-bloque h2 { margin-bottom: .2rem; }
+.cab-bloque .navegar { margin: 0; }
+.panel-titulo { flex: 0 0 auto; min-width: 12rem; }
+.panel-titulo p { white-space: nowrap; }
+@media (max-width: 1100px) { .panel-titulo p { white-space: normal; } }
+.lote-tarjeta > div > span { justify-self: start; }
+#empresas-solicitudes[hidden], #empresas-activas[hidden] { display: none; }

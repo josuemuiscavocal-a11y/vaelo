@@ -16,7 +16,7 @@ const ESTADOS = {
 };
 const MOTIVOS_FALLO = { no_contesta: 'Quien recibe no contesta', no_esta: 'No había nadie en el lugar', direccion: 'Dirección o ubicación incorrecta',
   rechazo: 'Quien recibe no aceptó el paquete', sin_cobro: 'Quien recibe no pagó el cobro', otro: 'Otro motivo' };
-const TIPOS_CARGO = { cancelacion: 'Cancelación con el piloto en camino', devolucion: 'Devolución del paquete', bodega: 'Días en la sede', reentrega: 'Nueva entrega desde la sede' };
+const TIPOS_CARGO = { cancelacion: 'Cancelación con el piloto en camino', devolucion: 'Devolución del paquete', bodega: 'Días en la sede', reentrega: 'Nueva entrega desde la sede', bodega_empresa: 'Paquetes de empresa guardados en la sede' };
 // Tiempo que falta hasta una fecha ISO: "1 h 25 min"
 function faltaPara(iso) {
   const min = Math.max(0, Math.round((new Date(iso).getTime() - Date.now()) / 60000));
@@ -125,6 +125,9 @@ function el(etiqueta, atributos = {}, ...hijos) {
   for (const h of hijos.flat()) if (h != null && h !== false) nodo.append(h instanceof Node ? h : document.createTextNode(String(h)));
   return nodo;
 }
+
+// Reemplaza el contenido de un nodo ignorando vacíos (null, false) y aplanando listas
+function poner(nodo, ...hijos) { nodo.replaceChildren(...hijos.flat(Infinity).filter((h) => h != null && h !== false)); }
 
 const chipEstado = (estado) => el('span', { class: `estado ${estado}`, text: ESTADOS[estado] || estado });
 
@@ -702,6 +705,51 @@ function bloqueInstalar(nombreApp) {
   document.addEventListener('vaelo-instalada', () => { caja.hidden = true; });
   setTimeout(mostrar, 0);
   return caja;
+}
+
+// ---------- Escáner de códigos QR (etiquetas de los paquetes) ----------
+// alLeer(texto) se llama con cada código leído; en modo continuo sigue leyendo hasta que alLeer devuelva false o se cierre.
+async function escanearQR(alLeer, { continuo = false, titulo = 'Escanea el código QR del paquete' } = {}) {
+  const dlg = el('dialog', { class: 'dialogo escaner' });
+  const video = el('video', { playsinline: true, muted: true, autoplay: true });
+  const estado = el('p', { class: 'pista', text: 'Apunta la cámara a la etiqueta.' });
+  const manual = el('input', { placeholder: 'O escribe el código, ej. VA-7K3M9QX2', autocomplete: 'off', 'aria-label': 'Código del paquete' });
+  let stream = null, activo = true;
+  const apagar = () => { activo = false; if (stream) stream.getTracks().forEach((t) => t.stop()); };
+  const cerrar = () => { apagar(); if (dlg.open) dlg.close(); };
+  const recibir = (v) => {
+    const seguir = alLeer(String(v || '').trim());
+    if (!continuo || seguir === false) { cerrar(); return; }
+    estado.textContent = 'Leído: ' + v;
+  };
+  dlg.append(el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: cerrar }), el('h2', { text: titulo }), video, estado,
+    el('form', { class: 'escaner-manual', onsubmit: (ev) => { ev.preventDefault(); if (manual.value.trim()) { recibir(manual.value.trim().toUpperCase()); manual.value = ''; } } },
+      manual, el('button', { class: 'boton chico', type: 'submit', text: 'Usar' })),
+    continuo ? el('button', { class: 'boton borde', type: 'button', style: 'margin-top:.75rem', text: 'Listo', onclick: cerrar }) : null);
+  dlg.addEventListener('close', () => { apagar(); dlg.remove(); });
+  document.body.append(dlg); dlg.showModal();
+  if (!('BarcodeDetector' in window) || !navigator.mediaDevices) { estado.textContent = 'Este navegador no lee códigos con la cámara (usa Chrome en Android). Escribe el código.'; video.hidden = true; manual.focus(); return; }
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    video.srcObject = stream; await video.play();
+  } catch { estado.textContent = 'No se pudo abrir la cámara. Da permiso a la cámara o escribe el código.'; video.hidden = true; return; }
+  let detector;
+  try { detector = new BarcodeDetector({ formats: ['qr_code'] }); } catch { estado.textContent = 'Este navegador no lee códigos QR. Escribe el código.'; return; }
+  const leidos = new Set();
+  const leer = async () => {
+    if (!activo) return;
+    try {
+      for (const c of await detector.detect(video)) {
+        if (leidos.has(c.rawValue)) continue;
+        leidos.add(c.rawValue);
+        if (navigator.vibrate) navigator.vibrate(80);
+        recibir(c.rawValue);
+        if (!activo) return;
+      }
+    } catch { /* cuadro sin código */ }
+    setTimeout(leer, 250);
+  };
+  leer();
 }
 
 // ---------- App instalable ----------

@@ -80,8 +80,21 @@ Página web y app (instalable en el celular) de Vaelo, mensajería en moto y pic
 
 1. La empresa entra a **vaelomensajeria.com/empresas** (en el menú principal), crea su cuenta y llena la solicitud: datos de la empresa, representante, fotos de la sede, DPI del representante y patente de comercio.
 2. La oficina la revisa en el panel (**Empresas**), pone la **cita para firmar** (la empresa recibe aviso y correo) y, ya firmado, **activa la empresa**.
-3. La empresa tiene su panel con estadísticas (envíos, éxito de entrega, zonas, motivos de fallo, cobros contra entrega, cargos), puede elegir **«Paga quien recibe»** y mandar **varios paquetes a la misma dirección por un solo precio**.
-4. **Envío a la sede:** sube una lista de 10 paquetes o más y los lleva a la sede. La oficina marca «Llegaron a la sede» y desde ahí se reparten. Si salen el mismo día no pagan bodega; si se quedan, cuesta Q10 por paquete por día.
+3. Ya activa, en **Mi empresa** tiene dos pestañas: **Mandar varios pedidos** y **Analítica**. En su panel **no aparece dinero**: Vaelo solo le presta los pilotos y cobra el envío.
+
+### Mandar varios pedidos
+- La empresa registra cada pedido: qué es, **tamaño** (sobre, pequeño, mediano, grande), **foto** y el nombre y WhatsApp de su cliente. También puede subir un Excel (hay plantilla).
+- Llena ella los datos de entrega o toca **«Mandar enlace»**: su cliente abre `/pedido/...`, elige **día**, **horario** (mañana, tarde o cualquier hora), marca su **ubicación**, quién recibe y cómo paga el envío (efectivo al recibir o transferencia a Vaelo). Ahí mismo activa **«Avísame cuando el piloto salga»** (notificación del navegador).
+- Con **10 pedidos confirmados para el mismo día** (se cambia en Tarifas y ajustes) aparece **«Enviar a Vaelo»** con tres opciones y una recomendada según tamaños, cupo y tiempo de ruta: **una moto para todo**, **varias motos** o **pickup**. Elige si Vaelo recoge en su local o ella los lleva a la sede.
+- **Pickup:** lo paga la empresa (habla primero por WhatsApp con Vaelo: precio y promoción) o cada cliente (Q35 en zonas preferenciales, Q45 fuera).
+- Cada pedido tiene su código, que es también la guía, y la empresa imprime **etiquetas con código QR** para pegarlas en los paquetes.
+- Si un pedido no se entrega, **queda en la sede de Vaelo**: la empresa manda a alguien a recogerlo con el código y la bodega se le cobra por día por WhatsApp.
+
+### En el panel de Vaelo (Empresas)
+- Lista de empresas activas, con las que tienen pedidos por repartir arriba. Al tocar una: **Por repartir, En ruta, En sede, Historial y Datos**. Las solicitudes de contrato están en su propia sub-pestaña.
+- **Dividir pedidos:** el mapa arma las rutas solo (primero la mañana, después lo más cercano). «Dividir entre N motos», «Una moto», «Un paquete por moto» o «Pickup»; se pueden pasar pedidos entre rutas y cambiar el orden. Luego se asigna cada ruta a un piloto.
+- Los pedidos de empresas tienen **prioridad** y no se mezclan con la lista general de Envíos (filtro «De empresas»).
+- El piloto acepta **la ruta completa**, escanea las etiquetas al recoger y entrega en orden. A la empresa le llega aviso y correo; a cada cliente «va en camino, eres la parada 3 de 5» y «eres el próximo». Si el cliente no activó los avisos, el piloto tiene el botón **«Avisar por WhatsApp»**.
 
 ## Entregas fallidas, sede y cargos
 
@@ -152,10 +165,10 @@ Mientras no esté configurado, no se exige confirmar el correo.
 - **Entrega segura:** cada envío tiene un código de 4 números que el cliente le da a quien recibe. El piloto no puede marcar
   "entregado" sin ese código, una foto del paquete y el nombre de quien recibió (la firma es opcional). 5 códigos equivocados bloquean la entrega.
 - **Asignación automática** (Tarifas y ajustes): cada pedido se ofrece al piloto libre más cercano con el vehículo correcto; si no acepta a tiempo pasa al siguiente.
-- **Caja** (solo administración): efectivo que cada piloto debe entregar en la sede, pago a pilotos (comisión configurable),
-  cobros contra entrega por devolver a las tiendas y crédito de empresas por cobrar.
+- **Caja** (solo administración): **sueldo de cada piloto en una sola cuenta**: lo que ganó menos el efectivo que trae. Sale «Vaelo le paga Q90» o «Debe entregar Q50» y el botón **«Ya fue pagado»** (solo administradores) la cierra y la guarda en el historial. Cada piloto elige en su app si cobra cada día, cada semana o cada quincena.
+- **Cerrar día** (Caja): se toca al final del día, cuando ya no falta nada. Guarda el Excel del día (resumen, envíos, sueldos, caja y empresas) y el conteo empieza de nuevo. En **Reportes** quedan todos los cierres y los Excel de la semana, el mes y el año, que se calculan solos.
+- **Buscador** arriba del panel (tecla **/**): pilotos con su neto del día, guías, pedidos, empresas y clientes. El botón **QR** escanea la etiqueta de un paquete con la cámara.
 - **Descuentos:** promociones automáticas por fechas (se anuncian en la página) y cupones. Se aplica el mejor para el cliente, no se suman.
-- **Empresas:** precio especial, pago a fin de mes y varios envíos subiendo un archivo CSV.
 - **Programar envíos**, **direcciones guardadas**, **rastreo público con el piloto en vivo** y **ruta sugerida** cuando el piloto lleva varios paquetes.
 - **Botón de emergencia** del piloto: avisa al panel con su ubicación y suena hasta que alguien lo marca como atendido.
 - **Reportes** con descarga para Excel.

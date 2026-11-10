@@ -22,6 +22,7 @@
   <dialog id="dlg-p"><div class="dialogo" id="dlg-p-cuerpo"></div></dialog>
 
   <script src="/js/comun.js?v=20261109c"></script>
+  <script src="/js/qr.js?v=1"></script>
   <script>
     'use strict';
     const $ = (id) => document.getElementById(id);
@@ -53,7 +54,7 @@
     let conocidos = null, bloqueoPantalla = null, temporizador = null, envios = [], ultimaFirma = '', ocupado = 0;
 
     function barra(conSesion) {
-      $('nav').replaceChildren(el('span', { class: 'etiqueta-modo', text: 'Modo mensajero' }));
+      poner($('nav'), el('span', { class: 'etiqueta-modo', text: 'Modo mensajero' }));
       if (conSesion) $('nav').append(el('button', { class: 'enlace', type: 'button', text: 'Salir', onclick: async () => {
         if (hayEntregaActiva() && !confirm('Tienes entregas en curso. Si sales, dejarás de compartir tu ubicación. ¿Salir de todas formas?')) return;
         detenerGps();
@@ -69,12 +70,12 @@
         yo = r.piloto; vehiculos = r.vehiculos; vigencia = r.vigencia_antecedentes;
       } catch (e) {
         if (e.status === 401 || e.status === 403) return pintarAcceso();
-        app.replaceChildren(el('div', { class: 'mensaje error', text: e.message })); return;
+        poner(app, el('div', { class: 'mensaje error', text: e.message })); return;
       }
       barra(true);
       if (yo.estado_piloto === 'aprobado') return pintarTrabajo();
       if (yo.estado_piloto === 'en_revision') return pintarSolicitud();
-      app.replaceChildren(el('div', { class: 'bloque' }, el('h1', { style: 'font-size:1.8rem', text: 'Tu cuenta está suspendida' }),
+      poner(app, el('div', { class: 'bloque' }, el('h1', { style: 'font-size:1.8rem', text: 'Tu cuenta está suspendida' }),
         el('p', { text: 'No puedes recibir envíos por ahora. Comunícate con la administración de Vaelo.' })));
     }
 
@@ -121,7 +122,7 @@
       });
       const verRegistro = () => { panelEntrar.hidden = true; panelRegistro.hidden = false; history.replaceState(null, '', '#registro'); };
       const verEntrar = () => { panelEntrar.hidden = false; panelRegistro.hidden = true; history.replaceState(null, '', location.pathname); };
-      app.replaceChildren(bloqueInstalar('Vaelo Pilotos'), el('div', { class: 'acceso-piloto' }, panelEntrar, panelRegistro));
+      poner(app, bloqueInstalar('Vaelo Pilotos'), el('div', { class: 'acceso-piloto' }, panelEntrar, panelRegistro));
       if (location.hash === '#registro') verRegistro();
     }
 
@@ -172,7 +173,7 @@
         const listas = req.filter(x => x.ok()).length;
         const pct = Math.round((listas / req.length) * 100);
         anillo.style.setProperty('--p', pct); anillo.firstChild.textContent = pct + '%';
-        avanceTexto.replaceChildren(el('strong', { text: pct === 100 ? 'Tu perfil está completo' : `Te faltan ${req.length - listas} de ${req.length} secciones` }),
+        poner(avanceTexto, el('strong', { text: pct === 100 ? 'Tu perfil está completo' : `Te faltan ${req.length - listas} de ${req.length} secciones` }),
           el('small', { text: aprobado ? 'Mantén al día tu licencia y tus antecedentes.' : 'Guarda y vuelve cuando quieras. La administración revisa tu solicitud cuando esté completa.' }));
         for (const x of SECCIONES) {
           const ok = !!x.ok();
@@ -198,7 +199,7 @@
       };
       function pintarLicencia() {
         const v = valor('licencia_vence');
-        tarjetaLic.replaceChildren(el('small', { text: 'Licencia de conducir · República de Guatemala' }),
+        poner(tarjetaLic, el('small', { text: 'Licencia de conducir · República de Guatemala' }),
           el('div', { class: 'lic-num', text: valor('licencia_numero') || '—' }),
           el('div', { class: 'lic-fila' },
             el('div', {}, el('small', { text: 'Tipo' }), el('strong', { text: valor('licencia_tipo') || '—' })),
@@ -209,7 +210,7 @@
       const venceAnt = el('div', { class: 'lic-fila', style: 'color:var(--tinta);margin-bottom:.75rem' });
       function pintarVencimientos() {
         const vence = (f) => { if (!f) return ''; const d = new Date(f + 'T12:00:00'); d.setMonth(d.getMonth() + vigencia); return d.toISOString().slice(0, 10); };
-        venceAnt.replaceChildren(...[['Penales', valor('penales_fecha')], ['Policiacos', valor('policiacos_fecha')]].map(([t, f]) =>
+        poner(venceAnt, ...[['Penales', valor('penales_fecha')], ['Policiacos', valor('policiacos_fecha')]].map(([t, f]) =>
           el('div', {}, el('small', { class: 'mini', text: `${t} vencen` }), el('strong', { text: f ? new Date(vence(f) + 'T12:00:00').toLocaleDateString('es-GT', { day: 'numeric', month: 'short', year: 'numeric' }) + ' ' : '— ' }), f ? chipVence(vence(f)) : null)));
       }
 
@@ -282,9 +283,9 @@
 
     function pintarSolicitud() {
       const revision = el('div');
-      const pintarRevision = () => revision.replaceChildren(cajaRevision());
+      const pintarRevision = () => poner(revision, cajaRevision());
       pintarRevision();
-      app.replaceChildren(
+      poner(app, 
         el('div', { class: 'area-cabecera' }, el('div', {}, el('h1', { text: `Hola, ${yo.nombre.split(' ')[0]}` }), el('p', { text: 'Tu solicitud para ser piloto de Vaelo.' }))),
         revision, formularioPerfil(false, pintarRevision));
     }
@@ -310,12 +311,12 @@
         window.scrollTo(0, 0);
         $('boton-emergencia').hidden = t === 'perfil';
         if (t === 'ganancias') pintarGanancias(panelGanancias);
-        if (t === 'perfil') panelPerfil.replaceChildren(cajaRevision(), formularioPerfil(true, () => { $('revision').replaceChildren(cajaRevision()); }), formularioClave());
+        if (t === 'perfil') poner(panelPerfil, cajaRevision(), formularioPerfil(true, () => { poner($('revision'), cajaRevision()); }), formularioClave());
       };
-      app.replaceChildren(el('div', { class: 'area-cabecera' }, el('div', {}, el('h1', { text: `Hola, ${yo.nombre.split(' ')[0]}` }),
+      poner(app, el('div', { class: 'area-cabecera' }, el('div', {}, el('h1', { text: `Hola, ${yo.nombre.split(' ')[0]}` }),
         el('p', {}, `${yo.vehiculo || ''} ${yo.veh_placa ? '· ' + yo.veh_placa : ''}`, yo.calificacion ? ` · ${yo.calificacion} de 5 estrellas` : ''))), panelEntregas, panelGanancias, panelPerfil, tabs);
       const r = yo.revision;
-      if (r.vencidos.length || r.porVencer.length) $('revision').replaceChildren(cajaRevision());
+      if (r.vencidos.length || r.porVencer.length) poner($('revision'), cajaRevision());
       pintarConexion();
       $('boton-emergencia').hidden = false;
       cargarEnvios(true);
@@ -339,19 +340,34 @@
 
     // ---------- Mis ganancias ----------
     async function pintarGanancias(caja) {
-      caja.replaceChildren(el('p', { class: 'pista', text: 'Cargando…' }));
+      poner(caja, el('p', { class: 'pista', text: 'Cargando…' }));
       let g;
-      try { g = await api('/api/piloto/ganancias'); } catch (e) { caja.replaceChildren(el('div', { class: 'mensaje error', text: e.message })); return; }
+      try { g = await api('/api/piloto/ganancias'); } catch (e) { poner(caja, el('div', { class: 'mensaje error', text: e.message })); return; }
       const ESTADO_CORTO = { entregado: 'Entregado', devuelto: 'Devuelto', en_sede: 'Dejado en la sede', cancelado: 'Cancelado en camino' };
-      caja.replaceChildren(
-        el('div', { class: 'ganancias-cabecera' }, el('span', { text: 'Por cobrar a Vaelo' }), el('strong', { text: dinero(g.por_cobrar) }),
+      const c = g.cuenta;
+      const frecuencia = el('div', { class: 'opciones' }, ...Object.entries(g.frecuencias).map(([k, f]) => el('label', { class: 'opcion' },
+        el('input', { type: 'radio', name: 'frecuencia', value: k, checked: c.frecuencia === k, onchange: async () => {
+          try { await api('/api/piloto/frecuencia', { method: 'PUT', body: { frecuencia: k } }); pintarGanancias(caja); } catch (e) { alert(e.message); }
+        } }), el('span', { text: f.nombre }))));
+      const cuenta = el('div', { class: 'cuenta-piloto' },
+        el('div', { class: 'cuenta-neto ' + (c.neto >= 0 ? 'paga' : 'recibe') }, el('span', { text: c.envios ? (c.neto >= 0 ? 'Vaelo te paga' : 'Debes entregar en la sede') : 'Tu cuenta está al día' }),
+          el('strong', { text: dinero(Math.abs(c.neto)) }), c.envios ? el('small', { text: `${c.envios} envío(s) desde tu último pago` }) : null),
+        el('div', { class: 'cuenta-desglose' },
+          el('div', {}, el('span', { text: 'Ganaste' }), el('strong', { text: dinero(c.ganancia) })),
+          el('div', {}, el('span', { text: 'Efectivo que traes' }), el('strong', { text: '− ' + dinero(c.efectivo) })),
+          c.descuentos ? el('div', {}, el('span', { text: 'Reclamos' }), el('strong', { text: '− ' + dinero(c.descuentos) })) : null,
+          el('div', {}, el('span', { text: 'Hoy' }), el('strong', { text: `${c.hoy.envios} · ${dinero(c.hoy.ganancia)}` }))),
+        el('h3', { style: 'margin:1rem 0 .4rem;font-size:1rem', text: '¿Cuándo quieres que te paguen?' }), frecuencia,
+        el('p', { class: 'pista', style: 'margin-top:.5rem', text: c.frecuencia === 'diaria' ? 'Pasas a la sede al final del día: se cuenta lo que ganaste menos el efectivo que traes.'
+          : `Juntas tu pago ${c.frecuencia === 'semanal' ? 'por semana' : 'por quincena'}. Si el efectivo que traes es más que lo que ganaste, igual debes entregarlo antes de ${g.dias_liquidar} días.` }));
+      poner(caja, cuenta,
+        el('div', { class: 'ganancias-cabecera' }, el('span', { text: 'Lo que has ganado' }),
           el('div', { class: 'ganancias-fila' },
             el('div', {}, el('span', { text: 'Hoy' }), el('strong', { text: dinero(g.hoy) })),
             el('div', {}, el('span', { text: 'Últimos 7 días' }), el('strong', { text: dinero(g.semana) })),
             el('div', {}, el('span', { text: 'Este mes' }), el('strong', { text: dinero(g.mes) })))),
         g.deuda ? el('div', { class: 'deuda-piloto', text: `Pasaron más de ${g.dias_liquidar} días: entrega el efectivo en la sede para poder conectarte.` }) : null,
         g.descuentos.length ? el('div', { class: 'mensaje aviso' }, el('strong', { text: 'Descuentos por reclamos' }), el('ul', { class: 'lista-simple' }, g.descuentos.map(d => el('li', { text: `${d.guia}: ${dinero(d.monto_piloto)}. ${d.resolucion || ''}` })))) : null,
-        g.efectivo_por_entregar > 0 ? el('div', { class: 'efectivo-pendiente' }, el('span', {}, 'Efectivo que debes entregar en la sede', el('br'), el('small', { text: `${g.envios_efectivo} envío(s)` })), el('strong', { text: dinero(g.efectivo_por_entregar) })) : null,
         el('p', { class: 'pista', text: `${g.comision.tipo === 'vaelo_fijo' ? `De cada envío Vaelo cobra ${dinero(g.comision.valor)} y el resto es para ti` : g.comision.tipo === 'fijo' ? 'Ganas ' + dinero(g.comision.valor) + ' por entrega' : 'Ganas ' + g.comision.valor + '% de cada envío'}. ${g.entregas_mes} entregas este mes. Entrega el efectivo en la sede antes de ${g.dias_liquidar} días.` }),
         el('h2', { style: 'font-size:1.15rem;margin-top:1.25rem', text: 'Tus últimos envíos' }),
         g.ultimas.length ? el('ul', { class: 'movimientos' }, g.ultimas.map(x => el('li', {},
@@ -359,14 +375,17 @@
           el('span', { style: 'text-align:right' }, el('span', { class: 'monto', text: dinero(x.ganancia_piloto) }), el('small', { text: x.pago_piloto_id ? 'Pagado' : 'Por cobrar' }))))) : el('p', { class: 'pista', text: 'Todavía no tienes envíos terminados.' }),
         g.pagos.length ? [el('h2', { style: 'font-size:1.15rem;margin-top:1.25rem', text: 'Pagos que recibiste' }),
           el('ul', { class: 'movimientos' }, g.pagos.map(x => el('li', {}, el('span', {}, el('strong', { text: fecha(x.creado, false) }), el('small', { text: `${x.envios} envíos${x.nota ? ' · ' + x.nota : ''}` })), el('span', { class: 'monto', text: dinero(x.monto) }))))] : null,
+        g.cuentas.length ? [el('h2', { style: 'font-size:1.15rem;margin-top:1.25rem', text: 'Cuentas cerradas' }),
+          el('ul', { class: 'movimientos' }, g.cuentas.map(x => el('li', {}, el('span', {}, el('strong', { text: fecha(x.creado, false) }), el('small', { text: `${x.envios} envíos · ganaste ${dinero(x.ganancia)} · traías ${dinero(x.efectivo)}` })),
+            el('span', { class: 'monto', text: (x.neto >= 0 ? 'Te pagaron ' : 'Entregaste ') + dinero(Math.abs(x.neto)) }))))] : null,
         g.liquidaciones.length ? [el('h2', { style: 'font-size:1.15rem;margin-top:1.25rem', text: 'Efectivo que entregaste' }),
           el('ul', { class: 'movimientos' }, g.liquidaciones.map(x => el('li', {}, el('span', {}, el('strong', { text: fecha(x.creado, false) }), el('small', { text: `${x.envios} envíos${Math.abs(x.recibido - x.esperado) > 0.009 ? ' · se esperaban ' + dinero(x.esperado) : ''}` })), el('span', { class: 'monto', text: dinero(x.recibido) }))))] : null);
     }
 
     function pintarPermisoAvisos() {
       const caja = $('permiso-avisos');
-      if (!('Notification' in window) || Notification.permission !== 'default') { caja.replaceChildren(); return; }
-      caja.replaceChildren(el('div', { class: 'mensaje aviso aviso-accion' }, 'Activa las notificaciones para enterarte de cada envío nuevo aunque tengas otra app abierta.',
+      if (!('Notification' in window) || Notification.permission !== 'default') { poner(caja); return; }
+      poner(caja, el('div', { class: 'mensaje aviso aviso-accion' }, 'Activa las notificaciones para enterarte de cada envío nuevo aunque tengas otra app abierta.',
         el('button', { class: 'boton chico', type: 'button', text: 'Activar', onclick: async () => { await Notification.requestPermission(); pintarPermisoAvisos(); } })));
     }
 
@@ -382,7 +401,7 @@
       const gps = !enLinea && !hayEntregaActiva() ? 'Ubicación apagada'
         : gpsError ? 'Sin ubicación' : ultimaPos ? `GPS activo${ultimaPos.precision ? `, precisión ${Math.round(ultimaPos.precision)} m` : ''}${hace != null ? `, hace ${hace} s` : ''}` : 'Buscando tu ubicación…';
       caja.className = 'conexion' + (enLinea ? ' activa' : '');
-      caja.replaceChildren(
+      poner(caja, 
         el('div', {}, el('strong', { text: enLinea ? 'Estás en línea' : 'Estás fuera de línea' }),
           el('small', { text: enLinea ? `Puedes recibir envíos. ${gps}.` : puede ? 'Conéctate para recibir envíos. Necesitas la ubicación encendida.'
             : !yo.politica_al_dia ? 'Acepta la política para pilotos para poder conectarte.' : yo.deuda ? 'Liquida el efectivo en la sede para poder conectarte.' : 'No puedes conectarte hasta renovar tus documentos vencidos.' })),
@@ -408,7 +427,7 @@
       }
       if (yo.deuda) nodos.push(el('div', { class: 'deuda-piloto' }, el('strong', { text: `Debes entregar ${dinero(yo.deuda.monto)} en la sede` }),
         el('p', { style: 'margin:.35rem 0 0', text: `Tienes efectivo de hace más de ${yo.deuda.dias} días. Pasa a la sede a aclarar cuentas: hasta entonces no puedes conectarte, y si no liquidas se suspende tu cuenta.` })));
-      caja.replaceChildren(...nodos);
+      poner(caja, ...nodos);
     }
 
     function posicionFresca() {
@@ -470,8 +489,8 @@
       const caja = $('alerta-gps');
       if (!caja) return;
       const necesaria = enLinea || hayEntregaActiva();
-      if (!necesaria || !gpsError) { caja.replaceChildren(); return; }
-      caja.replaceChildren(el('div', { class: 'alerta-gps' }, el('strong', { text: 'Tu ubicación está apagada' }),
+      if (!necesaria || !gpsError) { poner(caja); return; }
+      poner(caja, el('div', { class: 'alerta-gps' }, el('strong', { text: 'Tu ubicación está apagada' }),
         el('p', { text: gpsError === 'permiso'
           ? 'Vaelo necesita tu ubicación mientras estás en línea o llevas un envío. Ve a la configuración del navegador, busca vaelomensajeria.com y permite la ubicación. Luego recarga esta página.'
           : 'No llega señal de GPS. Revisa que la ubicación del teléfono esté encendida y que estés al aire libre.' }),
@@ -516,8 +535,8 @@
       const escribiendo = document.activeElement && $('lista').contains(document.activeElement) && document.activeElement.tagName === 'INPUT';
       if (firma !== ultimaFirma && !ocupado && !escribiendo) {
         ultimaFirma = firma;
-        if (!envios.length) $('lista').replaceChildren(el('div', { class: 'vacio', text: enLinea ? 'Estás en línea. Aquí aparecerán los envíos que te asignen.' : 'No tienes entregas. Conéctate para recibir envíos.' }));
-        else $('lista').replaceChildren(rutaSugerida(), ...envios.map(tarjeta));
+        if (!envios.length) poner($('lista'), el('div', { class: 'vacio', text: enLinea ? 'Estás en línea. Aquí aparecerán los envíos que te asignen.' : 'No tienes entregas. Conéctate para recibir envíos.' }));
+        else poner($('lista'), rutaSugerida(), ...tarjetas());
       }
       pintarConexion(); pintarAlertaGps();
     }
@@ -557,6 +576,106 @@
         accion ? el('div', { class: 'navegar navegar-' + (punto === 'origen' ? 'recoger' : 'entregar') },
           el('button', { class: 'boton chico ' + (punto === 'origen' ? 'navegar-a' : 'navegar-b'), type: 'button', text: `${accion} con Waze`, onclick: () => irA(e.id, punto, 'waze') }),
           el('button', { class: 'boton borde chico', type: 'button', text: `${accion} con Google Maps`, onclick: () => irA(e.id, punto, 'google') })) : null);
+    }
+
+    // ---------- Rutas de empresas: se aceptan completas, se recogen escaneando y se entregan en orden ----------
+    const HORARIO_TXT = { manana: 'En la mañana', tarde: 'En la tarde', cualquiera: 'A cualquier hora' };
+    const TAMANO_TXT = { sobre: 'Sobre', pequeno: 'Pequeño', mediano: 'Mediano', grande: 'Grande' };
+    const waTel = (t) => { let n = String(t || '').replace(/\D/g, ''); if (n.length === 8) n = '502' + n; return n; };
+    function botonWhatsCliente(e) {
+      const total = envios.filter(x => x.grupo && x.grupo === e.grupo).length || 1;
+      const texto = `Hola ${(e.destino_nombre || '').split(' ')[0]}, soy ${(yo.nombre || '').split(' ')[0]} de Vaelo. Voy en camino con tu pedido de ${e.empresa} (código ${e.guia}).${total > 1 ? ` Eres la entrega ${e.parada} de ${total}.` : ''} Ten a mano tu código de entrega.`;
+      return el('div', { class: 'aviso-cliente' },
+        e.avisos_cliente ? el('small', { class: 'pista', text: 'Tiene los avisos activados: le llegan solos.' }) : el('small', { class: 'pista', text: 'No activó los avisos: avísale por WhatsApp.' }),
+        el('a', { class: 'boton chico ' + (e.avisos_cliente ? 'borde' : 'cinta'), href: `https://wa.me/${waTel(e.destino_telefono)}?text=${encodeURIComponent(texto)}`, target: '_blank', rel: 'noopener', text: 'Avisar por WhatsApp' }));
+    }
+    function tarjetas() {
+      const nodos = [], vistos = new Set();
+      for (const e of envios) {
+        if (e.pedido_id && e.grupo) {
+          if (vistos.has(e.grupo)) continue;
+          vistos.add(e.grupo);
+          nodos.push(tarjetaRuta(envios.filter(x => x.grupo === e.grupo).sort((a, b) => (a.parada || 0) - (b.parada || 0))));
+        } else nodos.push(tarjeta(e));
+      }
+      return nodos;
+    }
+    function tarjetaRuta(lista) {
+      const e0 = lista[0];
+      const abiertos = lista.filter(x => ['pendiente', 'recogido', 'en_camino'].includes(x.estado));
+      const cab = (extra) => el('div', { class: 'cab' }, el('strong', { class: 'guia' }, `Ruta de ${e0.empresa}`), extra);
+      const paradasResumen = () => el('ol', { class: 'paradas-ruta' }, lista.map(x => el('li', { class: ['entregado', 'a_sede', 'en_sede', 'fallido'].includes(x.estado) ? 'hecha' : '' },
+        el('span', { class: 'num', text: String(x.parada || '') }), el('div', {}, el('strong', { text: x.destino_nombre }),
+          el('small', { text: `${x.destino_zona} · ${HORARIO_TXT[x.horario] || ''} · ${TAMANO_TXT[x.tamano] || ''}${x.metodo_pago === 'recibe' ? ` · cobra ${dinero(x.precio)}` : ''}` })),
+        x.estado !== 'pendiente' ? chipEstado(x.estado) : null)));
+      const cobros = lista.filter(x => x.metodo_pago === 'recibe');
+      const notaCobro = e0.cobro_en_recogida ? el('div', { class: 'cobro', text: `Cobra ${dinero(e0.cobro_en_recogida)} a la empresa al recoger` })
+        : cobros.length ? el('p', { class: 'pista', text: `${cobros.length} cliente(s) pagan el envío al recibir (${dinero(cobros.reduce((t, x) => t + x.precio, 0))} en total).` }) : null;
+      // 1) Por aceptar: la ruta completa
+      if (e0.asignacion === 'por_aceptar') {
+        const km = kmHasta(e0.origen_lat, e0.origen_lng);
+        return el('article', { class: 'entrega-tarjeta por-aceptar ruta' }, cab(el('span', { class: 'estado pendiente', text: 'Por aceptar' })),
+          el('div', { class: 'mensaje aviso', text: `${lista.length} entregas en orden. Al aceptar, aceptas toda la ruta.` }),
+          e0.programado_para ? el('div', { class: 'mensaje aviso', text: 'Recoger el ' + fechaProgramada(e0.programado_para) }) : null,
+          el('div', { class: 'parada' }, el('span', { text: 'Recoger en' }), [e0.origen_zona, e0.origen_direccion].filter(Boolean).join('. '), km != null ? el('div', { class: 'pista', text: `A ${km.toFixed(1)} km de ti` }) : null),
+          paradasResumen(), notaCobro,
+          el('div', { class: 'acciones-aceptar' },
+            el('button', { class: 'boton cinta accion-principal', type: 'button', text: 'Aceptar ruta', onclick: async (ev) => {
+              const b = ev.target; b.disabled = true; b.textContent = 'Revisando tu ubicación…'; ocupado++;
+              try { const pos = await posicionFresca(); await api(`/api/piloto/envios/${e0.id}/aceptar`, { body: pos }); enLinea = true; iniciarGps(); mantenerPantalla(true); mostrarMensaje($('msg'), ''); }
+              catch (err) { mostrarMensaje($('msg'), err.message); b.disabled = false; b.textContent = 'Aceptar ruta'; }
+              ocupado--; cargarEnvios();
+            } }),
+            el('button', { class: 'boton peligro', type: 'button', text: 'No puedo', onclick: async () => {
+              ocupado++; const motivo = prompt('¿Por qué no puedes tomarla? (opcional)'); ocupado--;
+              if (motivo === null) return;
+              try { await api(`/api/piloto/envios/${e0.id}/rechazar`, { body: { motivo } }); cargarEnvios(); } catch (err) { mostrarMensaje($('msg'), err.message); }
+            } })));
+      }
+      // 2) Recoger: marcar o escanear cada paquete
+      const porRecoger = lista.filter(x => x.estado === 'pendiente' && x.asignacion === 'aceptado');
+      if (porRecoger.length) {
+        const marcados = new Set();
+        const casillas = new Map();
+        const contador = el('strong');
+        const actualizar = () => { contador.textContent = `${marcados.size} de ${porRecoger.length} paquetes`; boton.disabled = !marcados.size; };
+        const filas = porRecoger.map(x => {
+          const c = el('input', { type: 'checkbox', style: 'width:auto', onchange: (ev) => { if (ev.target.checked) marcados.add(x.id); else marcados.delete(x.id); actualizar(); } });
+          casillas.set(x.guia, { c, x });
+          return el('label', { class: 'casilla paquete-recoger' }, c, el('span', {}, el('strong', { text: x.guia }), ` · ${x.destino_nombre} · ${TAMANO_TXT[x.tamano] || ''}`, x.descripcion ? el('small', { text: x.descripcion }) : null));
+        });
+        const boton = el('button', { class: 'boton cinta accion-principal', type: 'button', text: 'Ya recogí los paquetes marcados', disabled: true, onclick: async () => {
+          boton.disabled = true; boton.textContent = 'Guardando…'; ocupado++;
+          try {
+            const pos = await posicionFresca();
+            const x = await api(`/api/piloto/ruta/${encodeURIComponent(e0.grupo)}/recoger`, { body: { ids: [...marcados], ...pos } });
+            mostrarMensaje($('msg'), x.faltan ? `Recogiste ${x.recogidos}. Te faltan ${x.faltan}.` : 'Recogiste toda la ruta. Ve a la primera entrega.', 'exito');
+          } catch (err) { mostrarMensaje($('msg'), err.message); boton.disabled = false; boton.textContent = 'Ya recogí los paquetes marcados'; }
+          ocupado--; cargarEnvios();
+        } });
+        const escanear = el('button', { class: 'boton borde', type: 'button', text: 'Escanear etiquetas', onclick: () => {
+          ocupado++;
+          escanearQR((texto) => {
+            const m = /VA-[A-Z0-9]{8}/i.exec(texto || ''); const f = m && casillas.get(m[0].toUpperCase());
+            if (!f) { mostrarMensaje($('msg'), `${texto}: ese paquete no es de esta ruta.`); return true; }
+            f.c.checked = true; marcados.add(f.x.id); actualizar();
+            return marcados.size < porRecoger.length;
+          }, { continuo: true, titulo: 'Escanea cada paquete' }).finally(() => { setTimeout(() => { ocupado = Math.max(0, ocupado - 1); }, 500); });
+        } });
+        actualizar();
+        return el('article', { class: 'entrega-tarjeta activa ruta' }, cab(el('span', { class: 'estado pendiente', text: 'Recoger' })),
+          bloquePersona(e0, { titulo: 'Recoges en', nombre: e0.origen_quien === 'sede' ? 'Sede de Vaelo' : e0.empresa, telefono: e0.origen_telefono, chip: null,
+            zona: e0.origen_zona, referencias: e0.origen_direccion, punto: 'origen', accion: 'Ir a recoger' }),
+          notaCobro,
+          el('div', { class: 'recoger-lista' }, el('p', {}, 'Revisa cada paquete con su etiqueta: ', contador), ...filas),
+          el('div', { style: 'display:grid;gap:.5rem' }, escanear, boton));
+      }
+      // 3) Entregas en orden: la siguiente abierta completa y el resto como lista
+      const actual = abiertos[0];
+      return el('div', { class: 'ruta-en-curso' },
+        el('article', { class: 'entrega-tarjeta ruta' }, cab(el('span', { class: 'estado en_camino', text: abiertos.length ? `${lista.length - abiertos.length} de ${lista.length} hechas` : 'Ruta terminada' })), paradasResumen()),
+        actual ? tarjeta(actual) : null,
+        ...lista.filter(x => ['fallido', 'a_sede'].includes(x.estado)).map(tarjeta));
     }
 
     function tarjeta(e) {
@@ -630,9 +749,9 @@
       const quienRecibe = bloquePersona(e, {
         titulo: 'Recibe el paquete', nombre: r.nombre || e.destino_nombre, telefono: e.destino_telefono,
         foto: r.tiene_foto ? `/api/piloto/envios/${e.id}/foto-receptor?v=${v(r.confirmado_en)}` : null,
-        chip: r.omitido && !r.confirmado ? el('span', { class: 'receptor-estado si', text: 'Autorizado por Vaelo' }) : chipUbicacion(r),
-        zona: e.destino_zona, referencias: e.destino_direccion, punto: 'destino', accion: 'Dejar el pedido',
-        extra: r.omitido && !r.confirmado ? el('div', { class: 'pista', text: 'Sin ubicación: ' + r.omitido }) : null });
+        chip: e.pedido_id ? el('span', { class: 'receptor-estado si', text: 'Lugar marcado en el mapa' }) : r.omitido && !r.confirmado ? el('span', { class: 'receptor-estado si', text: 'Autorizado por Vaelo' }) : chipUbicacion(r),
+        zona: e.destino_zona, referencias: [e.destino_direccion, e.horario ? HORARIO_TXT[e.horario] : ''].filter(Boolean).join(' · '), punto: 'destino', accion: 'Dejar el pedido',
+        extra: e.pedido_id ? botonWhatsCliente(e) : r.omitido && !r.confirmado ? el('div', { class: 'pista', text: 'Sin ubicación: ' + r.omitido }) : null });
       return el('article', { class: 'entrega-tarjeta' + (!cerrado ? ' activa' : '') },
         el('div', { class: 'cab' }, el('strong', { class: 'guia' }, e.guia, e.flete ? el('span', { class: 'etiqueta-flete', style: 'margin-left:.4rem', text: 'Flete' }) : null), chipEstado(e.estado)),
         e.programado_para && recoger ? el('div', { class: 'mensaje aviso', text: 'Recoger el ' + fechaProgramada(e.programado_para) }) : '',
@@ -681,7 +800,7 @@
       let estrellas = 0;
       const botones = [1, 2, 3, 4, 5].map(n => el('button', { type: 'button', 'aria-label': `${n} de 5`, text: '★', onclick: async () => {
         estrellas = n; botones.forEach((b, i) => b.classList.toggle('si', i < n));
-        try { await api(`/api/piloto/envios/${e.id}/calificar-cliente`, { body: { estrellas } }); caja.replaceChildren(el('p', { class: 'pista ok', text: 'Gracias por calificar al cliente.' })); } catch (err) { alert(err.message); }
+        try { await api(`/api/piloto/envios/${e.id}/calificar-cliente`, { body: { estrellas } }); poner(caja, el('p', { class: 'pista ok', text: 'Gracias por calificar al cliente.' })); } catch (err) { alert(err.message); }
       } }));
       const caja = el('div', {}, e.ya_califique_cliente ? el('p', { class: 'pista ok', text: 'Ya calificaste a este cliente.' })
         : el('div', {}, el('span', { class: 'pista', text: `¿Cómo te fue con ${e.cliente_nombre.split(' ')[0]}?` }), el('div', { class: 'estrellas' }, botones)));
@@ -712,7 +831,7 @@
           mostrarMensaje($('msg'), `Reportado. Avisamos al cliente para que elija qué hacer con ${e.guia}.`, 'exito');
         } catch (err) { mostrarMensaje(msg, err.message); boton.disabled = false; boton.textContent = 'Reportar que no se pudo entregar'; }
       } });
-      $('dlg-p-cuerpo').replaceChildren(
+      poner($('dlg-p-cuerpo'), 
         el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: () => $('dlg-p').close() }),
         el('h2', { style: 'font-size:1.4rem', text: `No pude entregar ${e.guia}` }),
         el('p', { class: 'pista', text: 'Antes de reportarlo, llama a quien recibe. Repórtalo estando en el lugar de entrega.' }), msg,
@@ -743,7 +862,7 @@
           mostrarMensaje($('msg'), devolver ? `Devolviste ${e.guia}.` : `${e.guia} quedó en la sede.`, 'exito');
         } catch (err) { mostrarMensaje(msg, err.message); boton.disabled = false; boton.textContent = devolver ? 'Confirmar devolución' : 'Confirmar que lo dejé en la sede'; }
       } });
-      $('dlg-p-cuerpo').replaceChildren(
+      poner($('dlg-p-cuerpo'), 
         el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: () => $('dlg-p').close() }),
         el('h2', { style: 'font-size:1.4rem', text: devolver ? `Devolver ${e.guia}` : `Dejar ${e.guia} en la sede` }), msg,
         devolver ? [el('div', { class: 'campo' }, el('label', { text: '¿Quién recibió el paquete de vuelta?' }), recibio),
@@ -755,7 +874,7 @@
     // ---------- Ruta sugerida con varios paquetes ----------
     // Ordena las paradas (recoger antes de entregar) yendo siempre a la más cercana, y arma la ruta para Google Maps
     function rutaSugerida() {
-      const activos = envios.filter(e => e.asignacion === 'aceptado' && ['pendiente', 'recogido', 'en_camino', 'devolviendo'].includes(e.estado));
+      const activos = envios.filter(e => e.asignacion === 'aceptado' && !e.pedido_id && ['pendiente', 'recogido', 'en_camino', 'devolviendo'].includes(e.estado));
       if (activos.length < 2 || !ultimaPos) return '';
       const paradas = [];
       for (const e of activos) {
@@ -812,7 +931,7 @@
           mostrarMensaje($('msg'), `Entregaste ${e.guia}.`, 'exito');
         } catch (err) { mostrarMensaje(msg, err.message); boton.disabled = false; boton.textContent = 'Confirmar entrega'; }
       });
-      $('dlg-p-cuerpo').replaceChildren(
+      poner($('dlg-p-cuerpo'), 
         el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: cerrar }),
         el('h2', { style: 'font-size:1.4rem', text: 'Entregar ' + e.guia }), msg,
         Number(e.cobro_destinatario) > 0 ? el('div', { class: 'cobro', text: `Antes de entregar, cobra ${dinero(e.cobro_destinatario)}` }) : '',
@@ -834,7 +953,7 @@
         try {
           await api('/api/piloto/emergencia', { body: { tipo, ...(pos || {}) } });
           if (navigator.vibrate) navigator.vibrate([300, 100, 300]);
-          $('dlg-p-cuerpo').replaceChildren(el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: () => $('dlg-p').close() }),
+          poner($('dlg-p-cuerpo'), el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: () => $('dlg-p').close() }),
             el('h2', { text: 'Avisamos a Vaelo' }), el('p', { text: 'La administración ya ve tu ubicación y te va a llamar. Si es grave, llama también:' }), llamadas());
         } catch (err) { mostrarMensaje(msg, err.message + ' Llama directo a Vaelo o a emergencias.'); }
       };
@@ -842,7 +961,7 @@
         el('a', { class: 'boton peligro', href: 'tel:110', text: 'Policía (110)' }),
         el('a', { class: 'boton peligro', href: 'tel:122', text: 'Bomberos Voluntarios (122)' }),
         el('a', { class: 'boton peligro', href: 'tel:123', text: 'Bomberos Municipales (123)' }));
-      $('dlg-p-cuerpo').replaceChildren(
+      poner($('dlg-p-cuerpo'), 
         el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: () => $('dlg-p').close() }),
         el('h2', { style: 'font-size:1.5rem', text: '¿Qué pasó?' }),
         el('p', { text: 'Avisamos de inmediato a la administración con tu ubicación.' }), msg,

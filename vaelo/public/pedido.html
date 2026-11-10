@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Tu pedido · Vaelo</title>
+  <meta name="theme-color" content="#0e2463">
+  <link rel="icon" href="/img/favicon.png" type="image/png">
+  <link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/vendor/maplibre/maplibre-gl.css?v=4.7.1">
+  <link rel="stylesheet" href="/css/styles.css?v=20261109d">
+</head>
+<body>
+  <header class="barra"><div class="contenedor"><a href="/" class="marca"><img src="/img/logo-blanco.png" alt="Vaelo" width="139" height="40"></a></div></header>
+  <main class="area"><div class="contenedor" id="app" style="max-width:720px"><p class="pista">Cargando…</p></div></main>
+  <script src="/vendor/maplibre/maplibre-gl.js?v=4.7.1"></script>
+  <script src="/js/comun.js?v=20261109d"></script>
+  <script src="/js/qr.js?v=1"></script>
+  <script>
+    const app = document.getElementById('app');
+    const token = location.pathname.split('/').pop();
+    const DIAS_SEMANA = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+    const diaTexto = (d) => { const f = new Date(d + 'T12:00:00Z'); return `${DIAS_SEMANA[f.getUTCDay()]} ${f.getUTCDate()} de ${f.toLocaleDateString('es-GT', { month: 'long', timeZone: 'UTC' })}`; };
+    const sumar = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 86400_000).toISOString().slice(0, 10);
+    let datos = null, editando = false, reloj = null;
+
+    // Avisos al navegador sin cuenta: la suscripción queda ligada a este pedido
+    async function activarAvisosPedido() {
+      if (!pushDisponible()) throw new Error(esIos() && !yaInstalada() ? 'En iPhone primero agrega esta página a tu pantalla de inicio (Compartir > Agregar a inicio) y ábrela desde ahí.' : 'Este navegador no permite avisos. Usa Chrome.');
+      const permiso = await Notification.requestPermission();
+      if (permiso !== 'granted') throw new Error('No diste permiso. Puedes activarlo tocando el candado junto a la dirección de la página.');
+      const reg = await navigator.serviceWorker.ready;
+      const { clave } = await api('/api/push/clave');
+      const bytes = Uint8Array.from(atob(clave.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: bytes });
+      await api(`/api/pedido/${token}/push`, { body: { suscripcion: sub.toJSON() } });
+      try { localStorage.setItem('avisos-' + token, '1'); } catch { /* sin almacenamiento */ }
+    }
+    function bloqueAvisar() {
+      let activos = false;
+      try { activos = localStorage.getItem('avisos-' + token) === '1' && Notification.permission === 'granted'; } catch { /* vacío */ }
+      if (activos) return el('div', { class: 'mensaje exito' }, icono('campana'), ' Avisos activados: te avisamos cuando salga tu pedido y cuando seas la próxima entrega.');
+      const msg = el('small', { class: 'avisos-error' });
+      return el('div', { class: 'avisos-push pedido-avisos' }, icono('campana'),
+        el('div', {}, el('strong', { text: 'Avísame cuando el piloto salga' }), el('small', { text: 'Te llega un aviso al celular cuando tu pedido sale y cuando eres la próxima entrega, aunque cierres esta página.' }), msg),
+        el('button', { class: 'boton chico', type: 'button', text: 'Activar', onclick: async (ev) => {
+          ev.target.disabled = true;
+          try { await activarAvisosPedido(); pintar(); } catch (e) { msg.textContent = e.message; ev.target.disabled = false; }
+        } }));
+    }
+
+    async function cargar() {
+      try { datos = await api('/api/pedido/' + token); } catch (e) { poner(app, el('div', { class: 'mensaje error', text: e.message })); return; }
+      pintar();
+    }
+    function cabecera() {
+      const d = datos;
+      return el('div', { class: 'pedido-cabecera' },
+        el('div', {}, el('span', { class: 'etiqueta-azul', text: 'Pedido de ' + d.empresa }), el('h1', { text: d.envio ? 'Tu pedido' : (d.estado === 'confirmado' && !editando ? '¡Listo! Tu pedido está confirmado' : 'Elige cuándo y dónde recibir') }),
+          el('p', { class: 'pista', text: `${d.descripcion} · ${d.tamano} · código ${d.codigo}` })),
+        window.qrVaelo ? el('div', { class: 'pedido-qr' }, qrVaelo.nodo(d.codigo, 88)) : null);
+    }
+    function pintar() {
+      clearTimeout(reloj);
+      const d = datos;
+      if (d.envio) return pintarSeguimiento();
+      if (d.editable && (editando || ['pendiente', 'esperando', 'vencido'].includes(d.estado))) return pintarFormulario();
+      // Confirmado (o ya en manos de Vaelo, todavía sin salir)
+      poner(app, cabecera(),
+        d.en_lote ? el('div', { class: 'mensaje aviso', text: `${d.empresa} ya entregó tu pedido a Vaelo. Sale el ${diaTexto(d.dia)}; te avisamos cuando el piloto vaya en camino.` }) : null,
+        resumen(),
+        pagoTransferencia(),
+        bloqueAvisar(),
+        d.editable ? el('button', { class: 'boton borde', type: 'button', text: 'Cambiar día, horario o lugar', onclick: () => { editando = true; pintar(); } }) : null);
+      reloj = setTimeout(cargar, 60_000);
+    }
+    function resumen() {
+      const d = datos;
+      return el('div', { class: 'bloque pedido-resumen' },
+        el('dl', { class: 'pedido-datos' },
+          el('dt', { text: 'Día' }), el('dd', { text: d.dia ? diaTexto(d.dia) : '—' }),
+          el('dt', { text: 'Horario' }), el('dd', { text: d.horarios[d.horario] || '—' }),
+          el('dt', { text: 'Lugar' }), el('dd', { text: [d.direccion, d.zona].filter(Boolean).join(', ') + (d.referencias ? ` (${d.referencias})` : '') }),
+          el('dt', { text: 'Recibe' }), el('dd', { text: `${d.recibe_nombre} · ${d.recibe_telefono}` }),
+          el('dt', { text: 'Envío' }), el('dd', { text: d.precio ? `${dinero(d.precio.precio)} ${d.metodo_pago === 'transferencia' ? 'por transferencia' : 'en efectivo al recibir'}` : '—' })));
+    }
+    function pagoTransferencia() {
+      const d = datos;
+      if (d.metodo_pago !== 'transferencia' || !d.precio || d.envio) return null;
+      const tel = String(d.whatsapp_pagos || '').replace(/\D/g, '');
+      return el('div', { class: 'cargos-aviso' },
+        el('span', {}, el('strong', { style: 'font-size:1rem', text: `Transferencia de ${dinero(d.precio.precio)}` }), el('br'),
+          el('small', { text: (d.datos_transferencia ? d.datos_transferencia + '. ' : '') + 'Manda el comprobante por WhatsApp con tu código. Tu pedido sale cuando confirmemos el pago.' })),
+        tel ? el('a', { class: 'boton cinta chico', href: `https://wa.me/${tel}?text=${encodeURIComponent(`Hola Vaelo, adjunto el comprobante del envío de mi pedido ${d.codigo} (${d.empresa}) por ${dinero(d.precio.precio)}.`)}`, target: '_blank', rel: 'noopener', text: 'Mandar comprobante' }) : null);
+    }
+
+    function pintarFormulario() {
+      const d = datos;
+      const msg = el('div', { class: 'mensaje', role: 'alert' });
+      let dia = d.dia && d.dia >= d.hoy ? d.dia : '', horario = d.horario || '', punto = d.lat != null ? { lat: d.lat, lng: d.lng } : null;
+      const sec = (n, t, ...h) => el('section', { class: 'bloque seccion-paso' }, el('div', { class: 'seccion-cab' }, el('span', { class: 'num', text: n }), el('div', {}, el('h2', { text: t }))), ...h);
+      // 1. Día: los próximos 7 días como botones y otro día en el calendario
+      const otro = el('input', { type: 'date', min: d.hoy, max: sumar(d.hoy, 30), value: dia, 'aria-label': 'Otro día' });
+      const chipsDia = el('div', { class: 'opciones' });
+      const pintarDias = () => poner(chipsDia, ...Array.from({ length: 7 }, (_, i) => sumar(d.hoy, i)).map((x, i) => el('label', { class: 'opcion' },
+        el('input', { type: 'radio', name: 'dia', value: x, checked: dia === x, onchange: () => { dia = x; otro.value = x; } }),
+        el('span', {}, i === 0 ? 'Hoy' : i === 1 ? 'Mañana' : diaTexto(x).split(' de ')[0].replace(/^./, (c) => c.toUpperCase()), el('small', { text: i < 2 ? diaTexto(x) : diaTexto(x).split(' ').slice(2).join(' ') })))));
+      otro.addEventListener('change', () => { dia = otro.value; pintarDias(); });
+      pintarDias();
+      const chipsHora = el('div', { class: 'opciones' }, ...Object.entries(d.horarios).map(([k, t]) => el('label', { class: 'opcion' },
+        el('input', { type: 'radio', name: 'horario', value: k, checked: horario === k, onchange: () => { horario = k; } }),
+        el('span', {}, t, el('small', { text: { manana: '8 a. m. a 12 p. m.', tarde: '12 a 6 p. m.', cualquiera: 'Cuando pase el piloto' }[k] || '' })))));
+      // 2. Lugar: mapa, zona y referencias
+      const zona = el('select', { id: 'zona' }, el('option', { value: '', text: 'Elige…' }), ...d.zonas.map((z) => el('option', { value: z, text: z, selected: d.zona === z })));
+      const direccion = el('input', { id: 'direccion', maxlength: 300, value: d.direccion || '', placeholder: 'Calle, número de casa, colonia' });
+      const referencias = el('input', { id: 'referencias', maxlength: 300, value: d.referencias || '', placeholder: 'Portón negro, frente a la tienda…' });
+      const precio = el('div', { class: 'pedido-precio', hidden: true });
+      const actualizarPrecio = async () => {
+        if (!zona.value) { precio.hidden = true; return; }
+        try {
+          const r = await api(`/api/pedido/${token}/precio`, { body: { zona: zona.value, lat: punto?.lat, lng: punto?.lng } });
+          precio.hidden = false;
+          poner(precio, el('span', { text: 'Tu envío cuesta' }), el('strong', { text: dinero(r.precio) }), el('small', { text: r.preferencial ? 'Zona con tarifa preferencial' : 'Fuera de las zonas con tarifa preferencial' }));
+        } catch { precio.hidden = true; }
+      };
+      zona.addEventListener('change', actualizarPrecio);
+      const mapaCaja = el('div');
+      // 3. Quién recibe y pago
+      const nombre = el('input', { id: 'recibe_nombre', maxlength: 100, value: d.recibe_nombre || '', autocomplete: 'name' });
+      const tel = el('input', { id: 'recibe_telefono', type: 'tel', maxlength: 30, value: d.recibe_telefono || '', autocomplete: 'tel' });
+      let pago = d.metodo_pago || 'efectivo';
+      const chipsPago = el('div', { class: 'opciones' }, ...[['efectivo', 'Efectivo al recibir', 'Le pagas al piloto'], ['transferencia', 'Transferencia', 'Comprobante por WhatsApp antes de que salga']].map(([k, t, a]) =>
+        el('label', { class: 'opcion' }, el('input', { type: 'radio', name: 'pago', value: k, checked: pago === k, onchange: () => { pago = k; } }), el('span', {}, t, el('small', { text: a })))));
+      const form = el('form', { novalidate: true },
+        sec('1', '¿Qué día puedes recibir?', chipsDia, el('div', { class: 'campo', style: 'margin-top:.75rem;max-width:240px' }, el('label', { text: 'Otro día' }), otro),
+          el('h3', { style: 'margin-top:1.1rem', text: '¿En qué horario?' }), chipsHora),
+        sec('2', '¿Dónde lo entregamos?', mapaCaja,
+          el('div', { class: 'fila' }, el('div', { class: 'campo' }, el('label', { for: 'zona', text: 'Zona o municipio' }), zona), el('div', { class: 'campo' }, el('label', { for: 'direccion', text: 'Dirección' }), direccion)),
+          el('div', { class: 'campo' }, el('label', { for: 'referencias' }, 'Referencias', el('span', { class: 'ayuda', text: ' Opcional' })), referencias), precio),
+        sec('3', '¿Quién recibe?', el('div', { class: 'fila' }, el('div', { class: 'campo' }, el('label', { for: 'recibe_nombre', text: 'Nombre' }), nombre), el('div', { class: 'campo' }, el('label', { for: 'recibe_telefono', text: 'Teléfono' }), tel)),
+          el('h3', { style: 'margin-top:.6rem', text: '¿Cómo pagas el envío?' }), chipsPago),
+        msg,
+        el('button', { class: 'boton accion-principal', type: 'submit', text: d.estado === 'confirmado' ? 'Guardar cambios' : 'Confirmar mi pedido' }),
+        d.estado === 'confirmado' ? el('button', { class: 'boton borde', type: 'button', style: 'margin-left:.5rem', text: 'Cancelar', onclick: () => { editando = false; pintar(); } }) : null);
+      form.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const b = form.querySelector('button[type=submit]'); b.disabled = true;
+        try {
+          if (!dia) throw new Error('Elige el día en que puedes recibir.');
+          if (!horario) throw new Error('Elige el horario.');
+          if (!punto) throw new Error('Marca en el mapa dónde se entrega: busca la dirección o toca el mapa.');
+          await api('/api/pedido/' + token, { body: { dia, horario, lat: punto.lat, lng: punto.lng, zona: zona.value, direccion: direccion.value, referencias: referencias.value,
+            recibe_nombre: nombre.value, recibe_telefono: tel.value, metodo_pago: pago } });
+          editando = false;
+          await cargar();
+          window.scrollTo({ top: 0, behavior: sinAnimacion() ? 'auto' : 'smooth' });
+        } catch (e) { mostrarMensaje(msg, e.message); b.disabled = false; }
+      });
+      poner(app, cabecera(),
+        d.estado === 'vencido' ? el('div', { class: 'mensaje aviso', text: 'El día que habías elegido ya pasó. Elige uno nuevo.' }) : null,
+        el('p', { class: 'pista', text: `${d.empresa} te envía tu pedido con Vaelo. Elige el día, el horario y el lugar; el piloto llega ahí.` }), form);
+      const sel = selectorPunto(mapaCaja, { letra: 'B', clase: 'entrega', conMiUbicacion: true,
+        alCambiar: async (p) => {
+          punto = p;
+          try { const z = await api(`/api/zona?lat=${p.lat}&lng=${p.lng}`); if (z.zona && [...zona.options].some((o) => o.value === z.zona)) zona.value = z.zona; } catch { /* sin zona */ }
+          actualizarPrecio();
+        },
+        alDireccion: (t, usar) => { if (usar || !direccion.value) direccion.value = t; } });
+      if (punto) sel.poner(punto.lat, punto.lng);
+      actualizarPrecio();
+    }
+
+    function pintarSeguimiento() {
+      const d = datos, e = d.envio;
+      const enCurso = ['pendiente', 'recogido', 'en_camino'].includes(e.estado);
+      let situacion;
+      if (e.estado === 'entregado') situacion = el('div', { class: 'mensaje exito', text: `Entregado${e.recibio ? ' a ' + e.recibio : ''}. ¡Gracias!` });
+      else if (!enCurso) situacion = el('div', { class: 'mensaje aviso', text: `No pudimos entregar tu pedido${e.fallo ? ': ' + e.fallo.toLowerCase() : ''}. Queda guardado en la sede de Vaelo; escríbele a ${d.empresa} para coordinar.` });
+      else if (!e.piloto) situacion = el('div', { class: 'mensaje aviso', text: 'Tu pedido está listo para salir. Te avisamos cuando un piloto lo tome.' });
+      else if (e.estado === 'pendiente') situacion = el('div', { class: 'mensaje aviso', text: `${e.piloto.nombre} está recogiendo los paquetes. Pronto sale hacia ti.` });
+      else if (e.proximo || e.antes === 0) situacion = el('div', { class: 'pedido-proximo' }, el('strong', { text: 'Eres la próxima entrega' }), el('span', { text: `${e.piloto.nombre} va hacia ti. Ten a mano tu código.` }));
+      else situacion = el('div', { class: 'mensaje aviso', text: `${e.piloto.nombre} va en camino. ${e.antes === 1 ? 'Hay 1 entrega' : `Hay ${e.antes} entregas`} antes de la tuya.` });
+      poner(app, cabecera(),
+        el('div', { class: 'bloque' }, barraPasos(e.estado), situacion,
+          e.piloto ? el('p', { class: 'pista', style: 'margin:0' }, el('strong', { text: e.piloto.nombre }), [e.piloto.vehiculo, e.piloto.color, e.piloto.placa].filter(Boolean).length ? ' · ' + [e.piloto.vehiculo, e.piloto.color, e.piloto.placa].filter(Boolean).join(' · ') : '') : null),
+        e.codigo_entrega ? el('div', { class: 'codigo-entrega' }, el('div', {}, el('span', { text: 'Tu código de entrega' }), el('strong', { text: e.codigo_entrega })),
+          el('p', { text: 'Dáselo al piloto cuando te entregue. No lo compartas antes.' })) : null,
+        enCurso && e.precio && e.metodo_pago === 'recibe' ? el('p', { class: 'pedido-cobro' }, 'Pagas ', el('strong', { text: dinero(e.precio) }), ' en efectivo al recibir.') : null,
+        enCurso ? bloqueAvisar() : null,
+        resumen(),
+        el('a', { class: 'boton borde', href: '/rastreo?guia=' + e.guia, text: 'Ver en el mapa' }));
+      if (enCurso) reloj = setTimeout(cargar, 30_000);
+    }
+    cargar();
+  </script>
+</body>
+</html>

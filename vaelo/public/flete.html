@@ -22,7 +22,7 @@
     const wa = (tel) => { let t = String(tel || '').replace(/\D/g, ''); if (t.length === 8) t = '502' + t; return t; };
     async function cargar() {
       let f;
-      try { f = await api('/api/flete/' + token); } catch (e) { app.replaceChildren(el('div', { class: 'mensaje error', text: e.message })); return; }
+      try { f = await api('/api/flete/' + token); } catch (e) { poner(app, el('div', { class: 'mensaje error', text: e.message })); return; }
       const cab = el('div', { class: 'flete-cabecera' },
         el('div', {}, el('span', { class: 'etiqueta-flete', text: 'Flete en ' + (f.vehiculo || 'pickup').toLowerCase() }), el('h1', { text: f.configurado ? 'Tu flete' : 'Completa los datos de tu flete' }),
           el('p', { class: 'pista', text: `Guía ${f.guia}${f.piloto ? ' · piloto ' + f.piloto : ''}` })),
@@ -37,7 +37,7 @@
         url && !d.confirmado ? el('div', { class: 'navegar' },
           rol === 'entrega' ? el('a', { class: 'boton chico', href: url, text: 'Soy yo: compartir mi ubicación' }) : null,
           el('a', { class: 'boton cinta chico', href: `https://wa.me/${wa(d.telefono)}?text=${encodeURIComponent(enlaceTxt(rol, d.nombre, url))}`, target: '_blank', rel: 'noopener', text: 'Mandarle su enlace por WhatsApp' })) : null);
-      app.replaceChildren(cab,
+      poner(app, cab,
         el('div', { class: 'mensaje aviso', text: f.estado === 'pendiente' ? 'Para que el piloto salga, quien entrega y quien recibe tienen que compartir su ubicación en vivo con su enlace. El piloto llega a donde estén.' : 'El flete va en camino. Puedes seguirlo con la guía.' }),
         f.metodo_pago === 'transferencia' && f.pago_estado !== 'verificado' ? el('div', { class: 'cargos-aviso' },
           el('span', {}, el('strong', { style: 'font-size:1rem', text: `Transferencia de ${dinero(f.precio)}` }), el('br'), el('small', { text: (f.datos_transferencia ? f.datos_transferencia + '. ' : '') + 'Manda el comprobante por WhatsApp: el flete sale cuando confirmemos el pago.' })),
@@ -82,7 +82,7 @@
           cargar();
         } catch (e) { mostrarMensaje(msg, e.message); b.disabled = false; }
       });
-      app.replaceChildren(cab, el('p', { class: 'pista', text: 'Llena los datos y después cada persona comparte su ubicación con su enlace, igual que un envío normal. El precio ya está acordado.' }), form);
+      poner(app, cab, el('p', { class: 'pista', text: 'Llena los datos y después cada persona comparte su ubicación con su enlace, igual que un envío normal. El precio ya está acordado.' }), form);
     }
     cargar();
   </script>

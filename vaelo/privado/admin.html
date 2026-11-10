@@ -36,6 +36,12 @@
       <header class="panel-cabecera">
         <button class="menu-movil" type="button" id="abrir-menu" aria-label="Abrir menú" aria-controls="lateral" aria-expanded="false"></button>
         <div class="panel-titulo"><h1 id="titulo-seccion">Envíos</h1><p id="subtitulo-seccion">Pedidos de hoy y su estado</p></div>
+        <div class="buscador-global" id="buscador-global">
+          <label class="oculto" for="buscar-global">Buscar piloto, guía, pedido, empresa o cliente</label>
+          <input id="buscar-global" type="search" autocomplete="off" placeholder="Buscar piloto, guía o pedido  ( / )" aria-controls="resultados-globales" aria-expanded="false">
+          <button class="boton-icono" type="button" id="escanear" title="Escanear el código QR de un paquete" aria-label="Escanear código QR">QR</button>
+          <div class="resultados-globales" id="resultados-globales" role="listbox" hidden></div>
+        </div>
         <div class="cabecera-acciones">
           <button class="boton-icono" type="button" id="boton-push" title="Avisos en este equipo aunque el panel esté cerrado">Avisos</button>
           <button class="boton-icono" type="button" id="boton-avisos" aria-pressed="true">Sonido</button>
@@ -122,20 +128,26 @@
 
       <section id="panel-empresas" role="tabpanel" aria-labelledby="tab-empresas" hidden>
         <div id="msg-empresas" class="mensaje" role="alert"></div>
-        <div class="bloque solo-admin">
+        <div class="pestanas" role="tablist" id="empresas-sub">
+          <button type="button" role="tab" aria-selected="true" data-sub="activas">Empresas activas</button>
+          <button type="button" role="tab" aria-selected="false" data-sub="solicitudes" class="solo-admin">Solicitudes de contrato <span class="insignia" id="insignia-solicitudes" hidden></span></button>
+        </div>
+        <div id="empresas-activas"></div>
+        <div class="bloque" id="empresas-solicitudes" hidden>
           <h2>Solicitudes de contrato</h2>
           <p class="bloque-nota">Empresas que quieren usar los pilotos de Vaelo. Revisa sus datos y fotos, pon la cita para firmar el contrato y, ya firmado, activa su apartado de empresa.</p>
           <div id="lista-solicitudes"></div>
-        </div>
-        <div class="bloque">
-          <h2>Paquetes de empresas que llegan a la sede</h2>
-          <p class="bloque-nota">Cuando la empresa deja los paquetes en la sede, márcalo recibido: desde ese momento se pueden asignar a pilotos. Los que salen el mismo día no pagan bodega; después se cobran por paquete por día.</p>
-          <div id="lista-lotes"></div>
         </div>
       </section>
 
       <section id="panel-caja" role="tabpanel" aria-labelledby="tab-caja" hidden>
         <div id="msg-caja" class="mensaje" role="alert"></div>
+        <div class="bloque cierre-dia" id="caja-cierre"></div>
+        <div class="bloque">
+          <div class="cab-bloque"><div><h2>Sueldos de pilotos</h2>
+            <p class="bloque-nota">Lo que ganó cada piloto menos el efectivo que trae en la bolsa. Cuando viene a la sede: búscalo arriba por su nombre, revisa el neto y toca «Ya fue pagado».</p></div></div>
+          <div id="caja-sueldos"></div>
+        </div>
         <div class="bloque">
           <h2>Reclamos y devoluciones a clientes</h2>
           <p class="bloque-nota">Reportes de paquetes perdidos, dañados o incompletos. Evalúa según lo que llevaba el paquete (foto del cliente, valor declarado, foto de entrega y recorrido) y decide cuánto se le devuelve y cuánto paga el piloto.</p>
@@ -145,16 +157,6 @@
           <h2>Transferencias por confirmar</h2>
           <p class="bloque-nota">El cliente manda el comprobante al WhatsApp de Vaelo. Revisa que el dinero entró a la cuenta y márcalo recibido: hasta entonces el envío no se manda a ningún piloto.</p>
           <div id="caja-transferencias"></div>
-        </div>
-        <div class="bloque">
-          <h2>Efectivo que deben entregar los pilotos</h2>
-          <p class="bloque-nota">Envíos pagados en efectivo más lo cobrado a quien recibe. Cuando el piloto entrega el dinero en la sede, regístralo aquí.</p>
-          <div id="caja-efectivo"></div>
-        </div>
-        <div class="bloque">
-          <h2>Pago a pilotos</h2>
-          <p class="bloque-nota">Lo que ganó cada piloto por sus entregas y todavía no se le ha pagado. Se calcula con la comisión de "Tarifas y ajustes".</p>
-          <div id="caja-pagos"></div>
         </div>
         <div class="bloque">
           <h2>Cobros contra entrega por devolver a clientes</h2>
@@ -218,6 +220,12 @@
       </section>
 
       <section id="panel-reportes" role="tabpanel" aria-labelledby="tab-reportes" hidden>
+        <div class="bloque">
+          <div class="cab-bloque"><div><h2>Cierres del día y Excel</h2>
+            <p class="bloque-nota">Cada vez que se cierra el día (Caja &gt; Cerrar día) queda su Excel aquí. La semana, el mes y el año se calculan solos con todo lo registrado.</p></div>
+            <div class="navegar"><a class="boton borde chico" href="/api/admin/reporte-excel?periodo=semana">Excel de la semana</a><a class="boton borde chico" href="/api/admin/reporte-excel?periodo=mes">Excel del mes</a><a class="boton borde chico" href="/api/admin/reporte-excel?periodo=anio">Excel del año</a></div></div>
+          <div id="lista-cierres"></div>
+        </div>
         <div class="filtros" style="align-items:end">
           <div id="rangos" style="display:flex;gap:.4rem;flex-wrap:wrap"></div>
           <div class="campo" style="margin:0"><label for="rep-desde">Desde</label><input id="rep-desde" type="date"></div>
@@ -349,6 +357,7 @@
 
   <script src="/vendor/maplibre/maplibre-gl.js?v=4.7.1"></script>
   <script src="/js/comun.js?v=20261109c"></script>
+  <script src="/js/qr.js?v=1"></script>
   <script>
     const $ = (id) => document.getElementById(id);
     let filtroEstado = '', temporizador = null, mensajeros = [], vehiculos = [], mapaFlota = null, capaFlota = null;
@@ -369,7 +378,7 @@
       if (nombre === 'caja') cargarCaja();
       if (nombre === 'empresas') cargarEmpresas();
       if (nombre === 'descuentos') cargarDescuentos();
-      if (nombre === 'reportes') cargarReportes();
+      if (nombre === 'reportes') { cargarReportes(); cargarCierres(); }
     }
     tabs.forEach(t => $('tab-' + t).addEventListener('click', () => abrirTab(t)));
 
@@ -380,7 +389,7 @@
       const c = (titulo, valor, filtro, marcar) => el('button', { type: 'button', class: 'celda-cifra' + (marcar ? ' marcar' : '') + (filtro !== null && filtro === filtroEstado ? ' activa' : ''),
         disabled: filtro === null, onclick: () => { if (filtro === null) return; filtroEstado = filtro; pintarChips(); cargarEnvios(); cargarResumen(); } },
         el('span', { text: titulo }), el('strong', { text: String(valor) }));
-      $('cifras').replaceChildren(
+      poner($('cifras'), 
         c('Sin piloto', r.sinAsignar, 'sin_asignar', r.sinAsignar > 0),
         c('Requieren atención', atencion, 'atencion', atencion > 0),
         c('Por recoger', r.porEstado.pendiente, 'pendiente'),
@@ -394,8 +403,8 @@
     }
 
     function pintarChips() {
-      const opciones = [['', 'Todos'], ['sin_asignar', 'Sin piloto'], ['atencion', 'Requieren atención'], ...Object.entries(ESTADOS)];
-      $('chips').replaceChildren(...opciones.map(([v, t]) => el('button', {
+      const opciones = [['', 'Todos'], ['sin_asignar', 'Sin piloto'], ['atencion', 'Requieren atención'], ...Object.entries(ESTADOS), ['empresas', 'De empresas']];
+      poner($('chips'), ...opciones.map(([v, t]) => el('button', {
         class: 'chip', type: 'button', 'aria-pressed': String(v === filtroEstado), text: v === 'pendiente' ? 'Por recoger' : t,
         onclick: () => { filtroEstado = v; pintarChips(); cargarEnvios(); },
       })));
@@ -408,8 +417,8 @@
       const cuerpo = $('tabla-envios');
       try {
         const { envios } = await api('/api/admin/envios?' + q);
-        if (!envios.length) { cuerpo.replaceChildren(el('tr', {}, el('td', { colspan: 8, style: 'text-align:center;color:var(--suave);padding:2rem', text: 'No hay envíos con este filtro.' }))); return; }
-        cuerpo.replaceChildren(...envios.map(e => el('tr', { class: 'clic' + (pendientes.has(e.id) ? ' nuevo' : ''), tabindex: 0,
+        if (!envios.length) { poner(cuerpo, el('tr', {}, el('td', { colspan: 8, style: 'text-align:center;color:var(--suave);padding:2rem', text: 'No hay envíos con este filtro.' }))); return; }
+        poner(cuerpo, ...envios.map(e => el('tr', { class: 'clic' + (pendientes.has(e.id) ? ' nuevo' : ''), tabindex: 0,
           onclick: () => abrirEnvio(e.id), onkeydown: (ev) => { if (ev.key === 'Enter') abrirEnvio(e.id); } },
           el('td', {}, el('strong', { text: e.guia }), pendientes.has(e.id) ? el('span', { class: 'marca-nuevo', text: pendientes.get(e.id).rechazo ? 'Rechazado' : 'Nuevo' }) : null, e.fragil ? el('span', { class: 'etiqueta-pendiente', style: 'margin-left:.3rem', text: 'Frágil' }) : null),
           el('td', { text: fecha(e.creado) }),
@@ -423,7 +432,7 @@
             e.estado === 'fallido' && e.fallo?.decidir_antes ? [el('br'), sub(`El cliente elige en ${faltaPara(e.fallo.decidir_antes)}`)] : null,
             e.estado === 'en_sede' && e.sede ? [el('br'), sub(`${e.sede.dias} día(s) · ${dinero(e.sede.cargo)}`)] : null,
             e.metodo_pago === 'transferencia' && e.pago_estado === 'por_revisar' ? [el('br'), el('span', { class: 'etiqueta-azul', text: 'Comprobante por revisar' })] : null))));
-      } catch (e) { cuerpo.replaceChildren(el('tr', {}, el('td', { colspan: 8, class: 'mensaje error', text: e.message }))); }
+      } catch (e) { poner(cuerpo, el('tr', {}, el('td', { colspan: 8, class: 'mensaje error', text: e.message }))); }
     }
 
     // ---------- Quien entrega y quien recibe: ubicación en vivo ----------
@@ -559,7 +568,7 @@
       const selPil = el('select', { id: 'fl-pil' });
       const pintarPilotos = () => {
         const lista = m.mensajeros.filter(p => p.puede_trabajar).sort((a, b) => (b.vehiculo_id === Number(selVeh.value)) - (a.vehiculo_id === Number(selVeh.value)) || b.en_linea_real - a.en_linea_real);
-        selPil.replaceChildren(...(lista.length ? lista.map(p => el('option', { value: p.id, text: `${p.nombre} · ${p.vehiculo || 'sin vehículo'}${p.en_linea_real ? ' · en línea' : ''}` })) : [el('option', { value: '', text: 'No hay pilotos disponibles' })]));
+        poner(selPil, ...(lista.length ? lista.map(p => el('option', { value: p.id, text: `${p.nombre} · ${p.vehiculo || 'sin vehículo'}${p.en_linea_real ? ' · en línea' : ''}` })) : [el('option', { value: '', text: 'No hay pilotos disponibles' })]));
       };
       selVeh.addEventListener('change', pintarPilotos); pintarPilotos();
       const precio = el('input', { id: 'fl-precio', type: 'number', min: 1, step: '0.01', class: 'entrada-grande', placeholder: '0.00' });
@@ -570,13 +579,13 @@
         boton.disabled = true;
         try {
           const r = await api('/api/admin/fletes', { body: { precio: precio.value, vehiculo_id: selVeh.value, mensajero_id: selPil.value, cliente_telefono: tel.value, descripcion: desc.value } });
-          resultado.replaceChildren(el('div', { class: 'mensaje exito', text: `Flete ${r.guia} creado. El piloto ya tiene el aviso; sale cuando el cliente complete los datos y compartan las ubicaciones.` }),
+          poner(resultado, el('div', { class: 'mensaje exito', text: `Flete ${r.guia} creado. El piloto ya tiene el aviso; sale cuando el cliente complete los datos y compartan las ubicaciones.` }),
             enlaceFlete(r.guia, r.enlace, tel.value),
             el('button', { class: 'boton borde chico', type: 'button', text: 'Ver el flete', onclick: () => abrirEnvio(r.id) }));
           boton.hidden = true; cargarEnvios(); cargarResumen();
         } catch (e) { mostrarMensaje(msg, e.message); boton.disabled = false; }
       } });
-      $('dlg-cuerpo').replaceChildren(
+      poner($('dlg-cuerpo'), 
         el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: () => $('dlg').close() }),
         el('h2', { text: 'Nuevo flete' }),
         el('p', { class: 'pista', text: 'Cuando ya acordaste con el cliente por WhatsApp qué se lleva y cuánto cuesta. Pones el precio y el piloto, y le mandas el enlace: él completa los datos de quien entrega y quien recibe, y cada uno comparte su ubicación como en un envío normal.' }),
@@ -589,37 +598,223 @@
     }
     $('nuevo-flete').addEventListener('click', () => nuevoFlete().catch(e => alert(e.message)));
 
-    // ---------- Empresas: solicitudes de contrato y paquetes en la sede ----------
+    // ---------- Empresas: activas (pedidos, rutas y sede) y solicitudes de contrato ----------
+    let subEmpresas = 'activas';
+    document.querySelectorAll('#empresas-sub button').forEach((b) => b.addEventListener('click', () => {
+      subEmpresas = b.dataset.sub;
+      document.querySelectorAll('#empresas-sub button').forEach((x) => x.setAttribute('aria-selected', String(x === b)));
+      $('empresas-activas').hidden = subEmpresas !== 'activas'; $('empresas-solicitudes').hidden = subEmpresas !== 'solicitudes';
+    }));
+    const DIAS_GT = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+    const diaLargo = (d) => { if (!d) return ''; const f = new Date(d + 'T12:00:00Z'); return `${DIAS_GT[f.getUTCDay()]} ${f.getUTCDate()} de ${f.toLocaleDateString('es-GT', { month: 'long', timeZone: 'UTC' })}`; };
     async function cargarEmpresas() {
       let pendientes = 0;
+      try {
+        const r = await api('/api/admin/empresas-activas');
+        pendientes += r.lotes_nuevos;
+        const n = (v, t, clase) => v ? el('span', { class: clase, text: `${v} ${t}` }) : null;
+        poner($('empresas-activas'), r.empresas.length ? el('div', { class: 'empresas-lista' }, r.empresas.map((x) => el('button', { type: 'button', class: 'empresa-tarjeta' + (x.lotes_nuevos ? ' prioridad' : ''), onclick: () => abrirEmpresa(x.id) },
+          el('div', {}, el('strong', { text: x.empresa_nombre || x.nombre }), el('small', { text: `${x.nombre} · ${x.telefono || ''}` })),
+          el('div', { class: 'empresa-cuentas' },
+            n(x.lotes_nuevos, x.lotes_nuevos === 1 ? 'envío por repartir' : 'envíos por repartir', 'etiqueta-pendiente'),
+            n(x.en_ruta, 'en ruta', 'etiqueta-azul'), n(x.en_sede, 'en sede', 'etiqueta-gris'),
+            n(x.confirmados, 'confirmados sin mandar', 'etiqueta-gris'),
+            el('small', { text: `${x.entregados_mes} entregados este mes` })))))
+          : el('div', { class: 'bloque' }, el('p', { class: 'pista', text: 'Todavía no hay empresas con contrato. Cuando apruebes una solicitud aparece aquí.' })));
+        if (rolPanel === 'admin') { $('insignia-solicitudes').textContent = String(r.solicitudes); $('insignia-solicitudes').hidden = !r.solicitudes; pendientes += r.solicitudes; }
+      } catch (e) { mostrarMensaje($('msg-empresas'), e.message); }
       if (rolPanel === 'admin') {
         try {
           const r = await api('/api/admin/empresas');
           const ETQ = { enviada: 'etiqueta-azul', cita: 'etiqueta-pendiente', aprobada: 'etiqueta-completa', rechazada: 'etiqueta-gris' };
-          pendientes += r.solicitudes.filter(x => x.estado === 'enviada').length;
-          $('lista-solicitudes').replaceChildren(...(r.solicitudes.length ? r.solicitudes.map(x => el('div', { class: 'caja-fila' },
+          poner($('lista-solicitudes'), ...(r.solicitudes.length ? r.solicitudes.map(x => el('div', { class: 'caja-fila' },
             el('div', {}, el('strong', { text: x.empresa_nombre }), ' ', el('span', { class: ETQ[x.estado], text: x.estado_texto }), el('br'),
               sub(`${x.giro || ''} · ${x.paquetes_mes || '?'} paquetes al mes · ${x.rep_nombre} · ${x.cita_fecha ? 'cita ' + x.cita_fecha.replace('T', ' ') : fecha(x.enviada_en)}`)),
             el('button', { class: 'boton chico' + (x.estado === 'enviada' ? '' : ' borde'), type: 'button', text: 'Revisar', onclick: () => verSolicitud(x, r.documentos) }))) : [el('p', { class: 'pista', text: 'Todavía no hay solicitudes.' })]));
         } catch (e) { mostrarMensaje($('msg-empresas'), e.message); }
       }
-      try {
-        const { lotes } = await api('/api/admin/lotes-sede');
-        const EST = { esperando: ['Esperando que lleguen', 'etiqueta-azul'], recibido: ['En la sede', 'etiqueta-completa'], cancelado: ['Cancelado', 'etiqueta-gris'] };
-        pendientes += lotes.filter(l => l.estado === 'esperando').length;
-        $('lista-lotes').replaceChildren(...(lotes.length ? lotes.map(l => el('div', { class: 'caja-fila' },
-          el('div', {}, el('strong', { text: `${l.empresa}: ${l.paquetes} paquetes` }), ' ', el('span', { class: EST[l.estado][1], text: EST[l.estado][0] }), el('br'),
-            sub(`${l.entregas} entregas · ${l.entregados} entregadas · ${l.en_sede} en la sede${l.dias_en_sede ? ` · ${l.dias_en_sede} día(s), ${dinero(l.costo_hoy)} de bodega` : ''}${l.entregar_desde ? ' · repartir desde ' + l.entregar_desde : ''}`)),
-          l.estado === 'esperando' ? el('div', { style: 'display:flex;gap:.4rem' },
-            el('button', { class: 'boton chico', type: 'button', text: 'Llegaron a la sede', onclick: async () => {
-              if (!confirm(`¿Llegaron los ${l.paquetes} paquetes de ${l.empresa}?`)) return;
-              try { await api(`/api/admin/lotes-sede/${l.id}`, { body: { accion: 'recibido' } }); cargarEmpresas(); } catch (e) { mostrarMensaje($('msg-empresas'), e.message); } } }),
-            el('button', { class: 'boton peligro chico', type: 'button', text: 'Cancelar', onclick: async () => {
-              if (!confirm('Se cancelan todas las entregas de este envío. ¿Continuar?')) return;
-              try { await api(`/api/admin/lotes-sede/${l.id}`, { body: { accion: 'cancelar' } }); cargarEmpresas(); } catch (e) { mostrarMensaje($('msg-empresas'), e.message); } } })) : null)) : [el('p', { class: 'pista', text: 'No hay envíos de empresas a la sede.' })]));
-      } catch (e) { mostrarMensaje($('msg-empresas'), e.message); }
       $('insignia-empresas').textContent = String(pendientes); $('insignia-empresas').hidden = !pendientes;
     }
+    // Ficha de una empresa: por repartir, en ruta, en sede, historial y datos
+    async function abrirEmpresa(id, pestana = 'enviar') {
+      $('dlg').classList.remove('ancha');
+      let r;
+      try { r = await api('/api/admin/empresas-activas/' + id); } catch (e) { alert(e.message); return; }
+      const emp = r.empresa;
+      const cuerpo = el('div');
+      const PEST = [['enviar', `Por repartir (${r.lotes.filter(l => l.estado === 'nuevo').length})`], ['ruta', `En ruta (${r.en_ruta.length})`], ['sede', `En sede (${r.en_sede.length})`], ['historial', 'Historial'], ['datos', 'Datos']];
+      const pest = el('div', { class: 'pestanas', role: 'tablist' });
+      const ESTADO_ENVIO = { pendiente: 'Por recoger', recogido: 'Recogido', en_camino: 'En camino', entregado: 'Entregado', fallido: 'No entregado', a_sede: 'Va a la sede', en_sede: 'En la sede', cancelado: 'Cancelado', reenviado: 'Reenviado', devuelto: 'Devuelto' };
+      const tabla = (cols, filas) => el('div', { class: 'tabla-envoltura' }, el('table', {}, el('thead', {}, el('tr', {}, cols.map(c => el('th', { text: c })))), el('tbody', {}, filas)));
+      const pintar = () => {
+        poner(pest, ...PEST.map(([k, t]) => el('button', { type: 'button', role: 'tab', 'aria-selected': String(pestana === k), text: t, onclick: () => { pestana = k; pintar(); } })));
+        if (pestana === 'enviar') {
+          poner(cuerpo, 
+            r.lotes.length ? el('div', { class: 'lotes-lista' }, r.lotes.map(l => el('div', { class: 'lote-tarjeta' + (l.estado === 'nuevo' ? ' nuevo' : '') },
+              el('div', {}, el('strong', { text: `${diaLargo(l.dia)} · ${l.pedidos.length} pedidos` }), ' ', el('span', { class: l.estado === 'nuevo' ? 'etiqueta-pendiente' : 'etiqueta-azul', text: l.estado === 'nuevo' ? 'Por repartir' : 'En ruta' }),
+                el('small', { text: `La empresa eligió: ${l.modo_texto}${l.modo === 'pickup' ? (l.paga === 'empresa' ? ' (paga la empresa)' : ' (paga cada cliente)') : ''} · ${l.recogida === 'sede' ? (l.recibido_en ? 'paquetes en la sede' + (l.dias_sede ? ` hace ${l.dias_sede} día(s)` : '') : 'la empresa los trae a la sede') : 'se recoge en su local'}` }),
+                l.recomendacion ? el('small', { text: 'Recomendación: ' + l.recomendacion.razon }) : null),
+              l.estado === 'nuevo' ? el('button', { class: 'boton cinta', type: 'button', text: 'Dividir pedidos', onclick: () => abrirLote(l.id, emp.id) }) : null)))
+              : el('p', { class: 'pista', text: 'No hay envíos por repartir.' }),
+            r.confirmados_por_dia.length ? el('p', { class: 'pista', style: 'margin-top:1rem', text: 'Confirmados que la empresa todavía no manda: ' + r.confirmados_por_dia.map(d => `${d.n} para el ${diaLargo(d.dia)}`).join(' · ') }) : null);
+        } else if (pestana === 'ruta') {
+          poner(cuerpo, r.en_ruta.length ? tabla(['Guía', 'Recibe', 'Zona', 'Ruta', 'Piloto', 'Estado'], r.en_ruta.map(e => el('tr', { class: 'clic', onclick: () => abrirEnvio(e.id) },
+            el('td', { text: e.guia }), el('td', { text: e.destino_nombre }), el('td', { text: e.destino_zona }), el('td', { text: e.parada ? `Parada ${e.parada}` : 'Sola' }),
+            el('td', {}, e.piloto ? e.piloto.split(' ')[0] : el('span', { class: 'estado pendiente', text: 'Buscando piloto' }), e.asignacion === 'por_aceptar' ? el('span', { class: 'etiqueta-azul', style: 'margin-left:.3rem', text: 'Por aceptar' }) : null),
+            el('td', {}, chipEstado(e.estado))))) : el('p', { class: 'pista', text: 'Nada en ruta ahora.' }));
+        } else if (pestana === 'sede') {
+          poner(cuerpo, el('p', { class: 'bloque-nota', text: `La empresa manda a alguien a recogerlos con el código. La bodega se cobra por WhatsApp${r.tarifa_bodega != null ? ` (${dinero(r.tarifa_bodega)} por día por paquete)` : ''}.` }),
+            r.en_sede.length ? tabla(['Guía', 'Era para', 'Motivo', 'Días', r.tarifa_bodega != null ? 'Bodega' : '', ''], r.en_sede.map(e => el('tr', {},
+              el('td', { text: e.guia }), el('td', { text: e.destino_nombre }), el('td', { text: e.fallo }), el('td', { text: e.estado === 'en_sede' ? String(e.dias) : 'En camino a la sede' }),
+              el('td', { text: e.cargo != null ? dinero(e.cargo) : '' }),
+              el('td', {}, e.estado === 'a_sede' ? el('button', { class: 'boton chico', type: 'button', text: 'Llegó a la sede', onclick: async () => {
+                try { await api(`/api/admin/envios/${e.id}/fallido`, { body: { accion: 'recibido' } }); abrirEmpresa(id, 'sede'); } catch (x) { alert(x.message); } } })
+                : e.estado === 'en_sede' ? el('button', { class: 'boton borde chico', type: 'button', text: 'Lo recogieron', onclick: async () => {
+                  const recibio = prompt(`¿Quién recogió ${e.guia}?${e.cargo ? ` Cobra ${dinero(e.cargo)} de bodega.` : ''}`); if (!recibio) return;
+                  try { await api(`/api/admin/envios/${e.id}/fallido`, { body: { accion: 'retirar', recibio } }); abrirEmpresa(id, 'sede'); } catch (x) { alert(x.message); } } }) : null)))) : el('p', { class: 'pista', text: 'No hay paquetes de esta empresa en la sede.' }));
+        } else if (pestana === 'historial') {
+          poner(cuerpo, r.historial.length ? tabla(['Guía', 'Fecha', 'Recibe', 'Zona', 'Piloto', 'Estado'], r.historial.map(e => el('tr', { class: 'clic', onclick: () => abrirEnvio(e.id) },
+            el('td', { text: e.guia }), el('td', { text: fecha(e.creado) }), el('td', { text: e.destino_nombre }), el('td', { text: e.destino_zona }), el('td', { text: e.piloto ? e.piloto.split(' ')[0] : '—' }), el('td', {}, chipEstado(e.estado))))) : el('p', { class: 'pista', text: 'Todavía no hay envíos.' }));
+        } else {
+          const s = emp.solicitud || {};
+          const dato = (t, v) => el('div', {}, el('span', { text: t }), v || '—');
+          poner(cuerpo, el('div', { class: 'datos' }, dato('Contacto', `${emp.contacto} · ${emp.telefono || ''}`), dato('Correo', emp.email), dato('Recogida', emp.punto ? emp.punto.direccion : 'No la ha marcado'),
+            dato('Representante', [s.rep_nombre, s.rep_telefono].filter(Boolean).join(' · ')), dato('NIT', s.nit), dato('Giro', s.giro), dato('Contrato desde', s.aprobada_en ? fecha(s.aprobada_en, false) : '')),
+            el('div', { class: 'navegar' }, emp.telefono ? el('a', { class: 'boton cinta chico', href: `https://wa.me/${waTel(emp.telefono)}`, target: '_blank', rel: 'noopener', text: 'WhatsApp de la empresa' }) : null));
+        }
+      };
+      poner($('dlg-cuerpo'), el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: () => $('dlg').close() }),
+        el('h2', { text: emp.nombre }), el('p', { class: 'pista', text: `${emp.en_ruta} en ruta · ${emp.en_sede} en sede · ${emp.entregados_mes} entregados este mes` }), pest, cuerpo);
+      pintar();
+      if (!$('dlg').open) $('dlg').showModal();
+    }
+    const waTel = (t) => { let n = String(t || '').replace(/\D/g, ''); if (n.length === 8) n = '502' + n; return n; };
+
+    // "Dividir pedidos": calcular rutas, ajustarlas a mano, elegir pilotos y confirmar
+    const COLORES_RUTA = ['#1c3faa', '#d9480f', '#17824a', '#9c36b5', '#e8b800', '#0b7285', '#c2255c', '#495057'];
+    async function abrirLote(loteId, empresaId) {
+      $('dlg').classList.add('ancha');
+      let r;
+      try { r = await api('/api/admin/lotes-empresa/' + loteId); } catch (e) { alert(e.message); return; }
+      const l = r.lote;
+      const porId = new Map(l.pedidos.map(p => [p.id, p]));
+      let modo = l.recomendacion?.modo === 'motos' ? 'motos' : l.recomendacion?.modo || l.modo;
+      if (l.modo === 'pickup') modo = 'pickup';
+      let motos = Math.max(2, l.recomendacion?.motos || 2);
+      let rutas = [];   // [{ pedidos: [ids], piloto_id, km, minutos, puntos }]
+      const msg = el('div', { class: 'mensaje', role: 'alert' });
+      const mapaCaja = el('div', { class: 'mapa alto' });
+      const lista = el('div', { class: 'rutas-lista' });
+      const resumen = el('div');
+      let mapa = null, capa = null;
+      const pilotosDe = () => (modo === 'pickup' ? r.pilotos_pickup : r.pilotos_moto);
+      const medir = async (ruta) => { try { Object.assign(ruta, await api(`/api/admin/lotes-empresa/${loteId}/medir`, { body: { pedidos: ruta.pedidos, modo } })); } catch { /* sin medida */ } };
+      const calcular = async () => {
+        try {
+          const x = await api(`/api/admin/lotes-empresa/${loteId}/calcular`, { body: { modo, motos } });
+          const anteriores = rutas.map(q => q.piloto_id);
+          rutas = x.rutas.map((q, i) => ({ ...q, piloto_id: anteriores[i] || '' }));
+          mostrarMensaje(msg, '');
+          pintarRutas();
+        } catch (e) { mostrarMensaje(msg, e.message); }
+      };
+      const pintarMapa = () => {
+        if (!mapa) return;
+        if (capa) capa.limpiar();
+        capa = mapa.grupo();
+        const pts = [];
+        if (l.origen) { capa.marcador(l.origen.lat, l.origen.lng, { html: htmlPin('A', 'recogida'), popup: l.recogida === 'sede' ? 'Sede de Vaelo' : 'Local de ' + l.empresa }); pts.push([l.origen.lat, l.origen.lng]); }
+        rutas.forEach((q, ri) => {
+          const color = COLORES_RUTA[ri % COLORES_RUTA.length];
+          const linea = l.origen ? [[l.origen.lat, l.origen.lng]] : [];
+          q.pedidos.forEach((id, i) => {
+            const p = porId.get(id); if (!p || p.lat == null) return;
+            linea.push([p.lat, p.lng]); pts.push([p.lat, p.lng]);
+            capa.marcador(p.lat, p.lng, { html: `<div class="pin-parada" style="background:${color}">${i + 1}</div>`, ancla: 'center', popup: `${p.recibe_nombre || p.cliente_nombre} · ${p.zona} · ${p.horario_texto}` });
+          });
+          if (linea.length > 1 && modo !== 'un_paquete') capa.linea(linea, { color, ancho: 3, opacidad: 0.8 });
+        });
+        if (!rutas.length) l.pedidos.forEach(p => { if (p.lat != null) { pts.push([p.lat, p.lng]); capa.marcador(p.lat, p.lng, { html: '<div class="pin-parada">•</div>', ancla: 'center', popup: p.recibe_nombre || p.cliente_nombre }); } });
+        mapa.encuadrar(pts, { margen: 50 });
+      };
+      const pintarRutas = () => {
+        const opcionesPiloto = (sel) => [el('option', { value: '', text: modo === 'pickup' ? 'Elige el piloto del pickup' : 'Ofrecer al piloto libre más cercano' }),
+          ...pilotosDe().map(p => el('option', { value: p.id, text: `${p.nombre}${p.en_linea ? ' · en línea' : ''}${p.activos ? ` · ${p.activos} activos` : ''}`, selected: String(sel) === String(p.id) }))];
+        poner(lista, ...rutas.map((q, ri) => {
+          const color = COLORES_RUTA[ri % COLORES_RUTA.length];
+          const piloto = el('select', { 'aria-label': `Piloto de la ruta ${ri + 1}`, onchange: (ev) => { q.piloto_id = ev.target.value; } }, opcionesPiloto(q.piloto_id));
+          const mover = async (i, d) => { const j = i + d; if (j < 0 || j >= q.pedidos.length) return; [q.pedidos[i], q.pedidos[j]] = [q.pedidos[j], q.pedidos[i]]; await medir(q); pintarRutas(); };
+          const pasarA = async (i, destino) => { const [id] = q.pedidos.splice(i, 1); rutas[destino].pedidos.push(id); await Promise.all([medir(q), medir(rutas[destino])]); rutas = rutas.filter(x => x.pedidos.length); pintarRutas(); };
+          return el('div', { class: 'ruta-tarjeta', style: `--color-ruta:${color}` },
+            el('div', { class: 'ruta-cab' }, el('span', { class: 'ruta-color' }), el('strong', { text: modo === 'un_paquete' ? `Envío ${ri + 1}` : `Ruta ${ri + 1}` }),
+              el('small', { text: `${q.pedidos.length} parada(s) · ${q.km ?? '?'} km · ~${q.minutos ? (q.minutos / 60).toFixed(1).replace('.0', '') + ' h' : '?'}${modo !== 'pickup' ? ` · cupo ${q.puntos ?? '?'} de ${r.cupo}` : ''}` }),
+              q.excede_cupo || (q.puntos > r.cupo && modo !== 'pickup') ? el('span', { class: 'etiqueta-pendiente', text: 'No cabe en una moto' }) : null,
+              q.excede_horas || (q.minutos > r.horas * 60 && modo !== 'pickup') ? el('span', { class: 'etiqueta-pendiente', text: `Más de ${r.horas} h` }) : null),
+            el('ol', { class: 'paradas' }, q.pedidos.map((id, i) => {
+              const p = porId.get(id);
+              return el('li', {}, el('div', {}, el('strong', { text: p.recibe_nombre || p.cliente_nombre }), el('small', { text: `${p.codigo} · ${p.zona} · ${p.horario_texto} · ${p.tamano_texto}${p.metodo_pago === 'transferencia' ? ' · transferencia' : ''}` })),
+                modo === 'un_paquete' ? null : el('div', { class: 'parada-acciones' },
+                  el('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Subir', text: '↑', disabled: i === 0, onclick: () => mover(i, -1) }),
+                  el('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Bajar', text: '↓', disabled: i === q.pedidos.length - 1, onclick: () => mover(i, 1) }),
+                  rutas.length > 1 ? el('select', { 'aria-label': 'Pasar a otra ruta', onchange: (ev) => { if (ev.target.value !== '') pasarA(i, Number(ev.target.value)); } },
+                    el('option', { value: '', text: 'Pasar a…' }), ...rutas.map((_, k) => k === ri ? null : el('option', { value: k, text: `Ruta ${k + 1}` }))) : null));
+            })),
+            modo === 'un_paquete' ? null : el('div', { class: 'campo', style: 'margin:.5rem 0 0' }, el('label', { text: 'Piloto' }), piloto));
+        }));
+        pintarMapa();
+      };
+      // Controles: cómo repartir
+      const modos = el('div', { class: 'filtros' });
+      const nMotos = el('input', { type: 'number', min: 1, max: l.pedidos.length, value: motos, style: 'width:5rem', 'aria-label': 'Número de motos', onchange: (ev) => { motos = Math.max(1, Number(ev.target.value) || 1); if (modo === 'motos') calcular(); } });
+      const pintarModos = () => poner(modos, ...[['una_moto', 'Una moto'], ['motos', 'Dividir entre motos'], ['un_paquete', 'Un paquete por moto'], ['pickup', 'Pickup']].map(([k, t]) =>
+        el('button', { class: 'chip', type: 'button', 'aria-pressed': String(modo === k), text: t + (l.recomendacion?.modo === k ? ' ★' : ''), disabled: k !== 'pickup' && l.pedidos.some(p => p.tamano === 'grande'),
+          onclick: () => { modo = k; pintarModos(); pintarPickup(); calcular(); } })), el('span', { hidden: modo !== 'motos' }, nMotos, ' motos'));
+      // Pickup: precio acordado por WhatsApp, pago y piloto
+      const pickup = el('div');
+      const precio = el('input', { type: 'number', min: 1, step: '0.01', placeholder: '0.00' });
+      const metodo = el('select', {}, el('option', { value: 'efectivo', text: 'Efectivo: el piloto cobra al recoger' }), el('option', { value: 'transferencia', text: 'Transferencia a Vaelo' }));
+      const pagado = el('input', { type: 'checkbox', style: 'width:auto' });
+      const pintarPickup = () => poner(pickup, modo === 'pickup' && l.paga === 'empresa' ? el('div', { class: 'bloque', style: 'background:var(--gris);border:0' },
+        el('h3', { text: 'Pickup que paga la empresa' }), el('p', { class: 'pista', text: 'Pon el precio y la promoción que acordaron por WhatsApp. Si es transferencia, el piloto sale cuando llegue el pago.' }),
+        el('div', { class: 'fila' }, el('div', { class: 'campo' }, el('label', { text: 'Precio acordado (Q)' }), precio), el('div', { class: 'campo' }, el('label', { text: 'Pago' }), metodo)),
+        el('label', { class: 'casilla' }, pagado, 'La transferencia de la empresa ya llegó'),
+        r.whatsapp_empresa ? el('a', { class: 'boton cinta chico', href: `https://wa.me/${waTel(r.whatsapp_empresa)}`, target: '_blank', rel: 'noopener', text: 'WhatsApp de la empresa' }) : null)
+        : modo === 'pickup' ? el('p', { class: 'mensaje aviso', text: 'Pickup que pagan los clientes: cada uno paga Q35 en zonas preferenciales o Q45 fuera, al recibir o por transferencia.' }) : null);
+      // Transferencias de clientes por confirmar
+      const transferencias = l.pedidos.filter(p => p.metodo_pago === 'transferencia' && !p.transferencia_ok);
+      const bloqueTransf = transferencias.length && !(l.modo === 'pickup' && l.paga === 'empresa') ? el('div', { class: 'mensaje aviso' },
+        el('strong', { text: 'Transferencias por confirmar: ' }), 'el cliente manda el comprobante al WhatsApp de Vaelo.',
+        el('ul', { class: 'lista-simple' }, transferencias.map(p => el('li', {}, `${p.codigo} · ${p.recibe_nombre || p.cliente_nombre}${p.precio ? ' · ' + dinero(p.precio) : ''} `,
+          rolPanel === 'admin' ? el('button', { class: 'boton chico', type: 'button', text: 'Llegó', onclick: async () => { await api(`/api/admin/pedidos/${p.id}/pago`, { body: { accion: 'transferencia_ok' } }).catch(e => alert(e.message)); abrirLote(loteId, empresaId); } }) : null, ' ',
+          rolPanel === 'admin' ? el('button', { class: 'boton borde chico', type: 'button', text: 'Que pague al recibir', onclick: async () => { await api(`/api/admin/pedidos/${p.id}/pago`, { body: { accion: 'efectivo' } }).catch(e => alert(e.message)); abrirLote(loteId, empresaId); } }) : null)))) : null;
+      const confirmar = el('button', { class: 'boton accion-principal', type: 'button', text: 'Confirmar rutas y avisar a los pilotos', disabled: !l.se_puede_asignar || (l.recogida === 'sede' && !l.recibido_en), onclick: async () => {
+        if (!rutas.length) { mostrarMensaje(msg, 'Primero calcula las rutas.'); return; }
+        confirmar.disabled = true;
+        try {
+          const x = await api(`/api/admin/lotes-empresa/${loteId}/confirmar`, { body: { modo, rutas: rutas.map(q => ({ pedidos: q.pedidos, piloto_id: q.piloto_id })), pickup_precio: precio.value, pickup_metodo: metodo.value, pickup_pagado: pagado.checked } });
+          mostrarMensaje(msg, `Listo: ${x.envios} envíos en ${x.rutas} ruta(s). Los pilotos ya tienen el aviso.`, 'exito');
+          cargarEmpresas(); cargarEnvios(); setTimeout(() => abrirEmpresa(empresaId, 'ruta'), 1200);
+        } catch (e) { mostrarMensaje(msg, e.message); confirmar.disabled = false; }
+      } });
+      poner($('dlg-cuerpo'), el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: () => $('dlg').close() }),
+        el('button', { class: 'boton borde chico', type: 'button', text: '← ' + l.empresa, onclick: () => abrirEmpresa(empresaId) }),
+        el('h2', { style: 'margin-top:.75rem', text: `Dividir pedidos · ${diaLargo(l.dia)}` }),
+        el('p', { class: 'pista', text: `${l.pedidos.length} pedidos de ${l.empresa}. Recogida: ${l.recogida === 'sede' ? 'sede de Vaelo' : l.origen_direccion || 'local de la empresa'}. La empresa eligió ${l.modo_texto.toLowerCase()}.` }),
+        l.recomendacion ? el('div', { class: 'mensaje aviso' }, el('strong', { text: 'Recomendación: ' }), l.recomendacion.razon) : null,
+        l.recogida === 'sede' && !l.recibido_en ? el('div', { class: 'cargos-aviso' }, el('span', { text: 'La empresa trae los paquetes a la sede. Cuando lleguen, márcalo para poder asignar.' }),
+          el('button', { class: 'boton chico', type: 'button', text: 'Paquetes recibidos', onclick: async () => { try { await api(`/api/admin/lotes-empresa/${loteId}/recibido`, { body: {} }); abrirLote(loteId, empresaId); } catch (e) { alert(e.message); } } })) : null,
+        !l.se_puede_asignar ? el('div', { class: 'mensaje aviso', text: `Puedes preparar las rutas; se asignan el ${diaLargo(l.dia)}.` }) : null,
+        bloqueTransf, modos, pickup, mapaCaja, resumen, lista, msg,
+        el('div', { class: 'navegar' }, confirmar,
+          el('button', { class: 'boton peligro chico', type: 'button', text: 'Cancelar este envío', onclick: async () => {
+            if (!confirm('Los pedidos vuelven a la empresa como confirmados. ¿Cancelar?')) return;
+            try { await api(`/api/admin/lotes-empresa/${loteId}/cancelar`, { body: {} }); cargarEmpresas(); abrirEmpresa(empresaId); } catch (e) { mostrarMensaje(msg, e.message); }
+          } })));
+      if (!$('dlg').open) $('dlg').showModal();
+      mapa = crearMapa(mapaCaja, { cooperativo: false });
+      pintarModos(); pintarPickup(); calcular();
+    }
+
     function verSolicitud(x, docs) {
       const msg = el('div', { class: 'mensaje', role: 'alert' });
       const dato = (t, v) => el('div', {}, el('span', { text: t }), v || '—');
@@ -634,7 +829,7 @@
         catch (e) { mostrarMensaje(msg, e.message); ev.target.disabled = false; }
       };
       const abierta = ['enviada', 'cita'].includes(x.estado);
-      $('dlg-cuerpo').replaceChildren(
+      poner($('dlg-cuerpo'), 
         el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: () => $('dlg').close() }),
         el('h2', { text: x.empresa_nombre }), el('span', { class: 'etiqueta-azul', text: x.estado_texto }),
         el('div', { class: 'datos' }, dato('Razón social', x.razon_social), dato('NIT', x.nit), dato('Giro', x.giro), dato('Paquetes al mes', String(x.paquetes_mes || '')),
@@ -676,7 +871,7 @@
         : e.asignacion === 'por_aceptar' ? el('span', { class: 'etiqueta-azul', text: `${e.mensajero_nombre}: esperando que acepte` })
         : el('span', { class: 'etiqueta-completa', text: `${e.mensajero_nombre}: aceptó` });
       const idCliente = cliente ? cliente.verificacion : '';
-      $('dlg-cuerpo').replaceChildren(
+      poner($('dlg-cuerpo'), 
         el('button', { class: 'cerrar no-imprimir', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: () => $('dlg').close() }),
         el('div', { class: 'no-imprimir' },
           el('h2', { style: 'font-size:1.4rem;margin-bottom:.3rem' }, e.guia, e.flete ? el('span', { class: 'etiqueta-flete', style: 'margin-left:.5rem;vertical-align:middle', text: 'Flete' }) : null, e.fragil ? el('span', { class: 'etiqueta-pendiente', style: 'margin-left:.5rem;vertical-align:middle', text: 'Frágil' }) : null), chipEstado(e.estado),
@@ -735,7 +930,7 @@
           el('ol', { class: 'linea-tiempo' }, eventos.slice().reverse().map(ev =>
             el('li', {}, el('strong', { text: ESTADOS[ev.estado] || ev.estado }), ev.nota ? el('div', { text: ev.nota }) : null, el('small', { text: fecha(ev.creado) })))),
           el('button', { class: 'boton borde chico', type: 'button', text: 'Imprimir guía', onclick: () => {
-            $('zona-guia').replaceChildren(guiaImprimible(e)); window.print(); $('zona-guia').replaceChildren();
+            poner($('zona-guia'), guiaImprimible(e)); window.print(); poner($('zona-guia'));
           } })),
         el('div', { id: 'zona-guia', style: 'margin-top:.75rem' }));
       $('dlg').showModal();
@@ -767,8 +962,8 @@
       if (!cerrado) {
         try {
           const { pilotos, con_ubicacion } = await api(`/api/admin/envios/${e.id}/cercanos`);
-          if (!pilotos.length) listaCercanos.replaceChildren(el('p', { class: 'pista', text: 'No hay pilotos aprobados con documentos vigentes.' }));
-          else listaCercanos.replaceChildren(...pilotos.map((p, i) => el('div', { class: 'cercano' + (i === 0 && p.en_linea ? ' mejor' : '') },
+          if (!pilotos.length) poner(listaCercanos, el('p', { class: 'pista', text: 'No hay pilotos aprobados con documentos vigentes.' }));
+          else poner(listaCercanos, ...pilotos.map((p, i) => el('div', { class: 'cercano' + (i === 0 && p.en_linea ? ' mejor' : '') },
             el('div', {}, el('span', { class: 'punto-linea' + (p.en_linea ? ' si' : '') }), el('strong', { text: p.nombre }),
               el('div', { class: 'pista' }, [p.en_linea ? (p.km != null ? `a ${p.km} km` : 'en línea') : 'fuera de línea', p.vehiculo, p.placa, `${p.activos} activos`, p.calificacion ? `${p.calificacion} de 5` : null].filter(Boolean).join(' · '),
                 p.vehiculo_id !== e.vehiculo_id ? el('span', { class: 'etiqueta-pendiente', style: 'margin-left:.4rem', text: 'Otro vehículo' }) : null,
@@ -778,7 +973,7 @@
                   if (!p.en_linea && !confirm(`${p.nombre} está fuera de línea y quizá no vea el aviso. ¿Asignar de todas formas?`)) return;
                   guardar(ev.target, () => api(`/api/admin/envios/${e.id}/asignar`, { body: { mensajero_id: p.id } }));
                 } }))));
-        } catch (err) { listaCercanos.replaceChildren(el('p', { class: 'mensaje error', text: err.message })); }
+        } catch (err) { poner(listaCercanos, el('p', { class: 'mensaje error', text: err.message })); }
       }
     }
 
@@ -788,11 +983,11 @@
       const r = await api('/api/admin/mensajeros');
       mensajeros = r.mensajeros;
       if (!vehiculos.length) vehiculos = (await api('/api/admin/tarifas')).vehiculos;
-      $('m-vehiculo').replaceChildren(...vehiculos.map(v => el('option', { value: v.id, text: v.nombre })));
+      poner($('m-vehiculo'), ...vehiculos.map(v => el('option', { value: v.id, text: v.nombre })));
       const cuerpo = $('tabla-mensajeros');
       const etiquetaEstado = (p) => el('span', { class: { aprobado: 'etiqueta-completa', en_revision: 'etiqueta-azul', suspendido: 'etiqueta-pendiente' }[p.estado_piloto] || 'etiqueta-gris', text: r.estados[p.estado_piloto] || p.estado_piloto });
-      if (!mensajeros.length) cuerpo.replaceChildren(el('tr', {}, el('td', { colspan: 7, style: 'text-align:center;color:var(--suave);padding:2rem', text: 'Todavía no hay pilotos. Comparte vaelomensajeria.com/modomensajero con quienes quieran trabajar con ustedes.' })));
-      else cuerpo.replaceChildren(...mensajeros.map(p => {
+      if (!mensajeros.length) poner(cuerpo, el('tr', {}, el('td', { colspan: 7, style: 'text-align:center;color:var(--suave);padding:2rem', text: 'Todavía no hay pilotos. Comparte vaelomensajeria.com/modomensajero con quienes quieran trabajar con ustedes.' })));
+      else poner(cuerpo, ...mensajeros.map(p => {
         const rv = p.revision;
         const extras = [p.deuda ? el('span', { class: 'etiqueta-pendiente', text: `Debe liquidar ${dinero(p.deuda.monto)}` }) : null,
           p.estado_piloto === 'aprobado' && !p.politica_al_dia ? el('span', { class: 'etiqueta-azul', text: 'Falta aceptar la política' }) : null,
@@ -918,7 +1113,7 @@
         rv.avisos.length ? el('div', { class: 'mensaje aviso', text: rv.avisos.join('. ') + '.' }) : null);
       const foto = p.docs.foto ? el('img', { src: `/api/admin/usuarios/${p.id}/documento/foto?v=${Date.now()}`, alt: '', style: 'width:72px;height:72px;border-radius:50%;object-fit:cover' }) : null;
       const etiqueta = { aprobado: 'etiqueta-completa', en_revision: 'etiqueta-azul', suspendido: 'etiqueta-pendiente' }[p.estado_piloto] || 'etiqueta-gris';
-      $('dlg-cuerpo').replaceChildren(
+      poner($('dlg-cuerpo'), 
         el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: () => $('dlg').close() }),
         el('div', { style: 'display:flex;gap:1rem;align-items:center' }, foto,
           el('div', {}, el('h2', { style: 'font-size:1.4rem;margin-bottom:.2rem', text: p.nombre }),
@@ -996,11 +1191,11 @@
     async function cargarClientes() {
       const r = await api('/api/admin/clientes');
       clientes = r.clientes;
-      $('aviso-correo').replaceChildren(r.correo_activo ? '' : el('div', { class: 'mensaje aviso', text: 'El correo automático de confirmación todavía no está configurado, así que no se exige confirmar el correo. Mira el README para activarlo.' }));
+      poner($('aviso-correo'), r.correo_activo ? '' : el('div', { class: 'mensaje aviso', text: 'El correo automático de confirmación todavía no está configurado, así que no se exige confirmar el correo. Mira el README para activarlo.' }));
       const porRevisar = clientes.filter(c => c.verificacion === 'por_revisar').length;
       $('insignia-clientes').textContent = String(porRevisar); $('insignia-clientes').hidden = !porRevisar;
-      if (!clientes.length) { $('tabla-clientes').replaceChildren(el('tr', {}, el('td', { colspan: 9, style: 'text-align:center;color:var(--suave);padding:2rem', text: 'Todavía no hay clientes.' }))); return; }
-      $('tabla-clientes').replaceChildren(...clientes.map(c => {
+      if (!clientes.length) { poner($('tabla-clientes'), el('tr', {}, el('td', { colspan: 9, style: 'text-align:center;color:var(--suave);padding:2rem', text: 'Todavía no hay clientes.' }))); return; }
+      poner($('tabla-clientes'), ...clientes.map(c => {
         const [txt, clase] = ESTADO_CLIENTE[c.verificacion] || ['', ''];
         return el('tr', { class: 'clic', tabindex: 0, onclick: () => revisarCliente(c.id), onkeydown: (ev) => { if (ev.key === 'Enter') revisarCliente(c.id); } },
           el('td', {}, el('strong', { text: c.nombre }), c.tipo_cuenta === 'empresa' ? [el('br'), el('span', { class: 'etiqueta-azul', text: c.empresa_nombre || 'Empresa' })] : ''),
@@ -1048,7 +1243,7 @@
       const [txt, clase] = ESTADO_CLIENTE[c.verificacion] || ['', ''];
       const doc = (tipo, titulo, tiene) => campoDocumento({ titulo, tiene, ver: `/api/admin/usuarios/${c.id}/documento/${tipo}`, soloVer: true });
       const dato = (t, v) => el('div', {}, el('span', { text: t }), v || el('em', { style: 'color:var(--alerta)', text: 'No lo ha escrito' }));
-      $('dlg-cuerpo').replaceChildren(
+      poner($('dlg-cuerpo'), 
         el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: () => $('dlg').close() }),
         el('h2', { style: 'font-size:1.4rem;margin-bottom:.3rem', text: c.nombre }), el('span', { class: clase, text: txt }),
         el('p', { class: 'pista', style: 'margin-top:.5rem', text: 'Compara: ¿el nombre y el número coinciden con el DPI? ¿La foto es de la misma persona del DPI?' }),
@@ -1074,7 +1269,7 @@
       const t = await api('/api/admin/tarifas');
       vehiculos = t.vehiculos;
       const num = (v, paso) => el('input', { type: 'number', min: 0, step: paso, value: v, style: 'min-width:90px' });
-      $('tabla-vehiculos').replaceChildren(...t.vehiculos.map(v => {
+      poner($('tabla-vehiculos'), ...t.vehiculos.map(v => {
         const f = { nombre: el('input', { value: v.nombre, maxlength: 40, style: 'min-width:90px' }), descripcion: el('input', { value: v.descripcion, maxlength: 120, style: 'min-width:180px' }),
           peso_max: num(v.peso_max, 1), tarifa_zona: num(v.tarifa_zona.toFixed(2), 0.5), tarifa_base: num(v.tarifa_base.toFixed(2), 0.5), precio_km: num(v.precio_km.toFixed(2), 0.25),
           solo_oficina: el('input', { type: 'checkbox', checked: !!v.solo_oficina, style: 'width:auto' }), activo: el('input', { type: 'checkbox', checked: !!v.activo, style: 'width:auto' }) };
@@ -1085,7 +1280,7 @@
             catch (e) { mostrarMensaje($('msg-tarifas'), e.message); }
           } })));
       }));
-      $('tabla-zonas').replaceChildren(...t.zonas.map(z => {
+      poner($('tabla-zonas'), ...t.zonas.map(z => {
         const nombre = el('input', { value: z.nombre, maxlength: 60, 'aria-label': 'Nombre de la zona' });
         const activa = el('input', { type: 'checkbox', checked: !!z.activa, style: 'width:auto', 'aria-label': 'Zona activa' });
         const puntos = z.poligono ? JSON.parse(z.poligono) : null;
@@ -1134,7 +1329,7 @@
       const msg = el('div', { class: 'mensaje', role: 'alert' });
       const caja = el('div', { class: 'mapa alto' });
       const cuenta = el('span', { class: 'pista' });
-      $('dlg-cuerpo').replaceChildren(
+      poner($('dlg-cuerpo'), 
         el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: () => $('dlg').close() }),
         el('h2', { text: `Dibujar ${z.nombre}` }),
         el('p', { class: 'pista', text: 'Toca el mapa para poner cada esquina de la zona, siguiendo su borde. Con 3 puntos o más ya queda un área. Puedes deshacer el último punto.' }),
@@ -1212,6 +1407,10 @@
     $('cerrar-sesion').addEventListener('click', async () => { try { await api('/api/logout', { body: {} }); } catch { /* igual */ } location.href = '/familiatecun'; });
     $('buscar').addEventListener('input', () => { clearTimeout(temporizador); temporizador = setTimeout(cargarEnvios, 300); });
     $('refrescar').addEventListener('click', () => { cargarResumen(); cargarEnvios(); revisarNuevos(); });
+    $('dlg').addEventListener('close', () => $('dlg').classList.remove('ancha'));
+    // Insignias de empresas (envíos por repartir) y del cierre del día pendiente
+    setTimeout(() => cargarEmpresas().catch(() => {}), 2500);
+    setInterval(() => { if (!document.hidden) cargarEmpresas().catch(() => {}); }, 60000);
 
     // ---------- Rol: los empleados de oficina no ven caja, descuentos, reportes ni tarifas ----------
     let rolPanel = 'admin';
@@ -1228,7 +1427,7 @@
       alertas.forEach(a => alertasVistas.add(a.id));
       if (alertas.length) { sonar(); setTimeout(sonar, 900); }   // suena en cada revisión mientras haya una abierta
       if (nuevas.length) notificarSistema(nuevas.map(a => ({ guia: 'EMERGENCIA', cliente_nombre: `${a.piloto}: ${a.tipo_texto}`, origen_zona: '', destino_zona: '', precio: 0 })));
-      caja.replaceChildren(...alertas.map(a => el('div', { class: 'alerta-emergencia' },
+      poner(caja, ...alertas.map(a => el('div', { class: 'alerta-emergencia' },
         el('div', {}, el('strong', { text: `EMERGENCIA: ${a.tipo_texto}` }), el('br'),
           `${a.piloto}${a.veh_placa ? ' · ' + a.veh_placa : ''}${a.guia ? ' · llevaba ' + a.guia : ''} · ${fecha(a.creado)}`,
           a.emergencia_nombre ? el('div', { class: 'pista', style: 'color:#fff' }, `Contacto de emergencia: ${a.emergencia_nombre} `, a.emergencia_telefono ? telLink(a.emergencia_telefono) : '') : ''),
@@ -1249,7 +1448,7 @@
       try {
         const { reclamos } = await api('/api/admin/reclamos');
         const abiertos = reclamos.filter(r => r.estado === 'abierto' || (r.estado === 'aprobado' && r.monto_cliente > 0 && !r.devuelto_en));
-        $('caja-reclamos').replaceChildren(...(abiertos.length ? abiertos.map(r => el('div', { class: 'caja-piloto' },
+        poner($('caja-reclamos'), ...(abiertos.length ? abiertos.map(r => el('div', { class: 'caja-piloto' },
           el('div', { class: 'caja-cab' }, el('div', {}, el('strong', { text: `${r.empresa_nombre || r.cliente} · ${r.guia}` }), el('br'), sub(r.piloto ? 'Piloto: ' + r.piloto : 'Sin piloto')),
             el('span', { class: r.estado === 'abierto' ? 'etiqueta-pendiente' : 'etiqueta-azul', text: r.estado === 'abierto' ? 'Por evaluar' : `Devolver ${dinero(r.monto_cliente)}` })),
           formReclamo(r, cargarCaja))) : [vacio('No hay reclamos pendientes.')]));
@@ -1260,13 +1459,13 @@
         const porRevisar = pagos.filter(x => x.pago_estado === 'por_revisar').length;
         $('insignia-caja').textContent = String(porRevisar); $('insignia-caja').hidden = !porRevisar;
         const ETQ = { sin_comprobante: ['Sin comprobante', 'etiqueta-gris'], por_revisar: ['Por revisar', 'etiqueta-azul'], rechazado: ['Rechazado', 'etiqueta-pendiente'] };
-        $('caja-transferencias').replaceChildren(...(pagos.length ? pagos.map(x => el('div', { class: 'caja-fila' },
+        poner($('caja-transferencias'), ...(pagos.length ? pagos.map(x => el('div', { class: 'caja-fila' },
           el('div', {}, el('strong', { text: x.guia }), ' ', el('span', { class: (ETQ[x.pago_estado] || ETQ.sin_comprobante)[1], text: (ETQ[x.pago_estado] || ETQ.sin_comprobante)[0] }), el('br'), sub(`${x.empresa_nombre || x.cliente} · ${fecha(x.creado)}`)),
           el('strong', { class: 'caja-monto', text: dinero(x.precio + (x.cargos_extra || 0)) }),
           el('button', { class: 'boton chico' + (x.pago_estado === 'por_revisar' ? '' : ' borde'), type: 'button', text: 'Revisar', onclick: () => abrirEnvio(x.id) }))) : [vacio('No hay transferencias pendientes.')]));
         const { cargos } = await api('/api/admin/cargos');
         const abiertos = cargos.filter(x => !x.pagado_en && !x.anulado_en);
-        $('caja-cargos').replaceChildren(...(abiertos.length ? abiertos.map(x => el('div', { class: 'caja-fila' },
+        poner($('caja-cargos'), ...(abiertos.length ? abiertos.map(x => el('div', { class: 'caja-fila' },
           el('div', {}, el('strong', { text: x.empresa_nombre || x.cliente }), el('br'), sub(`${TIPOS_CARGO[x.tipo] || x.tipo}${x.guia ? ' · ' + x.guia : ''}${x.cobrado_guia ? ' · se cobra con ' + x.cobrado_guia : ''}`)),
           el('strong', { class: 'caja-monto', text: dinero(x.monto) }),
           el('div', { style: 'display:flex;gap:.4rem' },
@@ -1279,47 +1478,150 @@
               try { await api('/api/admin/cargos/' + x.id, { body: { accion: 'anular', nota } }); cargarCaja(); } catch (e) { mostrarMensaje($('msg-caja'), e.message); }
             } })))) : [vacio('No hay cargos pendientes.')]));
       } catch (e) { mostrarMensaje($('msg-caja'), e.message); }
-      const efectivo = c.pilotos.filter(p => p.efectivo > 0);
-      $('caja-efectivo').replaceChildren(...(efectivo.length ? efectivo.map(p => {
-        const recibido = el('input', { type: 'number', min: 0, step: '0.01', value: p.efectivo.toFixed(2), 'aria-label': 'Efectivo recibido' });
-        const nota = el('input', { maxlength: 300, placeholder: 'Nota (opcional)', 'aria-label': 'Nota' });
-        return el('div', { class: 'caja-piloto' },
-          el('div', { class: 'caja-cab' }, el('div', {}, el('strong', { text: p.nombre }), p.deuda_vencida ? el('span', { class: 'etiqueta-pendiente', style: 'margin-left:.4rem', text: `Pasó el plazo: no puede trabajar` }) : null, el('br'), sub(`${p.envios_efectivo} envíos`)), el('strong', { class: 'caja-monto', text: dinero(p.efectivo) })),
-          el('details', {}, el('summary', { text: 'Ver envíos' }), el('ul', {}, p.detalle.map(d => el('li', { text: `${d.guia}: ${dinero(d.efectivo)}` })))),
-          el('div', { class: 'fila', style: 'align-items:end' }, el('div', { class: 'campo' }, el('label', { text: 'Recibido en la sede (Q)' }), recibido), el('div', { class: 'campo' }, el('label', { text: 'Nota' }), nota),
-            el('div', { class: 'campo' }, el('button', { class: 'boton', type: 'button', text: 'Registrar entrega', onclick: async (ev) => {
-              if (!confirm(`¿${p.nombre} entregó ${dinero(Number(recibido.value))}?`)) return;
-              ev.target.disabled = true;
-              try {
-                const r = await api('/api/admin/caja/liquidar', { body: { piloto_id: p.id, recibido: recibido.value, nota: nota.value } });
-                mostrarMensaje($('msg-caja'), r.diferencia ? `Registrado. Diferencia: ${dinero(r.diferencia)}.` : 'Registrado, cuadra exacto.', r.diferencia < 0 ? 'error' : 'exito');
-                cargarCaja();
-              } catch (e) { mostrarMensaje($('msg-caja'), e.message); ev.target.disabled = false; }
-            } }))));
-      }) : [vacio('Ningún piloto tiene efectivo pendiente.')]));
-      const pagos = c.pilotos.filter(p => p.ganancia > 0);
-      $('caja-pagos').replaceChildren(...(pagos.length ? pagos.map(p => el('div', { class: 'caja-fila' },
-        el('div', {}, el('strong', { text: p.nombre }), el('br'), sub(`${p.envios_ganancia} envíos terminados${p.descuentos ? ` · ganó ${dinero(p.ganancia)}, menos ${dinero(p.descuentos)} por reclamos` : ''}`)),
-        el('strong', { class: 'caja-monto', text: dinero(p.a_pagar) }),
-        el('button', { class: 'boton chico', type: 'button', text: 'Registrar pago', onclick: async () => {
-          if (!confirm(`¿Le pagaste ${dinero(p.a_pagar)} a ${p.nombre}?${p.descuentos ? ` (ya con ${dinero(p.descuentos)} descontados por reclamos)` : ''}`)) return;
-          try { await api('/api/admin/caja/pagar-piloto', { body: { piloto_id: p.id } }); cargarCaja(); } catch (e) { mostrarMensaje($('msg-caja'), e.message); }
-        } }))) : [vacio('No hay pagos pendientes a pilotos.')]));
+      cargarSueldos(); cargarCierre();
       const lista = (filas, boton, ruta, pregunta) => filas.length ? filas.map(x => el('div', { class: 'caja-fila' },
         el('div', {}, el('strong', { text: x.empresa_nombre || x.nombre }), el('br'), sub(`${x.envios} envíos${x.telefono ? ' · ' + x.telefono : ''}`)), el('strong', { class: 'caja-monto', text: dinero(x.monto) }),
         el('button', { class: 'boton chico', type: 'button', text: boton, onclick: async () => {
           if (!confirm(pregunta(x))) return;
           try { await api(ruta, { body: { cliente_id: x.id } }); cargarCaja(); } catch (e) { mostrarMensaje($('msg-caja'), e.message); }
         } }))) : [vacio('Nada pendiente.')];
-      $('caja-cobros').replaceChildren(...lista(c.cobros, 'Marcar pagado', '/api/admin/caja/pagar-cobros', x => `¿Ya le entregaste ${dinero(x.monto)} a ${x.empresa_nombre || x.nombre}?`));
-      $('caja-credito').replaceChildren(...lista(c.credito, 'Marcar cobrado', '/api/admin/caja/cobrar-credito', x => `¿${x.empresa_nombre || x.nombre} ya pagó ${dinero(x.monto)}?`));
-      $('caja-historial').replaceChildren(c.historial.length ? el('div', { class: 'tabla-envoltura' }, el('table', {},
+      poner($('caja-cobros'), ...lista(c.cobros, 'Marcar pagado', '/api/admin/caja/pagar-cobros', x => `¿Ya le entregaste ${dinero(x.monto)} a ${x.empresa_nombre || x.nombre}?`));
+      poner($('caja-credito'), ...lista(c.credito, 'Marcar cobrado', '/api/admin/caja/cobrar-credito', x => `¿${x.empresa_nombre || x.nombre} ya pagó ${dinero(x.monto)}?`));
+      poner($('caja-historial'), c.historial.length ? el('div', { class: 'tabla-envoltura' }, el('table', {},
         el('thead', {}, el('tr', {}, ['Fecha', 'Movimiento', 'Piloto', 'Monto', 'Nota'].map(t => el('th', { text: t })))),
         el('tbody', {}, c.historial.map(h => el('tr', {}, el('td', { text: fecha(h.creado) }),
           el('td', { text: h.tipo === 'pago' ? `Pago al piloto (${h.envios} entregas)` : `Entregó efectivo (${h.envios} envíos)` }),
           el('td', { text: h.nombre }), el('td', {}, dinero(h.monto), h.esperado != null && Math.abs(h.monto - h.esperado) > 0.009 ? sub(` de ${dinero(h.esperado)}`) : ''), el('td', { text: h.nota || '' })))))) : vacio('Sin movimientos todavía.'));
     }
 
+    // ---------- Sueldos de pilotos: neto y "Ya fue pagado" ----------
+    function tarjetaSueldo(p, alPagar) {
+      const neto = p.neto;
+      const nota = el('input', { maxlength: 300, placeholder: 'Nota (opcional)', 'aria-label': 'Nota del pago' });
+      return el('div', { class: 'sueldo-tarjeta' + (p.le_toca ? ' le-toca' : '') },
+        el('div', { class: 'sueldo-cab' },
+          el('div', {}, el('strong', { text: p.nombre }), el('small', { text: `${p.telefono || ''}${p.veh_placa ? ' · ' + p.veh_placa : ''}` })),
+          el('div', { class: 'sueldo-chips' }, el('span', { class: 'etiqueta-gris', text: p.frecuencia_texto }),
+            p.le_toca ? el('span', { class: 'etiqueta-pendiente', text: 'Le toca hoy' }) : el('span', { class: 'etiqueta-azul', text: `Junta su pago (${p.dias_desde} día${p.dias_desde === 1 ? '' : 's'})` }),
+            p.deuda ? el('span', { class: 'etiqueta-pendiente', text: 'Debe efectivo: no puede trabajar' }) : null)),
+        el('div', { class: 'sueldo-cuentas' },
+          el('div', {}, el('span', { text: 'Envíos' }), el('strong', { text: String(p.envios) }), el('small', { text: `hoy ${p.hoy.envios}` })),
+          el('div', {}, el('span', { text: 'Ganó' }), el('strong', { text: dinero(p.ganancia) }), el('small', { text: `hoy ${dinero(p.hoy.ganancia)}` })),
+          el('div', {}, el('span', { text: 'Trae en efectivo' }), el('strong', { text: '− ' + dinero(p.efectivo) }), el('small', { text: `transferencias ${dinero(p.transferencias)}` })),
+          p.descuentos ? el('div', {}, el('span', { text: 'Reclamos' }), el('strong', { text: '− ' + dinero(p.descuentos) })) : null,
+          el('div', { class: 'sueldo-neto ' + (neto >= 0 ? 'paga' : 'recibe') }, el('span', { text: neto >= 0 ? 'Vaelo le paga' : 'Debe entregar' }), el('strong', { text: dinero(Math.abs(neto)) }))),
+        p.detalle ? el('details', {}, el('summary', { text: 'Ver envíos' }), el('ul', { class: 'lista-simple' }, p.detalle.map(d => el('li', { text: `${d.guia} · ${d.destino_zona} · ${fecha(d.piloto_cerro_en)} · gana ${dinero(d.ganancia)}${d.efectivo ? ` · cobró ${dinero(d.efectivo)}` : ''}` })))) : null,
+        el('div', { class: 'fila', style: 'align-items:end;margin-top:.6rem' }, el('div', { class: 'campo', style: 'margin:0' }, nota),
+          el('button', { class: 'boton', type: 'button', text: 'Ya fue pagado', onclick: async (ev) => {
+            if (!confirm(neto >= 0 ? `¿Le pagaste ${dinero(neto)} a ${p.nombre}?` : `¿${p.nombre} entregó ${dinero(-neto)}?`)) return;
+            ev.target.disabled = true;
+            try { await api(`/api/admin/sueldos/${p.id}/pagado`, { body: { neto, nota: nota.value } }); mostrarMensaje($('msg-caja'), `Cuenta de ${p.nombre} cerrada.`, 'exito'); alPagar(); }
+            catch (e) { alert(e.message); ev.target.disabled = false; alPagar(); }
+          } })));
+    }
+    async function cargarSueldos() {
+      let r;
+      try { r = await api('/api/admin/sueldos'); } catch (e) { mostrarMensaje($('msg-caja'), e.message); return; }
+      const tocan = r.pilotos.filter(p => p.le_toca);
+      const resto = r.pilotos.filter(p => !p.le_toca);
+      poner($('caja-sueldos'), 
+        el('div', { class: 'franja-cifras' },
+          el('div', { class: 'celda-cifra' }, el('span', { text: 'Vaelo paga a pilotos' }), el('strong', { text: dinero(r.total_pagar) })),
+          el('div', { class: 'celda-cifra' }, el('span', { text: 'Pilotos deben entregar' }), el('strong', { text: dinero(r.total_recibir) })),
+          el('div', { class: 'celda-cifra' + (tocan.length ? ' marcar' : '') }, el('span', { text: 'Les toca hoy' }), el('strong', { text: String(tocan.length) }))),
+        r.pilotos.length ? el('div', { class: 'sueldos-lista' }, [...tocan, ...resto].map(p => tarjetaSueldo(p, () => { cargarSueldos(); cargarCierre(); }))) : el('p', { class: 'pista', text: 'Todas las cuentas están al día.' }));
+    }
+    async function abrirSueldo(id) {
+      let r;
+      try { r = await api('/api/admin/sueldos/' + id); } catch (e) { alert(e.message); return; }
+      const p = { ...r.piloto, ...r.cuenta };
+      poner($('dlg-cuerpo'), el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: () => $('dlg').close() }),
+        el('h2', { text: 'Sueldo de ' + p.nombre }),
+        p.envios || p.descuentos ? tarjetaSueldo(p, () => abrirSueldo(id)) : el('div', { class: 'mensaje exito', text: 'No tiene nada pendiente: su cuenta está al día.' }),
+        el('h3', { style: 'margin-top:1.25rem', text: 'Cuentas cerradas' }),
+        r.historial.length ? el('div', { class: 'tabla-envoltura' }, el('table', {}, el('thead', {}, el('tr', {}, ['Fecha', 'Envíos', 'Ganó', 'Efectivo', 'Neto', 'Cerró'].map(t => el('th', { text: t })))),
+          el('tbody', {}, r.historial.map(h => el('tr', {}, el('td', { text: fecha(h.creado) }), el('td', { text: String(h.envios) }), el('td', { text: dinero(h.ganancia) }), el('td', { text: dinero(h.efectivo) }),
+            el('td', { text: (h.neto >= 0 ? 'Le pagó ' : 'Entregó ') + dinero(Math.abs(h.neto)) }), el('td', { text: h.cerrado_por })))))) : el('p', { class: 'pista', text: 'Todavía no hay cuentas cerradas.' }),
+        el('button', { class: 'boton borde chico', type: 'button', style: 'margin-top:1rem', text: 'Abrir su ficha', onclick: () => abrirFicha(id) }));
+      if (!$('dlg').open) $('dlg').showModal();
+    }
+
+    // ---------- Cierre del día (botón) ----------
+    async function cargarCierre() {
+      let r;
+      try { r = await api('/api/admin/cierres'); } catch { return; }
+      const j = r.jornada, x = j.resumen;
+      const c = (t, v) => el('div', { class: 'celda-cifra' }, el('span', { text: t }), el('strong', { text: String(v) }));
+      poner($('caja-cierre'), 
+        el('div', { class: 'cab-bloque' }, el('div', {}, el('h2', { text: 'Día en curso' }),
+          el('p', { class: 'bloque-nota', text: `Desde ${fecha(j.desde)} (${j.horas} h). Al cerrar el día se guarda el Excel con envíos, sueldos y caja, y el conteo empieza de nuevo.` })),
+          el('button', { class: 'boton cinta', type: 'button', text: 'Cerrar día', onclick: async (ev) => {
+            if (!confirm('¿Cerrar el día? Se guarda el Excel y el conteo empieza de nuevo.')) return;
+            ev.target.disabled = true;
+            try { const z = await api('/api/admin/cierres', { body: {} }); mostrarMensaje($('msg-caja'), `Día cerrado. El Excel está en Reportes > Cierres del día.`, 'exito'); cargarCierre(); window.location.href = `/api/admin/cierres/${z.id}/excel`; }
+            catch (e) { mostrarMensaje($('msg-caja'), e.message); ev.target.disabled = false; }
+          } })),
+        j.pendiente_cerrar ? el('div', { class: 'mensaje aviso', text: `El día lleva ${j.horas} horas abierto. Ciérralo para que el Excel salga por día.` }) : null,
+        el('div', { class: 'franja-cifras' }, c('Envíos nuevos', x.creados), c('Entregados', x.entregados), c('No entregados', x.no_entregados), c('Ingresos', dinero(x.ingresos)),
+          c('Para Vaelo', dinero(x.vaelo)), c('Pagado a pilotos', dinero(x.pagado_pilotos)), c('Efectivo recibido', dinero(x.efectivo_recibido))));
+    }
+    async function cargarCierres() {
+      try {
+        const r = await api('/api/admin/cierres');
+        poner($('lista-cierres'), r.cierres.length ? el('div', { class: 'tabla-envoltura' }, el('table', {}, el('thead', {}, el('tr', {}, ['Día', 'Entregados', 'Ingresos', 'Para Vaelo', 'Pagado a pilotos', 'Cerró', ''].map(t => el('th', { text: t })))),
+          el('tbody', {}, r.cierres.map(c => el('tr', {}, el('td', { text: diaLargo(c.dia) }), el('td', { text: String(c.resumen.entregados) }), el('td', { text: dinero(c.resumen.ingresos) }), el('td', { text: dinero(c.resumen.vaelo) }),
+            el('td', { text: dinero(c.resumen.pagado_pilotos) }), el('td', { text: `${c.cerrado_por} · ${fecha(c.creado)}` }), el('td', {}, el('a', { class: 'boton borde chico', href: `/api/admin/cierres/${c.id}/excel`, text: 'Excel' })))))))
+          : el('p', { class: 'pista', text: 'Todavía no se ha cerrado ningún día. Se cierra en Caja > Cerrar día.' }));
+      } catch (e) { poner($('lista-cierres'), el('p', { class: 'pista', text: e.message })); }
+    }
+
+    // ---------- Buscador general: pilotos, envíos, pedidos, empresas y clientes ----------
+    (function buscador() {
+      const input = $('buscar-global'), caja = $('resultados-globales');
+      let reloj = null, turno = 0;
+      const cerrar = () => { caja.hidden = true; input.setAttribute('aria-expanded', 'false'); };
+      const grupo = (titulo, filas) => filas.length ? [el('div', { class: 'resultado-grupo', text: titulo }), ...filas] : [];
+      const fila = (principal, detalle, accion, extra) => el('button', { type: 'button', class: 'resultado-global', role: 'option', onclick: () => { cerrar(); input.value = ''; accion(); } },
+        el('span', {}, el('strong', { text: principal }), el('small', { text: detalle })), extra || null);
+      async function buscar(q) {
+        const mio = ++turno;
+        let r;
+        try { r = await api('/api/admin/buscar?q=' + encodeURIComponent(q)); } catch { return; }
+        if (mio !== turno) return;
+        const nodos = [
+          ...grupo('Pilotos', r.pilotos.map(p => fila(p.nombre, [p.telefono, p.vehiculo, p.veh_placa, p.estado_piloto !== 'aprobado' ? p.estado_piloto : ''].filter(Boolean).join(' · '),
+            () => (rolPanel === 'admin' ? abrirSueldo(p.id) : null),
+            p.neto != null && p.pendiente ? el('span', { class: 'resultado-neto ' + (p.neto >= 0 ? 'paga' : 'recibe'), text: (p.neto >= 0 ? 'Le paga ' : 'Debe ') + dinero(Math.abs(p.neto)) }) : null))),
+          ...grupo('Envíos', r.envios.map(e => fila(e.guia, `${ESTADOS[e.estado] || e.estado} · ${e.destino_nombre} · ${e.empresa_nombre || e.cliente}${e.piloto ? ' · ' + e.piloto.split(' ')[0] : ''}`, () => abrirEnvio(e.id)))),
+          ...grupo('Pedidos de empresas sin salir', r.pedidos.map(p => fila(p.codigo, `${p.cliente_nombre} · ${p.empresa}${p.dia ? ' · ' + diaLargo(p.dia) : ''}`, () => { abrirTab('empresas'); abrirEmpresa(p.usuario_id); }))),
+          ...grupo('Empresas', r.empresas.map(x => fila(x.nombre, x.telefono || '', () => { abrirTab('empresas'); abrirEmpresa(x.id); }))),
+          ...grupo('Clientes', r.clientes.map(c => fila(c.nombre, [c.telefono, c.email].filter(Boolean).join(' · '), async () => { abrirTab('clientes'); await cargarClientes(); revisarCliente(c.id); }))),
+        ];
+        poner(caja, ...(nodos.length ? nodos : [el('p', { class: 'pista', style: 'padding:.75rem', text: 'Nada con ese nombre o código.' })]));
+        caja.hidden = false; input.setAttribute('aria-expanded', 'true');
+      }
+      input.addEventListener('input', () => { clearTimeout(reloj); const q = input.value.trim(); if (q.length < 2) { cerrar(); return; } reloj = setTimeout(() => buscar(q), 250); });
+      input.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Escape') { cerrar(); input.blur(); }
+        if (ev.key === 'Enter') { ev.preventDefault(); const b = caja.querySelector('.resultado-global'); if (b) b.click(); }
+        if (ev.key === 'ArrowDown') { ev.preventDefault(); caja.querySelector('.resultado-global')?.focus(); }
+      });
+      caja.addEventListener('keydown', (ev) => {
+        const lista = [...caja.querySelectorAll('.resultado-global')], i = lista.indexOf(document.activeElement);
+        if (ev.key === 'ArrowDown' && i < lista.length - 1) { ev.preventDefault(); lista[i + 1].focus(); }
+        if (ev.key === 'ArrowUp') { ev.preventDefault(); (i > 0 ? lista[i - 1] : input).focus(); }
+        if (ev.key === 'Escape') { cerrar(); input.focus(); }
+      });
+      document.addEventListener('click', (ev) => { if (!$('buscador-global').contains(ev.target)) cerrar(); });
+      document.addEventListener('keydown', (ev) => {
+        if (ev.key === '/' && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || '') && !$('dlg').open) { ev.preventDefault(); input.focus(); input.select(); }
+      });
+      // Escáner del código QR de la etiqueta del paquete (cámara del celular o de la computadora)
+      $('escanear').addEventListener('click', () => escanearQR((texto) => {
+        const m = /VA-[A-Z0-9]{8}/i.exec(texto || '');
+        input.value = m ? m[0].toUpperCase() : texto; input.focus(); buscar(input.value);
+      }));
+    })();
     // ---------- Descuentos ----------
     const ESTADO_PROMO = { activa: ['Activa ahora', 'etiqueta-completa'], programada: ['Programada', 'etiqueta-azul'], terminada: ['Terminada', 'etiqueta-gris'], pausada: ['Pausada', 'etiqueta-pendiente'] };
     let promos = [];
@@ -1327,7 +1629,7 @@
       const r = await api('/api/admin/promociones');
       promos = r.promociones;
       const fechaCorta = (t) => new Date(t + 'T12:00:00').toLocaleDateString('es-GT', { day: 'numeric', month: 'short', year: 'numeric' });
-      $('tabla-promos').replaceChildren(...(promos.length ? promos.map(p => {
+      poner($('tabla-promos'), ...(promos.length ? promos.map(p => {
         const [txt, clase] = ESTADO_PROMO[p.estado];
         return el('tr', {},
           el('td', {}, el('strong', { text: p.nombre }), el('br'), sub(p.codigo ? 'Cupón: ' + p.codigo : 'Automática' + (p.solo_primer_envio ? ', primer envío' : ''))),
@@ -1390,7 +1692,7 @@
       return [f(ini), f(fin)];
     }
     function pintarRangos(activo) {
-      $('rangos').replaceChildren(...[['hoy', 'Hoy'], ['7', 'Últimos 7 días'], ['mes', 'Este mes'], ['anterior', 'Mes pasado']].map(([v, t]) =>
+      poner($('rangos'), ...[['hoy', 'Hoy'], ['7', 'Últimos 7 días'], ['mes', 'Este mes'], ['anterior', 'Mes pasado']].map(([v, t]) =>
         el('button', { class: 'chip', type: 'button', 'aria-pressed': String(v === activo), text: t, onclick: () => { [$('rep-desde').value, $('rep-hasta').value] = rangoRapido(v); pintarRangos(v); cargarReportes(); } })));
     }
     const tablaSimple = (titulos, filas) => filas.length ? el('div', { class: 'tabla-envoltura' }, el('table', {},
@@ -1402,18 +1704,18 @@
       $('rep-excel').href = '/api/admin/reportes/csv?' + q;
       const r = await api('/api/admin/reportes?' + q), g = r.general;
       const c = (t, v) => el('div', { class: 'cifra' }, el('span', { text: t }), el('strong', { text: v }));
-      $('rep-cifras').replaceChildren(c('Envíos', String(g.envios)), c('Entregados', String(g.entregados)), c('No entregados', String(g.fallidos)), c('Cancelados', String(g.cancelados)),
+      poner($('rep-cifras'), c('Envíos', String(g.envios)), c('Entregados', String(g.entregados)), c('No entregados', String(g.fallidos)), c('Cancelados', String(g.cancelados)),
         c('Ingresos', dinero(g.ingresos)), c('Descuentos dados', dinero(g.descuentos)), c('Pago a pilotos', dinero(g.pagos_pilotos)),
         c('Ticket promedio', dinero(g.ticket)), c('Tiempo de entrega', g.minutos != null ? `${g.minutos} min` : '—'), c('Clientes', String(g.clientes)));
       const diaCorto = (d) => new Date(d + 'T12:00:00').toLocaleDateString('es-GT', { weekday: 'short', day: 'numeric', month: 'short' });
-      $('rep-dias').replaceChildren(tablaSimple(['Día', 'Envíos', 'Ingresos'], r.porDia.map(d => [diaCorto(d.dia), String(d.envios), dinero(d.ingresos)])));
-      $('rep-zonas').replaceChildren(tablaSimple(['Zona', 'Envíos'], r.porZona.map(z => [z.zona, String(z.envios)])));
+      poner($('rep-dias'), tablaSimple(['Día', 'Envíos', 'Ingresos'], r.porDia.map(d => [diaCorto(d.dia), String(d.envios), dinero(d.ingresos)])));
+      poner($('rep-zonas'), tablaSimple(['Zona', 'Envíos'], r.porZona.map(z => [z.zona, String(z.envios)])));
       const hora = (h) => `${h % 12 || 12}:00 ${h < 12 ? 'a. m.' : 'p. m.'}`;
-      $('rep-horas').replaceChildren(tablaSimple(['Hora', 'Pedidos'], r.porHora.slice().sort((a, b) => b.envios - a.envios).slice(0, 8).map(h => [hora(h.hora), String(h.envios)])));
-      $('rep-pilotos').replaceChildren(tablaSimple(['Piloto', 'Entregas', 'Calificación', 'Minutos promedio', 'Ganó'],
+      poner($('rep-horas'), tablaSimple(['Hora', 'Pedidos'], r.porHora.slice().sort((a, b) => b.envios - a.envios).slice(0, 8).map(h => [hora(h.hora), String(h.envios)])));
+      poner($('rep-pilotos'), tablaSimple(['Piloto', 'Entregas', 'Calificación', 'Minutos promedio', 'Ganó'],
         r.pilotos.map(p => [p.nombre, String(p.entregas), p.calificacion ? `${p.calificacion} de 5` : '—', p.minutos != null ? String(p.minutos) : '—', dinero(p.ganancia)])));
-      $('rep-promos').replaceChildren(tablaSimple(['Promoción', 'Usos', 'Descontado'], r.promos.map(p => [p.nombre, String(p.usos), dinero(p.descontado)])));
-      $('rep-cargos').replaceChildren(tablaSimple(['Tipo', 'Cantidad', 'Monto'], (r.cargos || []).map(x => [TIPOS_CARGO[x.tipo] || x.tipo, String(x.n), dinero(x.monto)])));
+      poner($('rep-promos'), tablaSimple(['Promoción', 'Usos', 'Descontado'], r.promos.map(p => [p.nombre, String(p.usos), dinero(p.descontado)])));
+      poner($('rep-cargos'), tablaSimple(['Tipo', 'Cantidad', 'Monto'], (r.cargos || []).map(x => [TIPOS_CARGO[x.tipo] || x.tipo, String(x.n), dinero(x.monto)])));
     }
     $('rep-ver').addEventListener('click', () => { pintarRangos(''); cargarReportes(); });
 
@@ -1430,7 +1732,7 @@
     });
     async function cargarOperadores() {
       const { operadores } = await api('/api/admin/operadores');
-      $('lista-operadores').replaceChildren(...(operadores.length ? operadores.map(o => el('div', { class: 'caja-fila' },
+      poner($('lista-operadores'), ...(operadores.length ? operadores.map(o => el('div', { class: 'caja-fila' },
         el('div', {}, el('strong', { text: o.nombre }), el('br'), sub(o.email)), el('span', { class: o.activo ? 'etiqueta-completa' : 'etiqueta-gris', text: o.activo ? 'Activo' : 'Desactivado' }),
         el('div', { style: 'display:flex;gap:.4rem' },
           el('button', { class: 'boton borde chico', type: 'button', text: 'Nueva contraseña', onclick: async () => {

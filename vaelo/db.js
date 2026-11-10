@@ -444,4 +444,82 @@ insAj.run('cargo_bodega_empresa', '10');      // Q por paquete por día en la se
 insAj.run('min_paquetes_sede', '10');         // mínimo de paquetes para un envío de empresa a la sede
 insAj.run('dias_reclamo', '3');               // días después de la entrega para reportar un problema
 
+// ---------- Versión 5: pedidos de empresas con enlace, rutas, sueldos de pilotos y cierres del día ----------
+db.exec(`
+  -- Pedido que registra una empresa: su cliente confirma día, horario y ubicación con un enlace
+  CREATE TABLE IF NOT EXISTS pedidos_empresa (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_id INTEGER NOT NULL REFERENCES usuarios(id),
+    codigo TEXT NOT NULL UNIQUE,                     -- el mismo código queda como guía del envío
+    token TEXT NOT NULL UNIQUE,                      -- enlace del cliente: /pedido/<token>
+    descripcion TEXT NOT NULL DEFAULT '', tamano TEXT NOT NULL DEFAULT 'pequeno', foto TEXT,
+    cliente_nombre TEXT NOT NULL, cliente_telefono TEXT NOT NULL,
+    dia TEXT, horario TEXT,                          -- AAAA-MM-DD y manana | tarde | cualquiera
+    direccion TEXT, zona TEXT, lat REAL, lng REAL, referencias TEXT,
+    recibe_nombre TEXT, recibe_telefono TEXT,
+    metodo_pago TEXT,                                -- efectivo (al recibir) | transferencia
+    estado TEXT NOT NULL DEFAULT 'pendiente',        -- pendiente, confirmado, enviado, vencido, cancelado
+    enlace_enviado_en TEXT, confirmado_en TEXT, confirmado_por TEXT, recordado_en TEXT, vencido_aviso TEXT,
+    transferencia_ok TEXT,                           -- la oficina confirmó la transferencia del cliente
+    lote_id INTEGER, envio_id INTEGER,
+    creado TEXT NOT NULL DEFAULT (datetime('now')), actualizado TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_pedidos_usuario ON pedidos_empresa(usuario_id, estado);
+  CREATE INDEX IF NOT EXISTS idx_pedidos_lote ON pedidos_empresa(lote_id);
+  -- Avisos al navegador del cliente de la empresa (no tiene cuenta)
+  CREATE TABLE IF NOT EXISTS push_pedidos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pedido_id INTEGER NOT NULL REFERENCES pedidos_empresa(id) ON DELETE CASCADE,
+    endpoint TEXT NOT NULL UNIQUE, p256dh TEXT NOT NULL, auth TEXT NOT NULL,
+    creado TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  -- "Enviar a Vaelo": los pedidos confirmados de un día que la empresa manda juntos
+  CREATE TABLE IF NOT EXISTS lotes_empresa (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_id INTEGER NOT NULL REFERENCES usuarios(id),
+    dia TEXT NOT NULL,
+    modo TEXT NOT NULL,                              -- una_moto | motos | pickup
+    recogida TEXT NOT NULL DEFAULT 'empresa',        -- empresa (el piloto recoge) | sede (la empresa los lleva)
+    paga TEXT NOT NULL DEFAULT 'clientes',           -- clientes | empresa (solo pickup, se acuerda por WhatsApp)
+    recomendado TEXT, nota TEXT,
+    estado TEXT NOT NULL DEFAULT 'nuevo',            -- nuevo, en_ruta, terminado, cancelado
+    recibido_en TEXT, recibido_por TEXT,             -- paquetes recibidos en la sede
+    origen_lat REAL, origen_lng REAL, origen_direccion TEXT,
+    pickup_precio REAL, pickup_metodo TEXT, confirmado_por TEXT, confirmado_en TEXT,
+    creado TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  -- Cuenta cerrada con un piloto: lo que ganó menos el efectivo que traía ("Ya fue pagado")
+  CREATE TABLE IF NOT EXISTS cuentas_piloto (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    piloto_id INTEGER NOT NULL REFERENCES usuarios(id),
+    envios INTEGER NOT NULL, ganancia REAL NOT NULL, descuentos REAL NOT NULL, efectivo REAL NOT NULL, transferencias REAL NOT NULL DEFAULT 0,
+    neto REAL NOT NULL,                              -- positivo: Vaelo le pagó; negativo: el piloto entregó
+    liquidacion_id INTEGER, pago_id INTEGER, cerrado_por TEXT NOT NULL, nota TEXT,
+    creado TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  -- Cierre del día (botón en el panel): resumen y Excel guardados
+  CREATE TABLE IF NOT EXISTS cierres (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    desde TEXT NOT NULL, hasta TEXT NOT NULL, dia TEXT NOT NULL,
+    resumen TEXT NOT NULL, archivo TEXT, cerrado_por TEXT NOT NULL,
+    creado TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+agregarColumnas('envios', [
+  ['pedido_id', 'INTEGER'], ['lote_empresa_id', 'INTEGER'], ['parada', 'INTEGER'], ['tamano', 'TEXT'], ['horario', 'TEXT'],
+  ['cobro_en_recogida', 'REAL'],        // pickup que paga la empresa en efectivo: el piloto lo cobra al recoger
+  ['aviso_proximo', 'TEXT'],            // ya se le avisó a quien recibe que es la próxima parada
+  ['asignado_por', 'TEXT'],             // oficina: la ruta la asignó una persona y no vence si el piloto tarda en aceptar
+]);
+db.exec('CREATE INDEX IF NOT EXISTS idx_envios_pedido ON envios(pedido_id)');
+agregarColumnas('usuarios', [
+  ['frecuencia_pago', "TEXT NOT NULL DEFAULT 'diaria'"],   // piloto: diaria | semanal | quincenal
+  ['empresa_lat', 'REAL'], ['empresa_lng', 'REAL'], ['empresa_direccion', 'TEXT'], ['empresa_zona', 'TEXT'],   // punto de recogida de la empresa
+]);
+insAj.run('tarifa_empresa_fuera', '45');      // pedidos de empresa fuera de las zonas con tarifa fija
+insAj.run('min_pedidos_lote', '10');          // pedidos confirmados del mismo día para "Enviar a Vaelo"
+insAj.run('cupo_moto', '30');                 // cupo de una moto: sobre 1, pequeño 5, mediano 15
+insAj.run('horas_ruta_moto', '4');            // más que esto en una sola moto: se recomienda partir la ruta
+insAj.run('horas_recordatorio', '24');        // si el cliente no llena su enlace en este tiempo, se avisa a la empresa
+
 module.exports = { db, DB_PATH, DATA_DIR };

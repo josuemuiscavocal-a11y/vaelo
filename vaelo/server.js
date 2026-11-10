@@ -7,6 +7,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { db, DATA_DIR } = require('./db');
 const { crearPush } = require('./push');
+const { crearExcel, leerExcel, leerCsv } = require('./lib/xlsx');
 
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '127.0.0.1';
@@ -55,7 +56,7 @@ function nuevaGuia() {
     let s = '';
     for (const b of crypto.randomBytes(8)) s += ALFABETO_GUIA[b % ALFABETO_GUIA.length];
     const guia = `VA-${s}`;
-    if (!db.prepare('SELECT 1 FROM envios WHERE guia = ?').get(guia)) return guia;
+    if (!db.prepare('SELECT 1 FROM envios WHERE guia = ?').get(guia) && !db.prepare('SELECT 1 FROM pedidos_empresa WHERE codigo = ?').get(guia)) return guia;
   }
 }
 
@@ -402,7 +403,7 @@ ruta('POST', '/api/cotizar', async ({ req, body }) => {
   const c = await cotizar(body);
   const u = usuarioActual(req);
   const desc = mejorDescuento(c.precio, u ? u.id : null, body.cupon);
-  const pendientes = u ? redondear(cargosPendientes(u.id).reduce((t, x) => t + x.monto, 0)) : 0;
+  const pendientes = u ? redondear(cargosPendientes(u.id).filter((x) => x.tipo !== 'bodega_empresa').reduce((t, x) => t + x.monto, 0)) : 0;
   return { tipo: c.tipo, km: c.km, precio_base: c.precio, precio: desc.precio, descuento: desc.descuento, promocion: desc.promocion,
     error_cupon: desc.errorCupon, detalle: c.detalle, recargo_fragil: c.recargo_fragil, seguro: c.seguro, cargos_pendientes: pendientes,
     por_confirmar: !!c.por_confirmar };
@@ -528,7 +529,7 @@ ruta('POST', '/api/cambiar-password', ({ req, body }) => {
 // Cliente: envíos
 ruta('GET', '/api/envios', ({ req }) => {
   const u = requiereUsuario(req);
-  return { envios: db.prepare(`${SQL_ENVIO} WHERE e.usuario_id = ? ORDER BY e.id DESC LIMIT 200`).all(u.id).map((e) => {
+  return { envios: db.prepare(`${SQL_ENVIO} WHERE e.usuario_id = ? AND e.pedido_id IS NULL ORDER BY e.id DESC LIMIT 200`).all(u.id).map((e) => {
     const out = sinCamposReceptor(envioSalida(e));
     out.receptor_confirmado = !!e.receptor_confirmado_en; out.receptor_listo = receptorListo(e);
     out.destino_lat = null; out.destino_lng = null;   // quien envía no ve dónde está quien recibe
@@ -777,7 +778,12 @@ function deudaVencida(pilotoId) {
   const r = db.prepare(`SELECT COALESCE(SUM(${SQL_EFECTIVO}), 0) AS monto, MIN(e.piloto_cerro_en) AS desde FROM envios e
     WHERE e.mensajero_id = ? AND e.piloto_cerro_en IS NOT NULL AND e.liquidado_id IS NULL AND ${SQL_EFECTIVO} > 0`).get(pilotoId);
   if (!(r.monto > 0) || fechaMs(r.desde) > Date.now() - dias * 86400_000) return null;
-  return { monto: redondear(r.monto), desde: r.desde, dias };
+  // Si lo que Vaelo le debe (sus ganancias sin pagar) cubre el efectivo, no hay deuda: puede juntar su pago por semana o quincena
+  const debe = db.prepare('SELECT COALESCE(SUM(ganancia_piloto), 0) AS t FROM envios WHERE mensajero_id = ? AND piloto_cerro_en IS NOT NULL AND pago_piloto_id IS NULL').get(pilotoId).t
+    - descuentosPiloto(pilotoId).reduce((t, x) => t + x.monto_piloto, 0);
+  const neto = redondear(r.monto - debe);
+  if (neto <= 0) return null;
+  return { monto: neto, desde: r.desde, dias };
 }
 const puedeTrabajar = (u, r = revisarPiloto(u)) => u.rol === 'mensajero' && u.estado_piloto === 'aprobado' && !!u.activo && !r.vencidos.length && politicaAlDia(u) && !deudaVencida(u.id);
 const SQL_PILOTO = `SELECT u.*, v.nombre AS vehiculo,
@@ -1028,8 +1034,14 @@ ruta('GET', '/api/piloto/envios', ({ req }) => {
     out.ya_califique_cliente = !!e.calif_cliente;
     out.tiene_foto_paquete = !!e.foto_paquete;
     out.flete_pendiente = !!e.flete && !e.flete_configurado_en;
+    if (e.pedido_id) {
+      const ped = db.prepare('SELECT id, cliente_nombre FROM pedidos_empresa WHERE id = ?').get(e.pedido_id);
+      out.empresa = nombreEmpresa(e.usuario_id);
+      out.avisos_cliente = ped ? db.prepare('SELECT COUNT(*) AS n FROM push_pedidos WHERE pedido_id = ?').get(ped.id).n > 0 : false;
+      out.cobro_en_recogida = e.cobro_en_recogida;
+    }
     for (const k of ['codigo_entrega', 'intentos_codigo', 'foto_entrega', 'firma_entrega', 'precio_base', 'descuento', 'promocion_id', 'liquidado_id', 'pago_piloto_id', 'excluidos', ...CAMPOS_INTERNOS]) delete out[k];
-    out.ganancia_piloto = e.ganancia_piloto;
+    out.ganancia_piloto = e.ganancia_piloto ?? (['pendiente', 'recogido', 'en_camino'].includes(e.estado) ? gananciaPiloto(e.precio) : null);   // en curso: lo que ganaría
     out.grupo_total = e.grupo ? db.prepare('SELECT COUNT(*) AS n FROM envios WHERE grupo = ? AND mensajero_id = ?').get(e.grupo, p.id).n : 1;
     const c = db.prepare('SELECT verificacion, foto_perfil FROM usuarios WHERE id = ?').get(e.usuario_id) || {};
     Object.assign(out, califCliente(e.usuario_id));
@@ -1158,6 +1170,8 @@ ruta('POST', '/api/piloto/envios/:id/no-entregado', ({ req, params, body }) => {
   db.prepare("UPDATE envios SET fallo_motivo = ?, fallo_nota = ?, fallo_en = datetime('now') WHERE id = ?").run(motivo, nota || null, e.id);
   registrarUbicacion(p, c, numero(body.precision), true);
   cambiarEstado(e.id, 'fallido', `No se pudo entregar: ${MOTIVOS_FALLO[motivo]}${nota ? '. ' + nota : ''}`, c.lat, c.lng);
+  // Pedido de empresa: no hay devolución, el paquete se guarda en la sede y la empresa lo recoge ahí
+  if (e.pedido_id) { decidirFallido(db.prepare('SELECT * FROM envios WHERE id = ?').get(e.id), 'sede', 'automático (pedido de empresa)'); return { ok: true, sede: true }; }
   return { ok: true, horas: horasDecidir() };
 }, { limite: 1_500_000 });
 
@@ -1193,6 +1207,8 @@ ruta('GET', '/api/piloto/ganancias', ({ req }) => {
       FROM envios e WHERE e.mensajero_id = ? AND e.piloto_cerro_en IS NOT NULL ORDER BY e.piloto_cerro_en DESC LIMIT 40`).all(p.id),
     pagos: db.prepare('SELECT id, monto, envios, nota, creado FROM pagos_piloto WHERE piloto_id = ? ORDER BY id DESC LIMIT 12').all(p.id),
     liquidaciones: db.prepare('SELECT id, esperado, recibido, envios, nota, creado FROM liquidaciones WHERE piloto_id = ? ORDER BY id DESC LIMIT 12').all(p.id),
+    cuenta: (() => { const c = cuentaPiloto(p.id); delete c.detalle; return c; })(), frecuencias: FRECUENCIAS,
+    cuentas: db.prepare('SELECT id, envios, ganancia, descuentos, efectivo, neto, creado FROM cuentas_piloto WHERE piloto_id = ? ORDER BY id DESC LIMIT 20').all(p.id),
   };
 });
 
@@ -2224,6 +2240,7 @@ function avisarEnvio(envioId, tipo, extra = {}) {
   try {
     const e = db.prepare(`${SQL_ENVIO} WHERE e.id = ?`).get(envioId);
     if (!e) return;
+    if (e.pedido_id && ['aceptado', 'llegando', 'recogido', 'entregado', 'fallido', 'devolviendo', 'a_sede', 'en_sede', 'devuelto', 'precio'].includes(tipo)) return avisarPedido(e, tipo);
     const url = `/mi-cuenta?envio=${e.id}`, guia = e.guia, piloto = (e.mensajero_nombre || 'El piloto').split(' ')[0];
     const cli = (titulo, cuerpo, conCorreo, parrafos, urgente) => {
       avisar(e.usuario_id, { titulo, cuerpo, url, etiqueta: 'envio-' + e.id, urgente });
@@ -2252,7 +2269,12 @@ function avisarEnvio(envioId, tipo, extra = {}) {
       case 'devuelto': cli('Paquete devuelto', `Tu paquete ${guia} fue devuelto${e.devuelto_a ? ' a ' + e.devuelto_a : ''}.`, true); break;
       case 'en_sede': cli('Tu paquete está en la sede', `El paquete ${guia} ya está guardado en la sede de Vaelo.`); break;
       case 'cancelado': if (e.asignacion) pil('Envío cancelado', `${guia} fue cancelado. Ya no tienes que recogerlo.`); break;
-      case 'asignado': pil('Nuevo envío para ti', `${e.origen_zona} → ${e.destino_zona} · ${e.vehiculo}. Tienes ${Math.max(20, Number(getAjustes().segundos_aceptar) || 60)} segundos para aceptar.`); break;
+      case 'asignado': {
+        const n = e.grupo ? db.prepare('SELECT COUNT(*) AS n FROM envios WHERE grupo = ? AND mensajero_id = ?').get(e.grupo, e.mensajero_id).n : 1;
+        if (e.pedido_id && n > 1) pil('Nueva ruta de empresa', `${nombreEmpresa(e.usuario_id)}: ${n} entregas. Ábrela para aceptarla.`);
+        else pil('Nuevo envío para ti', `${e.origen_zona} → ${e.destino_zona} · ${e.vehiculo}. Tienes ${Math.max(20, Number(getAjustes().segundos_aceptar) || 60)} segundos para aceptar.`);
+        break;
+      }
       case 'precio': cli('Precio de tu envío actualizado', `${guia}: ${extra.razon}. Total Q${Number(extra.precio).toFixed(2)}.`, true); break;
       case 'comprobante': avisarStaff({ titulo: 'Comprobante de transferencia', cuerpo: `${guia} · ${e.cliente_nombre} · Q${(e.precio + e.cargos_extra).toFixed(2)}`, url: RUTA_ADMIN, etiqueta: 'pago-' + e.id }); break;
     }
@@ -2290,7 +2312,7 @@ function crearCargo(usuarioId, envioId, tipo, monto, nota) {
 }
 // Al crear un envío, los cargos pendientes se cobran con él
 function sumarCargosPendientes(usuarioId, envioId) {
-  const r = db.prepare("UPDATE cargos SET cobrado_envio_id = ? WHERE usuario_id = ? AND cobrado_envio_id IS NULL AND pagado_en IS NULL AND anulado_en IS NULL").run(envioId, usuarioId);
+  const r = db.prepare("UPDATE cargos SET cobrado_envio_id = ? WHERE usuario_id = ? AND cobrado_envio_id IS NULL AND pagado_en IS NULL AND anulado_en IS NULL AND tipo != 'bodega_empresa'").run(envioId, usuarioId);
   if (!r.changes) return 0;
   const total = redondear(db.prepare('SELECT COALESCE(SUM(monto), 0) AS t FROM cargos WHERE cobrado_envio_id = ?').get(envioId).t);
   db.prepare('UPDATE envios SET cargos_extra = ? WHERE id = ?').run(total, envioId);
@@ -2305,9 +2327,10 @@ const cargosPendientes = (usuarioId) => db.prepare(`SELECT c.*, e.guia FROM carg
   WHERE c.usuario_id = ? AND c.pagado_en IS NULL AND c.anulado_en IS NULL AND c.cobrado_envio_id IS NULL ORDER BY c.id`).all(usuarioId);
 ruta('GET', '/api/yo/cargos', ({ req }) => {
   const u = requiereUsuario(req);
-  const pendientes = cargosPendientes(u.id);
+  // La bodega de las empresas se cobra por WhatsApp: no aparece en su cuenta
+  const pendientes = cargosPendientes(u.id).filter((c) => c.tipo !== 'bodega_empresa');
   const historial = db.prepare(`SELECT c.*, e.guia, ec.guia AS cobrado_guia FROM cargos c LEFT JOIN envios e ON e.id = c.envio_id LEFT JOIN envios ec ON ec.id = c.cobrado_envio_id
-    WHERE c.usuario_id = ? ORDER BY c.id DESC LIMIT 50`).all(u.id);
+    WHERE c.usuario_id = ? AND c.tipo != 'bodega_empresa' ORDER BY c.id DESC LIMIT 50`).all(u.id);
   return { pendientes, total: redondear(pendientes.reduce((t, c) => t + c.monto, 0)), historial, tipos: TIPOS_CARGO };
 });
 
@@ -2323,10 +2346,11 @@ function diasEnSede(e) {
   const fin = e.sede_salida ? fechaMs(e.sede_salida) : Date.now();
   return Math.max(1, Math.ceil((fin - fechaMs(e.sede_llegada)) / 86400_000));
 }
-const cargoBodega = (e) => redondear(diasEnSede(e) * (Number(getAjustes().cargo_bodega_dia) || 0));
+const cargoBodega = (e) => redondear(diasEnSede(e) * (Number(e.pedido_id ? getAjustes().cargo_bodega_empresa : getAjustes().cargo_bodega_dia) || 0));
 function decidirFallido(e, decision, por) {
   if (e.estado !== 'fallido') falla(400, 'Este envío ya no está esperando una decisión.');
   if (!['devolver', 'sede'].includes(decision)) falla(400, 'Elige devolver el paquete o guardarlo en la sede.');
+  if (e.pedido_id && decision === 'devolver') falla(400, 'Los pedidos de empresa no se devuelven: quedan en la sede y la empresa los recoge ahí.');
   const aj = getAjustes();
   db.exec('BEGIN');
   try {
@@ -2335,7 +2359,7 @@ function decidirFallido(e, decision, por) {
       crearCargo(e.usuario_id, e.id, 'devolucion', Number(aj.cargo_devolucion) || 0);
       cambiarEstado(e.id, 'devolviendo', `Se devolverá a quien lo envió (decidió: ${por}). Cargo: Q${(Number(aj.cargo_devolucion) || 0).toFixed(2)}`);
     } else {
-      cambiarEstado(e.id, 'a_sede', `Se guardará en la sede (decidió: ${por}). Q${(Number(aj.cargo_bodega_dia) || 0).toFixed(2)} por día`);
+      cambiarEstado(e.id, 'a_sede', e.pedido_id ? 'Se guardará en la sede: la empresa lo recoge ahí' : `Se guardará en la sede (decidió: ${por}). Q${(Number(aj.cargo_bodega_dia) || 0).toFixed(2)} por día`);
     }
     db.exec('COMMIT');
   } catch (err) { db.exec('ROLLBACK'); throw err; }
@@ -2364,7 +2388,7 @@ function retirarDeSede(e, recibio, quien) {
   try {
     db.prepare("UPDATE envios SET sede_salida = datetime('now'), recibio = ? WHERE id = ?").run(recibio, e.id);
     const f = db.prepare('SELECT * FROM envios WHERE id = ?').get(e.id);
-    crearCargo(e.usuario_id, e.id, 'bodega', cargoBodega(f), `${diasEnSede(f)} día(s) en la sede`);
+    crearCargo(e.usuario_id, e.id, e.pedido_id ? 'bodega_empresa' : 'bodega', cargoBodega(f), `${diasEnSede(f)} día(s) en la sede`);
     // Lo pendiente del cliente se paga en la sede al retirar
     db.prepare("UPDATE cargos SET pagado_en = datetime('now'), pagado_como = 'en la sede' WHERE usuario_id = ? AND pagado_en IS NULL AND anulado_en IS NULL AND cobrado_envio_id IS NULL").run(e.usuario_id);
     cambiarEstado(e.id, 'entregado', `Retirado en la sede por ${recibio} (${quien})`);
@@ -2407,6 +2431,7 @@ ruta('POST', '/api/envios/:id/reenviar', ({ req, params }) => {
   const u = requiereUsuario(req);
   const e = db.prepare('SELECT * FROM envios WHERE id = ? AND usuario_id = ?').get(Number(params.id), u.id);
   if (!e) falla(404, 'No encontramos ese envío.');
+  if (e.pedido_id) falla(400, 'Los pedidos de empresa que quedan en la sede se recogen ahí con el código del pedido.');
   return { ok: true, ...reenviarDesdeSede(e, 'pedido por el cliente') };
 });
 // Panel: decidir por el cliente, recibir en la sede, entregar en la sede o mandar de nuevo
@@ -2947,26 +2972,970 @@ ruta('GET', '/api/empresa/estadisticas', ({ req, query }) => {
   const hasta = /^\d{4}-\d{2}-\d{2}$/.test(query.get('hasta') || '') ? query.get('hasta') : hoy;
   const rango = "e.usuario_id = ? AND date(e.creado, '-6 hours') BETWEEN ? AND ?";
   const g = db.prepare(`SELECT COUNT(*) AS envios, COALESCE(SUM(e.paquetes), 0) AS paquetes, SUM(e.estado = 'entregado') AS entregados, SUM(e.fallo_en IS NOT NULL) AS fallidos,
-      SUM(e.estado = 'cancelado') AS cancelados, SUM(e.estado IN ${SQL_PILOTO_ACTIVO}) AS en_curso,
-      COALESCE(SUM(CASE WHEN e.estado = 'entregado' THEN e.cobro_destinatario END), 0) AS cobrado,
-      COALESCE(SUM(CASE WHEN e.estado = 'entregado' AND e.metodo_pago != 'recibe' THEN e.precio END), 0) AS gasto,
-      COALESCE(SUM(CASE WHEN e.estado = 'entregado' AND e.metodo_pago = 'recibe' THEN e.precio END), 0) AS pagaron_clientes,
+      SUM(e.estado = 'cancelado') AS cancelados, SUM(e.estado IN ${SQL_PILOTO_ACTIVO}) AS en_curso, SUM(e.pedido_id IS NOT NULL) AS de_pedidos,
       AVG(CASE WHEN e.estado = 'entregado' AND e.entregado_en IS NOT NULL THEN (julianday(e.entregado_en) - julianday(COALESCE(e.programado_para, e.creado))) * 1440 END) AS minutos
     FROM envios e WHERE ${rango}`).get(u.id, desde, hasta);
   const porDia = db.prepare(`SELECT date(e.creado, '-6 hours') AS dia, COUNT(*) AS envios, SUM(e.estado = 'entregado') AS entregados FROM envios e WHERE ${rango} GROUP BY dia ORDER BY dia`).all(u.id, desde, hasta);
   const porZona = db.prepare(`SELECT e.destino_zona AS zona, COUNT(*) AS envios FROM envios e WHERE ${rango} AND e.estado != 'cancelado' GROUP BY zona ORDER BY envios DESC LIMIT 8`).all(u.id, desde, hasta);
   const porFallo = db.prepare(`SELECT e.fallo_motivo AS motivo, COUNT(*) AS n FROM envios e WHERE ${rango} AND e.fallo_en IS NOT NULL GROUP BY motivo ORDER BY n DESC`).all(u.id, desde, hasta)
     .map((x) => ({ ...x, texto: MOTIVOS_FALLO[x.motivo] || x.motivo }));
-  const porCobrar = db.prepare("SELECT COALESCE(SUM(cobro_destinatario), 0) AS t FROM envios WHERE usuario_id = ? AND estado = 'entregado' AND cobro_destinatario > 0 AND cobro_pagado_en IS NULL").get(u.id).t;
-  const cargos = redondear(cargosPendientes(u.id).reduce((t, c) => t + c.monto, 0));
-  const lotes = lotesDe(u.id);
+  const porHorario = db.prepare(`SELECT COALESCE(e.horario, 'cualquiera') AS horario, COUNT(*) AS envios, SUM(e.estado = 'entregado') AS entregados FROM envios e WHERE ${rango} AND e.pedido_id IS NOT NULL GROUP BY 1`).all(u.id, desde, hasta)
+    .map((x) => ({ ...x, texto: HORARIOS[x.horario] || x.horario }));
+  const porDiaSemana = db.prepare(`SELECT CAST(strftime('%w', e.creado, '-6 hours') AS INTEGER) AS d, COUNT(*) AS envios FROM envios e WHERE ${rango} GROUP BY d ORDER BY d`).all(u.id, desde, hasta);
+  const enSede = db.prepare("SELECT e.guia, e.destino_nombre, e.sede_llegada, e.sede_salida FROM envios e WHERE e.usuario_id = ? AND e.estado IN ('a_sede','en_sede')").all(u.id)
+    .map((e) => ({ guia: e.guia, destino_nombre: e.destino_nombre, dias: e.sede_llegada ? diasEnSede(e) : 0 }));
   const entregadosOk = g.entregados || 0, terminados = entregadosOk + (g.fallidos || 0);
   return { desde, hasta, general: { ...g, entregados: entregadosOk, fallidos: g.fallidos || 0, cancelados: g.cancelados || 0, en_curso: g.en_curso || 0,
-      exito: terminados ? Math.round((entregadosOk / terminados) * 100) : null, minutos: g.minutos ? Math.round(g.minutos) : null,
-      cobrado: redondear(g.cobrado), gasto: redondear(g.gasto), pagaron_clientes: redondear(g.pagaron_clientes) },
-    porDia, porZona, porFallo, cobros_por_recibir: redondear(porCobrar), cargos_pendientes: cargos,
-    en_sede: lotes.reduce((t, l) => t + (l.estado === 'recibido' ? l.en_sede : 0), 0), costo_sede_hoy: redondear(lotes.reduce((t, l) => t + l.costo_hoy, 0)) };
+      exito: terminados ? Math.round((entregadosOk / terminados) * 100) : null, minutos: g.minutos ? Math.round(g.minutos) : null, de_pedidos: g.de_pedidos || 0 },
+    porDia, porZona, porFallo, porHorario, porDiaSemana, en_sede: enSede };
 });
+// =====================================================================================================
+// ---------- Versión 5: pedidos de empresas, rutas, sueldos de pilotos, cierres del día y buscador ----------
+// =====================================================================================================
+// La empresa registra sus pedidos y su cliente confirma día, horario y ubicación con un enlace (/pedido/<clave>).
+// Con 10 pedidos confirmados para el mismo día aparece "Enviar a Vaelo": una moto, varias motos o pickup.
+// En el panel se dividen en rutas (la más cercana primero) y se asignan. Vaelo solo cobra el envío.
+const TAMANOS = { sobre: { nombre: 'Sobre', ayuda: 'Papeles, documentos', puntos: 1 }, pequeno: { nombre: 'Pequeño', ayuda: 'Cabe en la caja de la moto', puntos: 5 },
+  mediano: { nombre: 'Mediano', ayuda: 'Una moto lleva uno o dos', puntos: 15 }, grande: { nombre: 'Grande', ayuda: 'Solo en pickup', puntos: null } };
+const HORARIOS = { manana: 'En la mañana', tarde: 'En la tarde', cualquiera: 'A cualquier hora' };
+const MODOS_LOTE = { una_moto: 'Una moto para todo', motos: 'Varias motos', un_paquete: 'Un paquete por moto', pickup: 'Pickup' };
+const ESTADOS_PEDIDO = { pendiente: 'Falta información', esperando: 'Esperando a tu cliente', confirmado: 'Confirmado', en_vaelo: 'Enviado a Vaelo', enviado: 'En reparto', vencido: 'Venció sin confirmar', cancelado: 'Cancelado' };
+const ajNum = (k, d) => { const v = Number(getAjustes()[k]); return Number.isFinite(v) && v > 0 ? v : d; };
+const vehiculoMoto = () => db.prepare('SELECT * FROM vehiculos WHERE activo = 1 AND solo_oficina = 0 ORDER BY orden, id LIMIT 1').get();
+const vehiculoPickup = () => db.prepare('SELECT * FROM vehiculos WHERE activo = 1 AND solo_oficina = 1 ORDER BY orden, id LIMIT 1').get()
+  || db.prepare('SELECT * FROM vehiculos WHERE activo = 1 ORDER BY peso_max DESC LIMIT 1').get();
+const puntosDe = (t) => TAMANOS[t]?.puntos ?? 999;
+const fechaLarga = (dia) => new Date(dia + 'T12:00:00Z').toLocaleDateString('es-GT', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' });
+const nombreEmpresa = (uid) => db.prepare('SELECT COALESCE(empresa_nombre, nombre) AS n FROM usuarios WHERE id = ?').get(uid)?.n || 'la empresa';
+const digitos = (t) => String(t || '').replace(/\D/g, '');
+
+// Precio del envío que paga quien recibe: Q35 en las zonas con tarifa fija, Q45 fuera
+function precioPedido(p) {
+  const moto = vehiculoMoto();
+  const conZona = !!p.zona && p.zona !== OTRA_ZONA && zonasFijas().some((z) => z.nombre === p.zona);
+  const formas = zonasConForma();
+  const dentro = conZona && (!formas.length || p.lat == null || formas.some((z) => dentroDe({ lat: p.lat, lng: p.lng }, z.puntos)));
+  return { precio: redondear(dentro ? (moto ? moto.tarifa_zona : 35) : ajNum('tarifa_empresa_fuera', 45)), preferencial: dentro };
+}
+const pedidoCompleto = (p) => !!(p.dia && p.horario && p.lat != null && p.direccion && p.zona && p.recibe_nombre && p.recibe_telefono && p.metodo_pago);
+function estadoPedido(p) { return p.estado === 'pendiente' && p.enlace_enviado_en ? 'esperando' : p.estado === 'confirmado' && p.lote_id ? 'en_vaelo' : p.estado; }
+// Lo que ve la empresa de un pedido (sin dinero)
+function pedidoSalida(p, conDinero = false) {
+  const out = { id: p.id, codigo: p.codigo, descripcion: p.descripcion, tamano: p.tamano, tamano_texto: TAMANOS[p.tamano]?.nombre || p.tamano,
+    cliente_nombre: p.cliente_nombre, cliente_telefono: p.cliente_telefono, dia: p.dia, horario: p.horario, horario_texto: HORARIOS[p.horario] || '',
+    direccion: p.direccion, zona: p.zona, lat: p.lat, lng: p.lng, referencias: p.referencias, recibe_nombre: p.recibe_nombre, recibe_telefono: p.recibe_telefono,
+    metodo_pago: p.metodo_pago, estado: estadoPedido(p), estado_texto: ESTADOS_PEDIDO[estadoPedido(p)], tiene_foto: !!p.foto, enlace: '/pedido/' + p.token,
+    confirmado_por: p.confirmado_por, confirmado_en: p.confirmado_en, enlace_enviado_en: p.enlace_enviado_en, lote_id: p.lote_id, creado: p.creado,
+    transferencia_ok: !!p.transferencia_ok, avisos: db.prepare('SELECT COUNT(*) AS n FROM push_pedidos WHERE pedido_id = ?').get(p.id).n };
+  if (conDinero) out.precio = precioPedido(p).precio;
+  if (p.envio_id) {
+    const e = db.prepare('SELECT e.*, m.nombre AS piloto FROM envios e LEFT JOIN usuarios m ON m.id = e.mensajero_id WHERE e.id = ?').get(p.envio_id);
+    if (e) {
+      out.envio = { id: e.id, guia: e.guia, estado: e.estado, piloto: e.asignacion === 'aceptado' && e.piloto ? e.piloto.split(' ')[0] : null, parada: e.parada,
+        paradas: e.grupo ? db.prepare('SELECT COUNT(*) AS n FROM envios WHERE grupo = ?').get(e.grupo).n : 1, recibio: e.recibio, entregado_en: e.entregado_en,
+        fallo: e.fallo_en ? (MOTIVOS_FALLO[e.fallo_motivo] || 'No se pudo entregar') : null, dias_sede: e.sede_llegada ? diasEnSede(e) : null };
+      if (conDinero && e.sede_llegada) out.envio.cargo_sede = redondear(diasEnSede(e) * ajNum('cargo_bodega_empresa', 10));
+    }
+  }
+  return out;
+}
+function leerDatosEntrega(body, parcial = false) {
+  const d = {};
+  const dia = texto(body.dia, 10);
+  if (dia || !parcial) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dia)) falla(400, 'Elige el día en que puedes recibir.');
+    if (dia < hoyGT()) falla(400, 'Ese día ya pasó. Elige otro.');
+    if (dia > sumarDias(hoyGT(), 30)) falla(400, 'Elige un día dentro del próximo mes.');
+    d.dia = dia;
+  }
+  if (body.horario !== undefined || !parcial) { if (!HORARIOS[body.horario]) falla(400, 'Elige el horario: mañana, tarde o cualquier hora.'); d.horario = body.horario; }
+  if (body.lat !== undefined || !parcial) {
+    const c = coordenada(body.lat, body.lng);
+    if (!c) falla(400, 'Marca en el mapa dónde se entrega.');
+    d.lat = c.lat; d.lng = c.lng;
+  }
+  if (body.direccion !== undefined || !parcial) { d.direccion = texto(body.direccion, 300); if (d.direccion.length < 5) falla(400, 'Escribe la dirección de entrega.'); }
+  if (body.zona !== undefined || !parcial) {
+    const z = texto(body.zona, 60);
+    if (z !== OTRA_ZONA && !zonasFijas().some((x) => x.nombre === z)) falla(400, 'Elige la zona o municipio.');
+    d.zona = z;
+  }
+  if (body.referencias !== undefined) d.referencias = texto(body.referencias, 300) || null;
+  if (body.recibe_nombre !== undefined || !parcial) { d.recibe_nombre = texto(body.recibe_nombre, 100); if (d.recibe_nombre.length < 2) falla(400, 'Escribe el nombre de quien recibe.'); }
+  if (body.recibe_telefono !== undefined || !parcial) { d.recibe_telefono = texto(body.recibe_telefono, 30); if (digitos(d.recibe_telefono).length < 8) falla(400, 'Escribe el teléfono de quien recibe (8 dígitos).'); }
+  if (body.metodo_pago !== undefined || !parcial) { if (!['efectivo', 'transferencia'].includes(body.metodo_pago)) falla(400, 'Elige cómo se paga el envío.'); d.metodo_pago = body.metodo_pago; }
+  return d;
+}
+const guardarPedido = (id, datos) => {
+  const k = Object.keys(datos);
+  if (k.length) db.prepare(`UPDATE pedidos_empresa SET ${k.map((x) => `${x} = ?`).join(', ')}, actualizado = datetime('now') WHERE id = ?`).run(...k.map((x) => datos[x]), id);
+  return db.prepare('SELECT * FROM pedidos_empresa WHERE id = ?').get(id);
+};
+function guardarFotoPedido(p, dataUrl) {
+  const m = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(String(dataUrl || ''));
+  if (!m) falla(400, 'Toma una foto del paquete.');
+  const datos = Buffer.from(m[2], 'base64');
+  if (datos.length < 300 || datos.length > 700_000) falla(400, 'La foto está vacía o pesa más de 700 KB.');
+  const ext = m[1] === 'jpeg' ? 'jpg' : m[1];
+  if (!FIRMAS[ext].every((b, i) => datos[i] === b)) falla(400, 'La foto no es válida.');
+  fs.mkdirSync(DOCS_DIR, { recursive: true, mode: 0o750 });
+  const nombre = `pedido-${p.id}-${crypto.randomBytes(6).toString('hex')}.${ext}`;
+  fs.writeFileSync(path.join(DOCS_DIR, nombre), datos, { mode: 0o640 });
+  if (p.foto && !db.prepare('SELECT 1 FROM envios WHERE foto_paquete = ?').get(p.foto)) fs.rm(path.join(DOCS_DIR, path.basename(p.foto)), () => {});
+  db.prepare("UPDATE pedidos_empresa SET foto = ?, actualizado = datetime('now') WHERE id = ?").run(nombre, p.id);
+}
+function crearPedido(u, b) {
+  const tamano = TAMANOS[b.tamano] ? b.tamano : falla(400, 'Elige el tamaño del paquete.');
+  const descripcion = texto(b.descripcion, 200);
+  if (descripcion.length < 2) falla(400, 'Escribe qué es el paquete.');
+  const cliente_nombre = texto(b.cliente_nombre, 100), cliente_telefono = texto(b.cliente_telefono, 30);
+  if (cliente_nombre.length < 2) falla(400, 'Escribe el nombre de tu cliente.');
+  if (digitos(cliente_telefono).length < 8) falla(400, 'Escribe el WhatsApp de tu cliente (8 dígitos).');
+  const r = db.prepare('INSERT INTO pedidos_empresa (usuario_id, codigo, token, descripcion, tamano, cliente_nombre, cliente_telefono) VALUES (?, ?, ?, ?, ?, ?, ?)')
+    .run(u.id, nuevaGuia(), crypto.randomBytes(16).toString('hex'), descripcion, tamano, cliente_nombre, cliente_telefono);
+  return db.prepare('SELECT * FROM pedidos_empresa WHERE id = ?').get(Number(r.lastInsertRowid));
+}
+// Si ya tiene todos los datos de entrega, queda confirmado
+function revisarConfirmado(p, quien) {
+  if (['pendiente', 'confirmado'].includes(p.estado) && pedidoCompleto(p)) {
+    if (p.estado !== 'confirmado' || p.confirmado_por !== quien) p = guardarPedido(p.id, { estado: 'confirmado', confirmado_en: db.prepare("SELECT datetime('now') AS t").get().t, confirmado_por: quien });
+  }
+  return p;
+}
+const pedidoDeEmpresa = (u, id) => db.prepare('SELECT * FROM pedidos_empresa WHERE id = ? AND usuario_id = ?').get(Number(id), u.id) || falla(404, 'No encontramos ese pedido.');
+const editable = (p) => { if (!['pendiente', 'confirmado', 'vencido'].includes(p.estado) || p.lote_id) falla(400, 'Este pedido ya se envió a Vaelo y no se puede cambiar.'); };
+
+// ---------- Rutas: la entrega más cercana primero, respetando el horario del cliente ----------
+const ORDEN_HORARIO = ['manana', 'cualquiera', 'tarde'];
+function ordenarParadas(origen, pedidos) {
+  let actual = origen;
+  const out = [];
+  for (const h of ORDEN_HORARIO) {
+    const resto = pedidos.filter((p) => (HORARIOS[p.horario] ? p.horario : 'cualquiera') === h);
+    while (resto.length) {
+      let mejor = 0, menor = Infinity;
+      resto.forEach((p, i) => { const d = distanciaRecta(actual, p); if (d < menor) { menor = d; mejor = i; } });
+      const [p] = resto.splice(mejor, 1);
+      out.push(p); actual = p;
+    }
+  }
+  return out;
+}
+function medirRuta(origen, paradas, pickup = false) {
+  let km = 0, a = origen;
+  for (const p of paradas) { km += distanciaRecta(a, p) * 1.4; a = p; }
+  const vel = pickup ? 18 : 22;
+  return { km: Math.round(km * 10) / 10, minutos: Math.round((km / vel) * 60 + paradas.length * 7 + 10), puntos: paradas.reduce((t, p) => t + (pickup ? 0 : puntosDe(p.tamano)), 0) };
+}
+// Barrido por ángulo alrededor del punto de recogida: grupos de entregas cercanas entre sí, con carga parecida
+function dividirEnRutas(origen, pedidos, k) {
+  k = Math.max(1, Math.min(k, pedidos.length));
+  if (k === 1) return [ordenarParadas(origen, pedidos)];
+  const cosLat = Math.cos((origen.lat * Math.PI) / 180);
+  const lista = pedidos.map((p) => ({ p, a: Math.atan2(p.lat - origen.lat, (p.lng - origen.lng) * cosLat) })).sort((x, y) => x.a - y.a);
+  // Se empieza a cortar después del hueco más grande, así ningún grupo da la vuelta completa
+  let hueco = 0, mayor = -1;
+  for (let i = 0; i < lista.length; i++) {
+    const sig = lista[(i + 1) % lista.length], d = (sig.a - lista[i].a + 2 * Math.PI) % (2 * Math.PI) || (lista.length === 1 ? 2 * Math.PI : 0);
+    if (d > mayor) { mayor = d; hueco = (i + 1) % lista.length; }
+  }
+  const orden = [...lista.slice(hueco), ...lista.slice(0, hueco)].map((x) => x.p);
+  const peso = (p) => puntosDe(p.tamano) + 4;
+  const total = orden.reduce((t, p) => t + peso(p), 0);
+  const grupos = [];
+  let actual = [], acum = 0;
+  orden.forEach((p, i) => {
+    actual.push(p); acum += peso(p);
+    const quedan = orden.length - i - 1, faltanGrupos = k - grupos.length - 1;
+    if (faltanGrupos > 0 && (acum >= (total * (grupos.length + 1)) / k || quedan === faltanGrupos)) { grupos.push(actual); actual = []; }
+  });
+  if (actual.length) grupos.push(actual);
+  return grupos.map((g) => ordenarParadas(origen, g));
+}
+function recomendar(origen, pedidos) {
+  const cupo = ajNum('cupo_moto', 30), horas = ajNum('horas_ruta_moto', 4);
+  const puntos = pedidos.reduce((t, p) => t + (p.tamano === 'grande' ? 0 : puntosDe(p.tamano)), 0);
+  const una = medirRuta(origen, ordenarParadas(origen, pedidos));
+  const base = { puntos, cupo, horas, minutos_una: una.minutos, km_una: una.km };
+  if (pedidos.some((p) => p.tamano === 'grande')) return { ...base, modo: 'pickup', motos: 0, razon: 'Hay paquetes grandes: solo caben en pickup.' };
+  if (puntos <= cupo && una.minutos <= horas * 60) return { ...base, modo: 'una_moto', motos: 1, razon: `Todo cabe en una moto y la ruta dura unas ${(una.minutos / 60).toFixed(1).replace('.0', '')} h.` };
+  let k = Math.max(2, Math.ceil(puntos / cupo), Math.ceil(una.minutos / (horas * 60)));
+  for (; k < pedidos.length; k++) {
+    if (dividirEnRutas(origen, pedidos, k).every((r) => { const m = medirRuta(origen, r); return m.puntos <= cupo && m.minutos <= horas * 60; })) break;
+  }
+  const razon = puntos > cupo ? `No cabe todo en una moto (${puntos} de ${cupo} de cupo).` : `Una sola moto se tardaría unas ${(una.minutos / 60).toFixed(1)} h.`;
+  return { ...base, modo: 'motos', motos: k, razon: `${razon} Se recomiendan ${k} motos.` };
+}
+function puntoEmpresa(u) {
+  const f = db.prepare('SELECT empresa_lat, empresa_lng, empresa_direccion, empresa_zona FROM usuarios WHERE id = ?').get(u.id);
+  return f && f.empresa_lat != null ? { lat: f.empresa_lat, lng: f.empresa_lng, direccion: f.empresa_direccion || '', zona: f.empresa_zona || '' } : null;
+}
+const origenLote = (l) => l.recogida === 'sede' ? sedeUbicacion() : (l.origen_lat != null ? { lat: l.origen_lat, lng: l.origen_lng } : null);
+
+// ---------- Empresa: registrar pedidos ----------
+const minimoLote = () => Math.round(ajNum('min_pedidos_lote', 10));
+ruta('GET', '/api/empresa/pedidos', ({ req }) => {
+  const u = requiereEmpresa(req);
+  const filas = db.prepare(`SELECT * FROM pedidos_empresa WHERE usuario_id = ? AND (estado IN ('pendiente','confirmado','vencido')
+    OR (estado = 'enviado' AND actualizado >= datetime('now', '-15 days'))) ORDER BY CASE estado WHEN 'pendiente' THEN 0 WHEN 'confirmado' THEN 1 WHEN 'vencido' THEN 2 ELSE 3 END, COALESCE(dia, '9999'), id DESC LIMIT 500`).all(u.id);
+  const pedidos = filas.map((p) => pedidoSalida(p));
+  // Días con pedidos confirmados sin enviar: ahí aparece "Enviar a Vaelo"
+  const dias = {};
+  for (const p of filas) if (p.estado === 'confirmado' && !p.lote_id && p.dia >= hoyGT()) {
+    dias[p.dia] = dias[p.dia] || { dia: p.dia, confirmados: 0, sin_foto: 0, grandes: 0 };
+    dias[p.dia].confirmados++; if (!p.foto) dias[p.dia].sin_foto++; if (p.tamano === 'grande') dias[p.dia].grandes++;
+  }
+  const lotes = db.prepare("SELECT * FROM lotes_empresa WHERE usuario_id = ? AND (estado IN ('nuevo','en_ruta') OR creado >= datetime('now','-7 days')) ORDER BY id DESC LIMIT 30").all(u.id)
+    .map((l) => ({ id: l.id, dia: l.dia, modo: l.modo, modo_texto: MODOS_LOTE[l.modo], recogida: l.recogida, paga: l.paga, estado: l.estado, creado: l.creado, recibido_en: l.recibido_en,
+      pedidos: db.prepare('SELECT COUNT(*) AS n FROM pedidos_empresa WHERE lote_id = ?').get(l.id).n,
+      entregados: db.prepare("SELECT COUNT(*) AS n FROM envios WHERE lote_empresa_id = ? AND estado = 'entregado'").get(l.id).n }));
+  return { pedidos, dias: Object.values(dias).sort((a, b) => a.dia.localeCompare(b.dia)), lotes, minimo: minimoLote(), punto: puntoEmpresa(u), tamanos: TAMANOS, horarios: HORARIOS,
+    modos: MODOS_LOTE, empresa: u.empresa_nombre || u.nombre, whatsapp: getAjustes().whatsapp || '', sede: getAjustes().sede_direccion || '',
+    zonas: [...zonasFijas().map((z) => z.nombre), OTRA_ZONA] };
+});
+ruta('PUT', '/api/empresa/punto', ({ req, body }) => {
+  const u = requiereEmpresa(req);
+  const c = coordenada(body.lat, body.lng);
+  if (!c) falla(400, 'Marca en el mapa dónde recoge el piloto los paquetes.');
+  const direccion = texto(body.direccion, 300), zona = texto(body.zona, 60);
+  if (direccion.length < 5) falla(400, 'Escribe la dirección de tu local.');
+  db.prepare('UPDATE usuarios SET empresa_lat = ?, empresa_lng = ?, empresa_direccion = ?, empresa_zona = ? WHERE id = ?').run(c.lat, c.lng, direccion, zona || zonaDePunto(c) || OTRA_ZONA, u.id);
+  return { ok: true, punto: puntoEmpresa(u) };
+});
+ruta('POST', '/api/empresa/pedidos', ({ req, body }) => {
+  const u = requiereEmpresa(req);
+  if (db.prepare("SELECT COUNT(*) AS n FROM pedidos_empresa WHERE usuario_id = ? AND estado IN ('pendiente','confirmado')").get(u.id).n >= 1000) falla(400, 'Tienes demasiados pedidos sin enviar.');
+  db.exec('BEGIN');
+  try {
+    let p = crearPedido(u, body);
+    if (body.foto) guardarFotoPedido(p, body.foto);
+    if (body.llenar === true) p = guardarPedido(p.id, leerDatosEntrega(body));
+    p = revisarConfirmado(db.prepare('SELECT * FROM pedidos_empresa WHERE id = ?').get(p.id), 'empresa');
+    db.exec('COMMIT');
+    return { _status: 201, pedido: pedidoSalida(p) };
+  } catch (err) { db.exec('ROLLBACK'); throw err; }
+}, { limite: 1_000_000 });
+ruta('PUT', '/api/empresa/pedidos/:id', ({ req, params, body }) => {
+  const u = requiereEmpresa(req);
+  let p = pedidoDeEmpresa(u, params.id);
+  editable(p);
+  const datos = {};
+  if (body.descripcion !== undefined) { datos.descripcion = texto(body.descripcion, 200); if (datos.descripcion.length < 2) falla(400, 'Escribe qué es el paquete.'); }
+  if (body.tamano !== undefined) datos.tamano = TAMANOS[body.tamano] ? body.tamano : falla(400, 'Elige el tamaño.');
+  if (body.cliente_nombre !== undefined) { datos.cliente_nombre = texto(body.cliente_nombre, 100); if (datos.cliente_nombre.length < 2) falla(400, 'Escribe el nombre de tu cliente.'); }
+  if (body.cliente_telefono !== undefined) { datos.cliente_telefono = texto(body.cliente_telefono, 30); if (digitos(datos.cliente_telefono).length < 8) falla(400, 'Revisa el WhatsApp de tu cliente.'); }
+  Object.assign(datos, leerDatosEntrega(body, true));
+  if (p.estado === 'vencido') datos.estado = 'pendiente';
+  p = guardarPedido(p.id, datos);
+  p = revisarConfirmado(p, 'empresa');
+  return { pedido: pedidoSalida(p) };
+});
+ruta('POST', '/api/empresa/pedidos/:id/foto', ({ req, params, body }) => {
+  const u = requiereEmpresa(req);
+  const p = pedidoDeEmpresa(u, params.id);
+  editable(p);
+  guardarFotoPedido(p, body.foto);
+  return { ok: true };
+}, { limite: 1_000_000 });
+ruta('GET', '/api/empresa/pedidos/:id/foto', ({ req, res, params }) => {
+  const u = requiereEmpresa(req);
+  const p = pedidoDeEmpresa(u, params.id);
+  return enviarArchivoEnvio(res, { foto_entrega: p.foto }, 'foto');
+});
+ruta('POST', '/api/empresa/pedidos/:id/enlace', ({ req, params }) => {
+  const u = requiereEmpresa(req);
+  const p = pedidoDeEmpresa(u, params.id);
+  if (!p.enlace_enviado_en) db.prepare("UPDATE pedidos_empresa SET enlace_enviado_en = datetime('now') WHERE id = ?").run(p.id);
+  return { ok: true };
+});
+ruta('DELETE', '/api/empresa/pedidos/:id', ({ req, params }) => {
+  const u = requiereEmpresa(req);
+  const p = pedidoDeEmpresa(u, params.id);
+  editable(p);
+  db.prepare("UPDATE pedidos_empresa SET estado = 'cancelado', actualizado = datetime('now') WHERE id = ?").run(p.id);
+  return { ok: true };
+});
+// Subir muchos pedidos de un Excel o CSV: Descripción, Tamaño, Cliente, WhatsApp
+const COLUMNAS_ARCHIVO = { descripcion: /descrip|producto|paquete|qu[eé]/i, tamano: /tama/i, cliente_nombre: /cliente|nombre/i, cliente_telefono: /whats|tel[eé]f|celular|n[uú]mero/i };
+function tamanoDeTexto(t) {
+  const s = String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  if (/sobre|papel|document/.test(s)) return 'sobre';
+  if (/media|mediano/.test(s)) return 'mediano';
+  if (/grande/.test(s)) return 'grande';
+  return 'pequeno';
+}
+ruta('POST', '/api/empresa/pedidos/archivo', ({ req, body }) => {
+  const u = requiereEmpresa(req);
+  const m = /^data:([^;]*);base64,([A-Za-z0-9+/=]+)$/.exec(String(body.archivo || ''));
+  if (!m) falla(400, 'Sube un archivo de Excel (.xlsx) o CSV.');
+  const buf = Buffer.from(m[2], 'base64');
+  if (buf.length > 2_000_000) falla(400, 'El archivo pesa más de 2 MB.');
+  let filas;
+  try { filas = buf.subarray(0, 2).toString() === 'PK' ? leerExcel(buf) : leerCsv(buf.toString('utf8')); }
+  catch (err) { falla(400, err.message || 'No pudimos leer el archivo.'); }
+  if (filas.length < 2) falla(400, 'El archivo no tiene pedidos: la primera fila son los títulos y debajo un pedido por fila.');
+  const cab = filas[0];
+  const idx = {};
+  for (const [k, re] of Object.entries(COLUMNAS_ARCHIVO)) idx[k] = cab.findIndex((t, i) => re.test(t) && !Object.values(idx).includes(i));
+  if (idx.cliente_nombre < 0 || idx.cliente_telefono < 0 || idx.descripcion < 0) falla(400, 'Faltan columnas. Usa la plantilla: Descripción, Tamaño, Cliente, WhatsApp.');
+  if (filas.length > 301) falla(400, 'Máximo 300 pedidos por archivo.');
+  const errores = [], listos = [];
+  filas.slice(1).forEach((f, i) => {
+    const b = { descripcion: f[idx.descripcion], tamano: tamanoDeTexto(idx.tamano >= 0 ? f[idx.tamano] : ''), cliente_nombre: f[idx.cliente_nombre], cliente_telefono: f[idx.cliente_telefono] };
+    if (!texto(b.descripcion) || texto(b.descripcion).length < 2) errores.push(`Fila ${i + 2}: falta qué es el paquete.`);
+    else if (!texto(b.cliente_nombre) || texto(b.cliente_nombre).length < 2) errores.push(`Fila ${i + 2}: falta el nombre del cliente.`);
+    else if (digitos(b.cliente_telefono).length < 8) errores.push(`Fila ${i + 2}: el WhatsApp del cliente no tiene 8 dígitos.`);
+    else listos.push(b);
+  });
+  if (errores.length) return { _status: 400, ok: false, errores: errores.slice(0, 30) };
+  db.exec('BEGIN');
+  try { for (const b of listos) crearPedido(u, b); db.exec('COMMIT'); } catch (err) { db.exec('ROLLBACK'); throw err; }
+  return { _status: 201, ok: true, creados: listos.length };
+}, { limite: 3_000_000 });
+ruta('GET', '/api/empresa/pedidos/plantilla', ({ req, res }) => {
+  requiereEmpresa(req);
+  const buf = crearExcel([{ nombre: 'Pedidos', columnas: [{ titulo: 'Descripción', ancho: 30 }, { titulo: 'Tamaño', ancho: 14 }, { titulo: 'Cliente', ancho: 26 }, { titulo: 'WhatsApp', ancho: 16 }],
+    filas: [['Blusa talla M', 'Pequeño', 'María López', '55551234'], ['Factura y contrato', 'Sobre', 'José Pérez', '44443333']] }]);
+  return enviarExcel(res, buf, 'plantilla-pedidos-vaelo.xlsx');
+});
+// Recomendación para un día: una moto, varias o pickup
+ruta('GET', '/api/empresa/recomendacion', ({ req, query }) => {
+  const u = requiereEmpresa(req);
+  const dia = query.get('dia') || '';
+  const pedidos = db.prepare("SELECT * FROM pedidos_empresa WHERE usuario_id = ? AND dia = ? AND estado = 'confirmado' AND lote_id IS NULL").all(u.id, dia);
+  if (!pedidos.length) falla(404, 'No hay pedidos confirmados para ese día.');
+  const origen = puntoEmpresa(u) || sedeUbicacion();
+  return { recomendacion: origen ? recomendar(origen, pedidos) : null, pedidos: pedidos.length, minimo: minimoLote() };
+});
+ruta('POST', '/api/empresa/enviar', ({ req, body }) => {
+  const u = requiereEmpresa(req);
+  const dia = texto(body.dia, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dia) || dia < hoyGT()) falla(400, 'Elige un día de hoy en adelante.');
+  if (!['una_moto', 'motos', 'pickup'].includes(body.modo)) falla(400, 'Elige cómo quieres que se repartan: una moto, varias motos o pickup.');
+  const recogida = body.recogida === 'sede' ? 'sede' : 'empresa';
+  const paga = body.modo === 'pickup' && body.paga === 'empresa' ? 'empresa' : 'clientes';
+  const pedidos = db.prepare("SELECT * FROM pedidos_empresa WHERE usuario_id = ? AND dia = ? AND estado = 'confirmado' AND lote_id IS NULL").all(u.id, dia);
+  if (pedidos.length < minimoLote()) falla(400, `Necesitas al menos ${minimoLote()} pedidos confirmados para el mismo día. Para ese día tienes ${pedidos.length}.`);
+  const sinFoto = pedidos.filter((p) => !p.foto);
+  if (sinFoto.length) falla(400, `Falta la foto del paquete en ${sinFoto.length} pedido(s): ${sinFoto.slice(0, 5).map((p) => p.codigo).join(', ')}.`);
+  if (body.modo !== 'pickup' && pedidos.some((p) => p.tamano === 'grande')) falla(400, 'Hay paquetes grandes: esos solo van en pickup.');
+  const punto = puntoEmpresa(u);
+  if (recogida === 'empresa' && !punto) falla(400, 'Marca primero dónde recoge el piloto los paquetes (tu local).');
+  if (recogida === 'sede' && !sedeUbicacion()) falla(400, 'Todavía no está configurada la sede de Vaelo. Escríbenos por WhatsApp.');
+  const origen = recogida === 'sede' ? sedeUbicacion() : punto;
+  const rec = recomendar(origen, pedidos);
+  db.exec('BEGIN');
+  let lote;
+  try {
+    lote = Number(db.prepare(`INSERT INTO lotes_empresa (usuario_id, dia, modo, recogida, paga, recomendado, nota, origen_lat, origen_lng, origen_direccion)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(u.id, dia, body.modo, recogida, paga, JSON.stringify(rec), texto(body.nota, 300) || null,
+      origen.lat, origen.lng, recogida === 'sede' ? (getAjustes().sede_direccion || 'Sede Vaelo') : punto.direccion).lastInsertRowid);
+    db.prepare(`UPDATE pedidos_empresa SET lote_id = ?, actualizado = datetime('now') WHERE id IN (${pedidos.map(() => '?').join(',')})`).run(lote, ...pedidos.map((p) => p.id));
+    db.exec('COMMIT');
+  } catch (err) { db.exec('ROLLBACK'); throw err; }
+  avisarStaff({ titulo: 'Pedidos de empresa para repartir', cuerpo: `${u.empresa_nombre || u.nombre}: ${pedidos.length} pedidos para el ${fechaLarga(dia)} (${MODOS_LOTE[body.modo]}).`, url: RUTA_ADMIN, etiqueta: 'lote-emp-' + lote, urgente: true });
+  let whatsapp = null;
+  if (body.modo === 'pickup' && paga === 'empresa') {
+    const tel = digitos(getAjustes().whatsapp);
+    const zonas = [...new Set(pedidos.map((p) => p.zona))].join(', ');
+    whatsapp = tel ? `https://wa.me/${tel}?text=${encodeURIComponent(`Hola Vaelo, somos ${u.empresa_nombre || u.nombre}. Queremos un pickup para ${pedidos.length} pedidos el ${fechaLarga(dia)} (zonas: ${zonas}). Recogida: ${recogida === 'sede' ? 'los llevamos a la sede' : punto.direccion}. Lote #${lote}. ¿Precio y promoción?`)}` : null;
+  }
+  return { _status: 201, ok: true, lote, pedidos: pedidos.length, whatsapp };
+});
+ruta('POST', '/api/empresa/lotes/:id/cancelar', ({ req, params }) => {
+  const u = requiereEmpresa(req);
+  const l = db.prepare("SELECT * FROM lotes_empresa WHERE id = ? AND usuario_id = ?").get(Number(params.id), u.id) || falla(404, 'No encontramos ese envío.');
+  if (l.estado !== 'nuevo') falla(400, 'Vaelo ya asignó los pilotos: para cambiar algo escríbenos por WhatsApp.');
+  cancelarLote(l);
+  return { ok: true };
+});
+function cancelarLote(l) {
+  db.prepare("UPDATE lotes_empresa SET estado = 'cancelado' WHERE id = ?").run(l.id);
+  db.prepare("UPDATE pedidos_empresa SET lote_id = NULL, actualizado = datetime('now') WHERE lote_id = ? AND estado = 'confirmado'").run(l.id);
+}
+// Excel del día para la empresa: sus pedidos, sin dinero
+ruta('GET', '/api/empresa/excel', ({ req, res, query }) => {
+  const u = requiereEmpresa(req);
+  const dia = /^\d{4}-\d{2}-\d{2}$/.test(query.get('dia') || '') ? query.get('dia') : hoyGT();
+  const filas = db.prepare('SELECT * FROM pedidos_empresa WHERE usuario_id = ? AND dia = ? AND estado != ? ORDER BY id').all(u.id, dia, 'cancelado').map((p) => pedidoSalida(p));
+  const ESTADO_ENVIO = { pendiente: 'Por recoger', recogido: 'Recogido', en_camino: 'En camino', entregado: 'Entregado', fallido: 'No se entregó', a_sede: 'Va a la sede', en_sede: 'En la sede', devuelto: 'Devuelto', reenviado: 'Reenviado', cancelado: 'Cancelado' };
+  const buf = crearExcel([{ nombre: 'Pedidos', titulo: `${u.empresa_nombre || u.nombre} · pedidos del ${fechaLarga(dia)}`,
+    columnas: [{ titulo: 'Código', ancho: 14 }, { titulo: 'Descripción', ancho: 28 }, { titulo: 'Tamaño', ancho: 10 }, { titulo: 'Cliente', ancho: 22 }, { titulo: 'WhatsApp', ancho: 14 },
+      { titulo: 'Zona', ancho: 14 }, { titulo: 'Dirección', ancho: 34 }, { titulo: 'Horario', ancho: 16 }, { titulo: 'Recibe', ancho: 20 }, { titulo: 'Estado', ancho: 18 },
+      { titulo: 'Piloto', ancho: 14 }, { titulo: 'Parada', tipo: 'numero', ancho: 8 }, { titulo: 'Recibió', ancho: 18 }, { titulo: 'Motivo si no se entregó', ancho: 28 }, { titulo: 'Días en sede', tipo: 'numero', ancho: 12 }],
+    filas: filas.map((p) => [p.codigo, p.descripcion, p.tamano_texto, p.cliente_nombre, p.cliente_telefono, p.zona, p.direccion, p.horario_texto, p.recibe_nombre,
+      p.envio ? ESTADO_ENVIO[p.envio.estado] || p.envio.estado : p.estado_texto, p.envio?.piloto || '', p.envio?.parada || '', p.envio?.recibio || '', p.envio?.fallo || '', p.envio?.dias_sede ?? '']) }]);
+  return enviarExcel(res, buf, `vaelo-pedidos-${dia}.xlsx`);
+});
+function enviarExcel(res, buf, nombre) {
+  res.writeHead(200, { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Content-Disposition': `attachment; filename="${nombre}"`,
+    'Content-Length': buf.length, 'Cache-Control': 'no-store', ...CABECERAS_SEGURIDAD });
+  res.end(buf);
+  return { _enviado: true };
+}
+
+// ---------- El enlace del cliente de la empresa: /pedido/<clave> ----------
+function pedidoPorToken(token) {
+  if (!/^[a-f0-9]{32}$/.test(String(token || ''))) falla(404, 'Este enlace no es válido. Pide a la tienda que te lo mande de nuevo.');
+  return db.prepare('SELECT * FROM pedidos_empresa WHERE token = ?').get(token) || falla(404, 'Este enlace no es válido. Pide a la tienda que te lo mande de nuevo.');
+}
+ruta('GET', '/api/pedido/:token', ({ params }) => {
+  const p = pedidoPorToken(params.token);
+  const aj = getAjustes();
+  const out = { codigo: p.codigo, empresa: nombreEmpresa(p.usuario_id), descripcion: p.descripcion, tamano: TAMANOS[p.tamano]?.nombre, cliente_nombre: p.cliente_nombre,
+    estado: estadoPedido(p), dia: p.dia, horario: p.horario, direccion: p.direccion, zona: p.zona, lat: p.lat, lng: p.lng, referencias: p.referencias,
+    recibe_nombre: p.recibe_nombre || p.cliente_nombre, recibe_telefono: p.recibe_telefono || p.cliente_telefono, metodo_pago: p.metodo_pago,
+    editable: ['pendiente', 'confirmado', 'vencido'].includes(p.estado) && !p.lote_id, en_lote: !!p.lote_id,
+    precio: p.lat != null || p.zona ? precioPedido(p) : null, tarifa_zona: vehiculoMoto()?.tarifa_zona ?? 35, tarifa_fuera: ajNum('tarifa_empresa_fuera', 45),
+    zonas: [...zonasFijas().map((z) => z.nombre), OTRA_ZONA], horarios: HORARIOS, hoy: hoyGT(), whatsapp_pagos: aj.whatsapp_pagos || aj.whatsapp || '', datos_transferencia: aj.datos_transferencia || '' };
+  if (p.envio_id) {
+    const e = db.prepare(`${SQL_ENVIO} WHERE e.id = ?`).get(p.envio_id);
+    if (e) {
+      const enCurso = ['pendiente', 'recogido', 'en_camino'].includes(e.estado);
+      out.envio = { estado: e.estado, guia: e.guia, parada: e.parada, paradas: e.grupo ? db.prepare('SELECT COUNT(*) AS n FROM envios WHERE grupo = ?').get(e.grupo).n : 1,
+        antes: e.grupo && e.parada ? db.prepare(`SELECT COUNT(*) AS n FROM envios WHERE grupo = ? AND parada < ? AND estado IN ('pendiente','recogido','en_camino')`).get(e.grupo, e.parada).n : 0,
+        codigo_entrega: enCurso ? e.codigo_entrega : null, precio: e.metodo_pago === 'recibe' || e.metodo_pago === 'transferencia' ? e.precio : 0, metodo_pago: e.metodo_pago,
+        piloto: e.asignacion === 'aceptado' && e.mensajero_nombre ? { nombre: e.mensajero_nombre.split(' ')[0], ...(() => { const m = pilotoPorId(e.mensajero_id); return m ? { vehiculo: m.vehiculo, color: m.veh_color, placa: m.veh_placa } : {}; })() } : null,
+        proximo: !!e.aviso_proximo && enCurso, recibio: e.recibio, entregado_en: e.entregado_en, fallo: e.fallo_en ? (MOTIVOS_FALLO[e.fallo_motivo] || '') : null };
+    }
+  }
+  return out;
+});
+ruta('POST', '/api/pedido/:token/precio', ({ params, body }) => {
+  pedidoPorToken(params.token);
+  const c = coordenada(body.lat, body.lng);
+  return precioPedido({ zona: texto(body.zona, 60), lat: c?.lat ?? null, lng: c?.lng ?? null });
+});
+ruta('POST', '/api/pedido/:token', ({ req, params, body }) => {
+  const p = pedidoPorToken(params.token);
+  if (limitar(ipDe(req), 'pedido', 30, 600_000)) falla(429, 'Demasiados intentos. Espera unos minutos.');
+  if (!['pendiente', 'confirmado', 'vencido'].includes(p.estado) || p.lote_id) falla(400, 'Tu pedido ya va en camino: ya no se puede cambiar. Si necesitas algo, escríbele a la tienda.');
+  const d = leerDatosEntrega(body);
+  if (!d.referencias) d.referencias = null;
+  const antes = p.estado;
+  let f = guardarPedido(p.id, { ...d, estado: 'pendiente' });
+  f = revisarConfirmado(f, 'cliente');
+  if (antes !== 'confirmado') avisar(p.usuario_id, { titulo: 'Un cliente confirmó su pedido', cuerpo: `${f.cliente_nombre}: ${fechaLarga(f.dia)}, ${HORARIOS[f.horario].toLowerCase()}.`, url: '/mi-cuenta?empresa=1', etiqueta: 'pedidos-confirmados' });
+  return { ok: true, precio: precioPedido(f) };
+});
+ruta('POST', '/api/pedido/:token/push', ({ params, body }) => {
+  const p = pedidoPorToken(params.token);
+  const s = body.suscripcion || {};
+  const endpoint = texto(s.endpoint, 1000), p256dh = texto(s.keys?.p256dh, 200), auth = texto(s.keys?.auth, 100);
+  if (!/^https:\/\//.test(endpoint) || !p256dh || !auth) falla(400, 'Suscripción no válida.');
+  db.prepare('DELETE FROM push_pedidos WHERE endpoint = ?').run(endpoint);
+  db.prepare('INSERT INTO push_pedidos (pedido_id, endpoint, p256dh, auth) VALUES (?, ?, ?, ?)').run(p.id, endpoint, p256dh, auth);
+  avisarCliente(p.id, { titulo: 'Avisos activados', cuerpo: `Te avisaremos cuando tu pedido de ${nombreEmpresa(p.usuario_id)} salga y cuando seas la próxima entrega.`, url: '/pedido/' + p.token, etiqueta: 'pedido-' + p.id });
+  return { ok: true };
+});
+async function avisarPedidoPush(pedidoId, datos) {
+  for (const s of db.prepare('SELECT * FROM push_pedidos WHERE pedido_id = ?').all(pedidoId)) {
+    if ((await push.enviar(s, datos)) === 'vencida') db.prepare('DELETE FROM push_pedidos WHERE id = ?').run(s.id);
+  }
+}
+const avisarCliente = (pedidoId, datos) => { avisarPedidoPush(pedidoId, datos).catch(() => {}); };
+
+// Avisos de un envío que viene de un pedido de empresa: al cliente (navegador) y a la empresa (resumido por ruta)
+function avisarPedido(e, tipo) {
+  const p = db.prepare('SELECT * FROM pedidos_empresa WHERE id = ?').get(e.pedido_id);
+  if (!p) return;
+  const emp = nombreEmpresa(e.usuario_id), piloto = (e.mensajero_nombre || 'El piloto').split(' ')[0];
+  const total = e.grupo ? db.prepare('SELECT COUNT(*) AS n FROM envios WHERE grupo = ?').get(e.grupo).n : 1;
+  const url = '/pedido/' + p.token, urlEmp = '/mi-cuenta?empresa=1';
+  switch (tipo) {
+    case 'aceptado':
+      avisarCliente(p.id, { titulo: `Tu pedido de ${emp} va en camino`, cuerpo: `${piloto} lo lleva.${total > 1 ? ` Eres la entrega ${e.parada} de ${total}.` : ''} Ten a mano tu código de entrega.`, url, etiqueta: 'pedido-' + p.id });
+      if ((e.parada || 1) === 1) {
+        avisar(e.usuario_id, { titulo: `${piloto} aceptó tu ruta`, cuerpo: `${total} pedido(s) en camino.`, url: urlEmp, etiqueta: 'ruta-' + (e.grupo || e.id) });
+        correoA(e.usuario_id, `${piloto} aceptó tu ruta de ${total} pedido(s)`, 'Tus pedidos van en camino', [`${piloto} aceptó la ruta con ${total} pedido(s). Puedes seguir cada entrega en tu panel.`], { texto: 'Ver mis pedidos', url: urlEmp });
+      }
+      break;
+    case 'llegando': avisarCliente(p.id, { titulo: 'Tu pedido está llegando', cuerpo: `${piloto} está llegando con tu pedido de ${emp}. Ten a mano tu código.`, url, etiqueta: 'pedido-' + p.id, urgente: true }); break;
+    case 'entregado':
+      avisarCliente(p.id, { titulo: 'Pedido entregado', cuerpo: `Tu pedido de ${emp} fue entregado${e.recibio ? ' a ' + e.recibio : ''}. ¡Gracias!`, url, etiqueta: 'pedido-' + p.id });
+      avisarSiguienteParada(e); rutaTerminada(e);
+      break;
+    case 'fallido': {
+      const motivo = MOTIVOS_FALLO[e.fallo_motivo] || 'motivo no indicado';
+      avisarCliente(p.id, { titulo: 'No pudimos entregar tu pedido', cuerpo: `Queda en la sede de Vaelo. Escríbele a ${emp} para coordinar.`, url, etiqueta: 'pedido-' + p.id });
+      avisar(e.usuario_id, { titulo: 'Un pedido no se pudo entregar', cuerpo: `${e.guia} (${p.cliente_nombre}): ${motivo}. Queda en la sede de Vaelo.`, url: urlEmp, etiqueta: 'fallo-' + e.id, urgente: true });
+      correoA(e.usuario_id, `No se pudo entregar el pedido ${e.guia}`, 'Un pedido quedó en la sede', [`El pedido ${e.guia} de ${p.cliente_nombre} no se pudo entregar: ${motivo}.`,
+        'El paquete queda guardado en la sede de Vaelo. Manda a alguien a recogerlo con el código del pedido; la bodega se cobra por día y se coordina por WhatsApp.'], { texto: 'Ver mis pedidos', url: urlEmp });
+      avisarStaff({ titulo: 'Pedido de empresa no entregado', cuerpo: `${e.guia}: ${motivo}`, url: RUTA_ADMIN, etiqueta: 'fallido-' + e.id });
+      avisarSiguienteParada(e);
+      break;
+    }
+    case 'a_sede': rutaTerminada(e); break;
+    case 'en_sede': avisar(e.usuario_id, { titulo: 'Tu pedido está en la sede', cuerpo: `${e.guia} ya está guardado en la sede de Vaelo. Pasa a recogerlo con el código.`, url: urlEmp, etiqueta: 'sede-' + e.id }); break;
+  }
+}
+// "Eres el próximo": a quien sigue en la ruta
+function avisarSiguienteParada(e) {
+  if (!e.grupo) return;
+  const sig = db.prepare(`SELECT * FROM envios WHERE grupo = ? AND estado IN ('recogido','en_camino') AND aviso_proximo IS NULL AND pedido_id IS NOT NULL ORDER BY parada LIMIT 1`).get(e.grupo);
+  if (!sig) return;
+  const desde = e.destino_lat != null ? { lat: e.destino_lat, lng: e.destino_lng } : e.origen_lat != null ? { lat: e.origen_lat, lng: e.origen_lng } : null;
+  const min = desde && sig.destino_lat != null ? Math.max(5, Math.round((distanciaRecta(desde, { lat: sig.destino_lat, lng: sig.destino_lng }) * 1.4 / 22) * 60 + 3)) : null;
+  db.prepare("UPDATE envios SET aviso_proximo = datetime('now') WHERE id = ?").run(sig.id);
+  const p = db.prepare('SELECT * FROM pedidos_empresa WHERE id = ?').get(sig.pedido_id);
+  const piloto = (db.prepare('SELECT nombre FROM usuarios WHERE id = ?').get(sig.mensajero_id)?.nombre || 'El piloto').split(' ')[0];
+  if (p) avisarCliente(p.id, { titulo: 'Eres la próxima entrega', cuerpo: `${piloto} va hacia ti${min ? `, llega en unos ${min} minutos` : ''}. Ten a mano tu código de entrega.`, url: '/pedido/' + p.token, etiqueta: 'pedido-' + p.id, urgente: true });
+}
+function rutaTerminada(e) {
+  const abiertos = (cond, v) => db.prepare(`SELECT COUNT(*) AS n FROM envios WHERE ${cond} AND estado IN ('pendiente','recogido','en_camino','fallido')`).get(v).n;
+  if (e.grupo && !abiertos('grupo = ?', e.grupo)) {
+    const r = db.prepare("SELECT SUM(estado = 'entregado') AS ok, SUM(estado IN ('a_sede','en_sede')) AS sede, COUNT(*) AS n FROM envios WHERE grupo = ?").get(e.grupo);
+    const cuerpo = `${r.ok} de ${r.n} entregados${r.sede ? `, ${r.sede} en la sede de Vaelo` : ''}.`;
+    avisar(e.usuario_id, { titulo: 'Ruta terminada', cuerpo, url: '/mi-cuenta?empresa=1', etiqueta: 'ruta-' + e.grupo });
+    correoA(e.usuario_id, 'Ruta terminada', 'Terminó la ruta de tus pedidos', [cuerpo, r.sede ? 'Los que quedaron en la sede se recogen ahí con el código del pedido.' : 'Gracias por usar Vaelo.'], { texto: 'Ver mis pedidos', url: '/mi-cuenta?empresa=1' });
+  }
+  if (e.lote_empresa_id && !abiertos('lote_empresa_id = ?', e.lote_empresa_id)) db.prepare("UPDATE lotes_empresa SET estado = 'terminado' WHERE id = ? AND estado = 'en_ruta'").run(e.lote_empresa_id);
+}
+// Cada hora: a la empresa se le avisa de los clientes que no llenan su enlace, y los pedidos de días que ya pasaron vencen
+function revisarPedidos() {
+  const horas = ajNum('horas_recordatorio', 24);
+  const sinLlenar = db.prepare(`SELECT usuario_id, COUNT(*) AS n FROM pedidos_empresa WHERE estado = 'pendiente' AND enlace_enviado_en IS NOT NULL AND recordado_en IS NULL
+    AND enlace_enviado_en < datetime('now', ?) GROUP BY usuario_id`).all(`-${Math.round(horas * 60)} minutes`);
+  for (const r of sinLlenar) {
+    avisar(r.usuario_id, { titulo: 'Clientes sin confirmar', cuerpo: `${r.n} cliente(s) todavía no llenan su enlace. Reenvíaselo por WhatsApp desde tu panel.`, url: '/mi-cuenta?empresa=1', etiqueta: 'recordatorio' });
+    db.prepare(`UPDATE pedidos_empresa SET recordado_en = datetime('now') WHERE usuario_id = ? AND estado = 'pendiente' AND enlace_enviado_en IS NOT NULL AND recordado_en IS NULL AND enlace_enviado_en < datetime('now', ?)`).run(r.usuario_id, `-${Math.round(horas * 60)} minutes`);
+  }
+  // Confirmados para un día que ya pasó y que nunca se mandaron a Vaelo
+  const vencidos = db.prepare("SELECT usuario_id, COUNT(*) AS n FROM pedidos_empresa WHERE estado = 'confirmado' AND lote_id IS NULL AND dia < ? GROUP BY usuario_id").all(hoyGT());
+  for (const r of vencidos) avisar(r.usuario_id, { titulo: 'Pedidos sin enviar', cuerpo: `${r.n} pedido(s) eran para un día que ya pasó. Pide a tus clientes una fecha nueva.`, url: '/mi-cuenta?empresa=1', etiqueta: 'vencidos' });
+  db.prepare("UPDATE pedidos_empresa SET estado = 'vencido', actualizado = datetime('now') WHERE estado = 'confirmado' AND lote_id IS NULL AND dia < ?").run(hoyGT());
+}
+if (require.main === module) setInterval(() => { try { revisarPedidos(); } catch (err) { console.error('Pedidos:', err.message); } }, 3600_000).unref();
+
+// ---------- Panel: empresas activas, sus pedidos y "Dividir pedidos" ----------
+function resumenEmpresa(uid) {
+  const n = (sql, ...a) => db.prepare(sql).get(uid, ...a).n;
+  return {
+    por_confirmar: n("SELECT COUNT(*) AS n FROM pedidos_empresa WHERE usuario_id = ? AND estado = 'pendiente'"),
+    confirmados: n("SELECT COUNT(*) AS n FROM pedidos_empresa WHERE usuario_id = ? AND estado = 'confirmado' AND lote_id IS NULL"),
+    lotes_nuevos: n("SELECT COUNT(*) AS n FROM lotes_empresa WHERE usuario_id = ? AND estado = 'nuevo'"),
+    en_ruta: n("SELECT COUNT(*) AS n FROM envios WHERE usuario_id = ? AND pedido_id IS NOT NULL AND estado IN ('pendiente','recogido','en_camino')"),
+    en_sede: n("SELECT COUNT(*) AS n FROM envios WHERE usuario_id = ? AND pedido_id IS NOT NULL AND estado IN ('fallido','a_sede','en_sede')"),
+    entregados_mes: n("SELECT COUNT(*) AS n FROM envios WHERE usuario_id = ? AND pedido_id IS NOT NULL AND estado = 'entregado' AND strftime('%Y-%m', entregado_en, '-6 hours') = ?", hoyGT().slice(0, 7)),
+  };
+}
+ruta('GET', '/api/admin/empresas-activas', ({ req }) => {
+  requiereStaff(req);
+  const lista = db.prepare("SELECT id, nombre, empresa_nombre, telefono, email FROM usuarios WHERE tipo_cuenta = 'empresa' AND rol = 'cliente' ORDER BY COALESCE(empresa_nombre, nombre)").all()
+    .map((u) => ({ ...u, ...resumenEmpresa(u.id) }));
+  lista.sort((a, b) => b.lotes_nuevos - a.lotes_nuevos || b.en_ruta - a.en_ruta || b.en_sede - a.en_sede || b.confirmados - a.confirmados);
+  return { empresas: lista, lotes_nuevos: lista.reduce((t, e) => t + e.lotes_nuevos, 0), solicitudes: db.prepare("SELECT COUNT(*) AS n FROM solicitudes_empresa WHERE estado = 'enviada'").get().n };
+});
+function loteSalida(l, conDinero) {
+  const pedidos = db.prepare('SELECT * FROM pedidos_empresa WHERE lote_id = ? ORDER BY id').all(l.id).map((p) => pedidoSalida(p, conDinero));
+  let rec = null; try { rec = JSON.parse(l.recomendado || 'null'); } catch { /* vacío */ }
+  return { ...l, modo_texto: MODOS_LOTE[l.modo], recomendacion: rec, pedidos, origen: origenLote(l), empresa: nombreEmpresa(l.usuario_id),
+    telefono_empresa: db.prepare('SELECT telefono FROM usuarios WHERE id = ?').get(l.usuario_id)?.telefono || '',
+    dias_sede: l.recibido_en && l.estado === 'nuevo' ? Math.max(0, Math.round((Date.parse(hoyGT()) - Date.parse(new Date(fechaMs(l.recibido_en) - 6 * 3600_000).toISOString().slice(0, 10))) / 86400_000)) : 0,
+    se_puede_asignar: l.dia <= hoyGT() };
+}
+ruta('GET', '/api/admin/empresas-activas/:id', ({ req, params }) => {
+  const quien = requiereStaff(req);
+  const conDinero = !esOperador(quien);
+  const u = db.prepare("SELECT * FROM usuarios WHERE id = ? AND tipo_cuenta = 'empresa'").get(Number(params.id)) || falla(404, 'No encontramos esa empresa.');
+  const s = solicitudDe(u.id);
+  const lotes = db.prepare("SELECT * FROM lotes_empresa WHERE usuario_id = ? AND estado IN ('nuevo','en_ruta') ORDER BY dia, id").all(u.id).map((l) => loteSalida(l, conDinero));
+  const enRuta = db.prepare(`${SQL_ENVIO} WHERE e.usuario_id = ? AND e.pedido_id IS NOT NULL AND e.estado IN ('pendiente','recogido','en_camino') ORDER BY e.grupo, e.parada`).all(u.id)
+    .map((e) => ({ id: e.id, guia: e.guia, estado: e.estado, destino_nombre: e.destino_nombre, destino_zona: e.destino_zona, piloto: e.mensajero_nombre, asignacion: e.asignacion, parada: e.parada, grupo: e.grupo, horario: e.horario }));
+  const tarifa = ajNum('cargo_bodega_empresa', 10);
+  const enSede = db.prepare(`${SQL_ENVIO} WHERE e.usuario_id = ? AND e.pedido_id IS NOT NULL AND e.estado IN ('fallido','a_sede','en_sede') ORDER BY e.id`).all(u.id)
+    .map((e) => ({ id: e.id, guia: e.guia, estado: e.estado, destino_nombre: e.destino_nombre, fallo: MOTIVOS_FALLO[e.fallo_motivo] || '', llegada: e.sede_llegada,
+      dias: e.sede_llegada ? diasEnSede(e) : 0, ...(conDinero ? { cargo: redondear((e.sede_llegada ? diasEnSede(e) : 0) * tarifa) } : {}) }));
+  const historial = db.prepare(`${SQL_ENVIO} WHERE e.usuario_id = ? AND e.pedido_id IS NOT NULL ORDER BY e.id DESC LIMIT 200`).all(u.id)
+    .map((e) => ({ id: e.id, guia: e.guia, estado: e.estado, creado: e.creado, entregado_en: e.entregado_en, destino_nombre: e.destino_nombre, destino_zona: e.destino_zona, piloto: e.mensajero_nombre }));
+  const porConfirmar = db.prepare("SELECT dia, COUNT(*) AS n FROM pedidos_empresa WHERE usuario_id = ? AND estado = 'confirmado' AND lote_id IS NULL GROUP BY dia ORDER BY dia").all(u.id);
+  return { empresa: { id: u.id, nombre: u.empresa_nombre || u.nombre, contacto: u.nombre, telefono: u.telefono, email: u.email, punto: puntoEmpresa(u),
+      solicitud: s ? { rep_nombre: s.rep_nombre, rep_telefono: s.rep_telefono, direccion: s.direccion, zona: s.zona, nit: s.nit, giro: s.giro, aprobada_en: s.aprobada_en, id: s.id } : null, ...resumenEmpresa(u.id) },
+    lotes, en_ruta: enRuta, en_sede: enSede, historial, confirmados_por_dia: porConfirmar, tarifa_bodega: conDinero ? tarifa : null };
+});
+const loteParaPanel = (id) => db.prepare('SELECT * FROM lotes_empresa WHERE id = ?').get(Number(id)) || falla(404, 'No encontramos ese envío de empresa.');
+function pilotosPara(vehiculoId) {
+  return db.prepare(`${SQL_PILOTO} WHERE u.rol = 'mensajero' AND u.estado_piloto = 'aprobado' AND u.activo = 1`).all()
+    .filter((p) => puedeTrabajar(p) && (!vehiculoId || p.vehiculo_id === vehiculoId))
+    .map((p) => ({ id: p.id, nombre: p.nombre, vehiculo: p.vehiculo, vehiculo_id: p.vehiculo_id, en_linea: enLineaReal(p), activos: p.activos, lat: enLineaReal(p) ? p.ubic_lat : null, lng: enLineaReal(p) ? p.ubic_lng : null }));
+}
+ruta('GET', '/api/admin/lotes-empresa/:id', ({ req, params }) => {
+  const quien = requiereStaff(req);
+  const l = loteParaPanel(params.id);
+  const moto = vehiculoMoto(), pick = vehiculoPickup();
+  return { lote: loteSalida(l, !esOperador(quien)), pilotos_moto: pilotosPara(moto?.id), pilotos_pickup: pick ? pilotosPara(pick.id) : [], modos: MODOS_LOTE,
+    cupo: ajNum('cupo_moto', 30), horas: ajNum('horas_ruta_moto', 4), tamanos: TAMANOS, whatsapp_empresa: digitos(db.prepare('SELECT telefono FROM usuarios WHERE id = ?').get(l.usuario_id)?.telefono) };
+});
+// Calcula rutas: una moto, dividir entre N motos o pickup
+ruta('POST', '/api/admin/lotes-empresa/:id/calcular', ({ req, params, body }) => {
+  requiereStaff(req);
+  const l = loteParaPanel(params.id);
+  const origen = origenLote(l) || falla(400, 'Falta el punto de recogida.');
+  const pedidos = db.prepare("SELECT * FROM pedidos_empresa WHERE lote_id = ? AND estado = 'confirmado'").all(l.id);
+  if (!pedidos.length) falla(400, 'Este envío ya no tiene pedidos por repartir.');
+  const modo = MODOS_LOTE[body.modo] ? body.modo : 'una_moto';
+  const k = modo === 'motos' ? Math.max(1, Math.min(pedidos.length, Math.round(numero(body.motos)) || 2)) : modo === 'un_paquete' ? pedidos.length : 1;
+  const rutas = modo === 'un_paquete' ? pedidos.map((p) => [p]) : dividirEnRutas(origen, pedidos, k);
+  const cupo = ajNum('cupo_moto', 30), horas = ajNum('horas_ruta_moto', 4);
+  return { modo, rutas: rutas.map((r) => { const m = medirRuta(origen, r, modo === 'pickup'); return { pedidos: r.map((p) => p.id), ...m, excede_cupo: modo !== 'pickup' && m.puntos > cupo, excede_horas: modo !== 'pickup' && m.minutos > horas * 60 }; }) };
+});
+ruta('POST', '/api/admin/lotes-empresa/:id/medir', ({ req, params, body }) => {
+  requiereStaff(req);
+  const l = loteParaPanel(params.id);
+  const origen = origenLote(l) || falla(400, 'Falta el punto de recogida.');
+  const ids = Array.isArray(body.pedidos) ? body.pedidos.map(Number) : [];
+  const pedidos = ids.map((id) => db.prepare('SELECT * FROM pedidos_empresa WHERE id = ? AND lote_id = ?').get(id, l.id)).filter(Boolean);
+  return medirRuta(origen, pedidos, body.modo === 'pickup');
+});
+ruta('POST', '/api/admin/lotes-empresa/:id/recibido', ({ req, params }) => {
+  const quien = requiereStaff(req);
+  const l = loteParaPanel(params.id);
+  if (l.recogida !== 'sede' || l.recibido_en) falla(400, 'Este envío no espera paquetes en la sede.');
+  db.prepare("UPDATE lotes_empresa SET recibido_en = datetime('now'), recibido_por = ? WHERE id = ?").run(quien.nombre.split(' ')[0], l.id);
+  avisar(l.usuario_id, { titulo: 'Recibimos tus paquetes', cuerpo: 'Tus paquetes ya están en la sede de Vaelo. Los que salen hoy no pagan bodega.', url: '/mi-cuenta?empresa=1', etiqueta: 'lote-emp-' + l.id });
+  return { ok: true };
+});
+ruta('POST', '/api/admin/lotes-empresa/:id/cancelar', ({ req, params }) => {
+  requiereStaff(req);
+  const l = loteParaPanel(params.id);
+  if (l.estado !== 'nuevo') falla(400, 'Este envío ya tiene pilotos asignados.');
+  cancelarLote(l);
+  avisar(l.usuario_id, { titulo: 'Envío a Vaelo cancelado', cuerpo: 'Tus pedidos vuelven a estar como confirmados. Escríbenos por WhatsApp si tienes dudas.', url: '/mi-cuenta?empresa=1' });
+  return { ok: true };
+});
+// La oficina confirma la transferencia del cliente o cambia el pago a "al recibir"
+ruta('POST', '/api/admin/pedidos/:id/pago', ({ req, params, body }) => {
+  requiereRol(req, 'admin');
+  const p = db.prepare('SELECT * FROM pedidos_empresa WHERE id = ?').get(Number(params.id)) || falla(404, 'No encontramos ese pedido.');
+  if (p.estado !== 'confirmado') falla(400, 'Este pedido ya salió.');
+  if (body.accion === 'transferencia_ok') db.prepare("UPDATE pedidos_empresa SET transferencia_ok = datetime('now') WHERE id = ?").run(p.id);
+  else if (body.accion === 'efectivo') db.prepare("UPDATE pedidos_empresa SET metodo_pago = 'efectivo', transferencia_ok = NULL WHERE id = ?").run(p.id);
+  else falla(400, 'Acción no válida.');
+  return { ok: true };
+});
+// Confirmar las rutas: se crean los envíos (con el mismo código del pedido) y se ofrecen a los pilotos
+ruta('POST', '/api/admin/lotes-empresa/:id/confirmar', ({ req, params, body }) => {
+  const quien = requiereStaff(req);
+  const l = loteParaPanel(params.id);
+  if (l.estado !== 'nuevo') falla(400, 'Este envío ya tiene sus rutas.');
+  if (l.dia > hoyGT()) falla(400, `Las rutas se asignan el mismo día de la entrega (${fechaLarga(l.dia)}).`);
+  if (l.recogida === 'sede' && !l.recibido_en) falla(400, 'Primero marca que los paquetes llegaron a la sede.');
+  const origen = origenLote(l) || falla(400, 'Falta el punto de recogida.');
+  const modo = MODOS_LOTE[body.modo] ? body.modo : falla(400, 'Elige cómo se reparte.');
+  const pedidos = db.prepare("SELECT * FROM pedidos_empresa WHERE lote_id = ? AND estado = 'confirmado'").all(l.id);
+  const porId = new Map(pedidos.map((p) => [p.id, p]));
+  const esPickup = modo === 'pickup';
+  if (!esPickup && pedidos.some((p) => p.tamano === 'grande')) falla(400, 'Hay paquetes grandes: solo se pueden mandar en pickup.');
+  const pagaEmpresa = esPickup && l.paga === 'empresa';
+  if (!pagaEmpresa) {
+    const sinPago = pedidos.filter((p) => p.metodo_pago === 'transferencia' && !p.transferencia_ok);
+    if (sinPago.length) falla(400, `Falta confirmar la transferencia de: ${sinPago.map((p) => p.codigo).join(', ')}. Márcala recibida o cámbiala a pago al recibir.`);
+  }
+  let rutas = Array.isArray(body.rutas) ? body.rutas : [];
+  if (modo === 'un_paquete' && !rutas.length) rutas = pedidos.map((p) => ({ pedidos: [p.id] }));
+  if (esPickup && rutas.length !== 1) falla(400, 'En pickup va una sola ruta con todos los pedidos.');
+  const usados = new Set();
+  for (const r of rutas) {
+    if (!Array.isArray(r.pedidos) || !r.pedidos.length) falla(400, 'Hay una ruta vacía.');
+    for (const id of r.pedidos) { if (!porId.has(Number(id)) || usados.has(Number(id))) falla(400, 'Las rutas no coinciden con los pedidos de este envío. Vuelve a calcular.'); usados.add(Number(id)); }
+  }
+  if (usados.size !== pedidos.length) falla(400, 'Falta poner algunos pedidos en una ruta.');
+  const vehiculo = esPickup ? vehiculoPickup() : vehiculoMoto();
+  if (!vehiculo) falla(400, 'No hay vehículo configurado para este tipo de envío.');
+  // Pilotos elegidos: aprobados, al día y con el vehículo correcto
+  const pilotos = rutas.map((r) => {
+    if (r.piloto_id === '' || r.piloto_id == null) return null;
+    const m = pilotoPorId(numero(r.piloto_id));
+    if (!m || !puedeTrabajar(m)) falla(400, 'Uno de los pilotos elegidos no puede trabajar ahora (documentos, política o efectivo pendiente).');
+    if (m.vehiculo_id !== vehiculo.id) falla(400, `${m.nombre.split(' ')[0]} no tiene ${vehiculo.nombre.toLowerCase()}.`);
+    return m;
+  });
+  if (esPickup && !pilotos[0]) falla(400, 'Elige el piloto del pickup.');
+  let precioTotal = 0, metodoEmpresa = null;
+  if (pagaEmpresa) {
+    precioTotal = redondear(numero(body.pickup_precio));
+    if (!(precioTotal > 0)) falla(400, 'Escribe el precio que se acordó con la empresa por WhatsApp.');
+    metodoEmpresa = body.pickup_metodo === 'transferencia' ? 'transferencia' : 'efectivo';
+    if (metodoEmpresa === 'transferencia' && body.pickup_pagado !== true) falla(400, 'Marca que ya llegó la transferencia de la empresa antes de asignar el piloto.');
+  }
+  const emp = db.prepare('SELECT * FROM usuarios WHERE id = ?').get(l.usuario_id);
+  const programado = l.dia > hoyGT() ? new Date(Date.parse(l.dia + 'T07:00:00Z') + 6 * 3600_000).toISOString().slice(0, 19).replace('T', ' ') : null;
+  const totalEnvios = pedidos.length;
+  const partes = pagaEmpresa ? pedidos.map((_, i) => { const base = Math.floor((precioTotal / totalEnvios) * 100) / 100; return i === 0 ? redondear(precioTotal - base * (totalEnvios - 1)) : base; }) : null;
+  let iParte = 0;
+  const creados = [];
+  db.exec('BEGIN');
+  try {
+    rutas.forEach((r, ri) => {
+      const grupo = r.pedidos.length > 1 ? `R${l.id}-${ri + 1}-${crypto.randomBytes(3).toString('hex')}` : null;
+      const ordenados = r.pedidos.map((id) => porId.get(Number(id)));
+      ordenados.forEach((p, i) => {
+        const precio = pagaEmpresa ? partes[iParte++] : precioPedido(p).precio;
+        const metodo = pagaEmpresa ? metodoEmpresa : p.metodo_pago === 'transferencia' ? 'transferencia' : 'recibe';
+        const pagoEstado = metodo === 'transferencia' ? 'verificado' : null;
+        const piloto = pilotos[ri];
+        const res = db.prepare(`INSERT INTO envios (guia, usuario_id, vehiculo_id, peso, descripcion, origen_direccion, origen_zona, origen_telefono, origen_lat, origen_lng, origen_quien, origen_nombre, origen_ubic_fecha,
+            destino_nombre, destino_telefono, destino_direccion, destino_zona, destino_lat, destino_lng, tipo_tarifa, precio, precio_base, metodo_pago, cobro_destinatario, notas,
+            codigo_entrega, programado_para, receptor_token, receptor_nombre, receptor_confirmado_en, receptor_lat, receptor_lng, receptor_ubic_fecha, pago_estado, paquetes,
+            foto_paquete, pedido_id, lote_empresa_id, parada, tamano, horario, grupo, cobro_en_recogida, mensajero_id, asignacion, asignado_en, asignado_por, precio_d_lat, precio_d_lng)
+          VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, 'zona', ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${piloto ? "datetime('now')" : 'NULL'}, ?, ?, ?)`).run(
+          p.codigo, l.usuario_id, vehiculo.id, p.descripcion, l.origen_direccion || '', l.recogida === 'sede' ? (zonaDePunto(origen) || OTRA_ZONA) : (emp.empresa_zona || zonaDePunto(origen) || OTRA_ZONA),
+          emp.telefono || '', origen.lat, origen.lng, l.recogida === 'sede' ? 'sede' : 'cliente', l.recogida === 'sede' ? 'Sede Vaelo' : (emp.empresa_nombre || emp.nombre),
+          p.recibe_nombre, p.recibe_telefono, p.direccion, p.zona, p.lat, p.lng, precio, precio, metodo, [p.referencias, `Cliente de ${emp.empresa_nombre || emp.nombre}`].filter(Boolean).join('. '),
+          String(crypto.randomInt(1000, 10000)), programado, crypto.randomBytes(16).toString('hex'), p.recibe_nombre, p.confirmado_en, p.lat, p.lng, p.confirmado_en, pagoEstado,
+          p.foto, p.id, l.id, grupo ? i + 1 : null, p.tamano, p.horario, grupo, pagaEmpresa && metodoEmpresa === 'efectivo' ? precioTotal : null,
+          piloto ? piloto.id : null, piloto ? 'por_aceptar' : null, piloto ? 'oficina' : null, p.lat, p.lng);
+        const id = Number(res.lastInsertRowid);
+        db.prepare("UPDATE pedidos_empresa SET estado = 'enviado', envio_id = ?, actualizado = datetime('now') WHERE id = ?").run(id, p.id);
+        db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(id, 'pendiente', `Pedido de ${emp.empresa_nombre || emp.nombre}${grupo ? `, parada ${i + 1} de ${ordenados.length}` : ''}${piloto ? `. Asignado a ${piloto.nombre.split(' ')[0]}, esperando que acepte` : ''} (${quien.nombre.split(' ')[0]})`);
+        creados.push({ id, ruta: ri, piloto });
+      });
+    });
+    db.prepare("UPDATE lotes_empresa SET estado = 'en_ruta', modo = ?, pickup_precio = ?, pickup_metodo = ?, confirmado_por = ?, confirmado_en = datetime('now') WHERE id = ?")
+      .run(modo, pagaEmpresa ? precioTotal : null, metodoEmpresa, quien.nombre.split(' ')[0], l.id);
+    db.exec('COMMIT');
+  } catch (err) { db.exec('ROLLBACK'); throw err; }
+  // Aviso al piloto de cada ruta (uno por ruta)
+  const avisadas = new Set();
+  for (const c of creados) if (c.piloto && !avisadas.has(c.ruta)) { avisadas.add(c.ruta); avisarEnvio(c.id, 'asignado'); }
+  avisar(l.usuario_id, { titulo: 'Vaelo preparó tus rutas', cuerpo: `${pedidos.length} pedidos en ${rutas.length} ruta(s). Te avisamos cuando cada piloto acepte.`, url: '/mi-cuenta?empresa=1', etiqueta: 'lote-emp-' + l.id });
+  return { ok: true, envios: creados.length, rutas: rutas.length };
+});
+
+// ---------- Piloto: recoger toda la ruta (marcando o escaneando cada paquete) ----------
+ruta('POST', '/api/piloto/ruta/:grupo/recoger', ({ req, params, body }) => {
+  const p = requierePilotoTrabajando(req);
+  const grupo = String(params.grupo || '');
+  const c = leerPosicion(body, true);
+  const ids = new Set((Array.isArray(body.ids) ? body.ids : []).map(Number));
+  const lista = db.prepare("SELECT * FROM envios WHERE grupo = ? AND mensajero_id = ? AND asignacion = 'aceptado' AND estado = 'pendiente' ORDER BY parada").all(grupo, p.id);
+  if (!lista.length) falla(400, 'No tienes paquetes por recoger en esta ruta.');
+  const marcar = lista.filter((e) => ids.has(e.id));
+  if (!marcar.length) falla(400, 'Marca o escanea los paquetes que recibiste.');
+  if (marcar[0].origen_lat != null) {
+    const km = distanciaRecta(c, { lat: marcar[0].origen_lat, lng: marcar[0].origen_lng });
+    if (km > 0.5) falla(400, `Estás a ${km.toFixed(1)} km del punto de recogida. Márcalo cuando estés ahí.`);
+  }
+  registrarUbicacion(p, c, numero(body.precision), true);
+  for (const e of marcar) cambiarEstado(e.id, 'recogido', 'Paquete recogido', c.lat, c.lng);
+  // Al tener todo, a la primera parada le llega "eres la próxima entrega"
+  if (marcar.length === lista.length) avisarSiguienteParada({ ...marcar[0], destino_lat: null, destino_lng: null });
+  return { ok: true, recogidos: marcar.length, faltan: lista.length - marcar.length };
+});
+
+// ---------- Sueldo de cada piloto: lo que ganó menos el efectivo que trae ----------
+const ULTIMO_PAGO = (pid) => db.prepare('SELECT creado FROM cuentas_piloto WHERE piloto_id = ? ORDER BY id DESC LIMIT 1').get(pid)?.creado
+  || db.prepare('SELECT MAX(creado) AS c FROM pagos_piloto WHERE piloto_id = ?').get(pid)?.c || null;
+const FRECUENCIAS = { diaria: { nombre: 'Cada día', dias: 1 }, semanal: { nombre: 'Cada semana', dias: 7 }, quincenal: { nombre: 'Cada quincena', dias: 15 } };
+function cuentaPiloto(pid) {
+  const filas = db.prepare(`SELECT e.id, e.guia, e.estado, e.destino_zona, e.piloto_cerro_en, e.metodo_pago, e.precio, e.cargos_extra, e.ganancia_piloto, e.pago_piloto_id, e.liquidado_id, ${SQL_EFECTIVO} AS efectivo
+    FROM envios e WHERE e.mensajero_id = ? AND e.piloto_cerro_en IS NOT NULL AND (e.pago_piloto_id IS NULL OR (e.liquidado_id IS NULL AND ${SQL_EFECTIVO} > 0)) ORDER BY e.piloto_cerro_en`).all(pid);
+  const ganancia = redondear(filas.filter((e) => !e.pago_piloto_id).reduce((t, e) => t + (e.ganancia_piloto || 0), 0));
+  const efectivo = redondear(filas.filter((e) => !e.liquidado_id).reduce((t, e) => t + (e.efectivo || 0), 0));
+  const transferencias = redondear(filas.filter((e) => !e.pago_piloto_id && e.metodo_pago === 'transferencia' && e.estado !== 'cancelado').reduce((t, e) => t + e.precio + (e.cargos_extra || 0), 0));
+  const desc = descuentosPiloto(pid), descuentos = redondear(desc.reduce((t, x) => t + x.monto_piloto, 0));
+  const neto = redondear(ganancia - descuentos - efectivo);
+  const u = db.prepare('SELECT frecuencia_pago FROM usuarios WHERE id = ?').get(pid) || {};
+  const frecuencia = FRECUENCIAS[u.frecuencia_pago] ? u.frecuencia_pago : 'diaria';
+  const ultimo = ULTIMO_PAGO(pid);
+  const primero = filas[0]?.piloto_cerro_en || null;
+  const desdeMs = ultimo ? fechaMs(ultimo) : (primero ? fechaMs(primero) : Date.now());
+  const dias = Math.floor((Date.now() - desdeMs) / 86400_000);
+  const hay = filas.length > 0;
+  const leToca = hay && (frecuencia === 'diaria' || neto < 0 || dias >= FRECUENCIAS[frecuencia].dias);
+  const hoy = hoyGT();
+  const deHoy = filas.filter((e) => new Date(fechaMs(e.piloto_cerro_en) - 6 * 3600_000).toISOString().slice(0, 10) === hoy);
+  return { envios: filas.length, entregas: filas.filter((e) => e.estado === 'entregado').length, ganancia, efectivo, transferencias, descuentos, descuentos_detalle: desc, neto,
+    frecuencia, frecuencia_texto: FRECUENCIAS[frecuencia].nombre, ultimo_pago: ultimo, dias_desde: dias, le_toca: leToca,
+    hoy: { envios: deHoy.length, ganancia: redondear(deHoy.reduce((t, e) => t + (e.ganancia_piloto || 0), 0)), efectivo: redondear(deHoy.reduce((t, e) => t + (e.efectivo || 0), 0)) },
+    detalle: filas.map((e) => ({ id: e.id, guia: e.guia, estado: e.estado, destino_zona: e.destino_zona, piloto_cerro_en: e.piloto_cerro_en, metodo_pago: e.metodo_pago,
+      ganancia: e.pago_piloto_id ? 0 : (e.ganancia_piloto || 0), efectivo: e.liquidado_id ? 0 : (e.efectivo || 0) })) };
+}
+ruta('GET', '/api/admin/sueldos', ({ req }) => {
+  requiereRol(req, 'admin');
+  const pilotos = db.prepare("SELECT id, nombre, telefono, foto_perfil IS NOT NULL AS tiene_foto, veh_placa FROM usuarios WHERE rol = 'mensajero' AND estado_piloto IN ('aprobado','suspendido') ORDER BY nombre").all()
+    .map((p) => ({ ...p, ...cuentaPiloto(p.id), deuda: deudaVencida(p.id) }));
+  const conCuenta = pilotos.filter((p) => p.envios || p.descuentos);
+  return { pilotos: conCuenta, sin_cuenta: pilotos.length - conCuenta.length, total_pagar: redondear(conCuenta.reduce((t, p) => t + Math.max(0, p.neto), 0)),
+    total_recibir: redondear(conCuenta.reduce((t, p) => t + Math.max(0, -p.neto), 0)), frecuencias: FRECUENCIAS };
+});
+ruta('GET', '/api/admin/sueldos/:id', ({ req, params }) => {
+  requiereRol(req, 'admin');
+  const p = db.prepare("SELECT id, nombre, telefono, veh_placa FROM usuarios WHERE id = ? AND rol = 'mensajero'").get(Number(params.id)) || falla(404, 'No encontramos ese piloto.');
+  return { piloto: p, cuenta: cuentaPiloto(p.id), historial: db.prepare('SELECT * FROM cuentas_piloto WHERE piloto_id = ? ORDER BY id DESC LIMIT 30').all(p.id) };
+});
+// "Ya fue pagado": se cierra la cuenta (efectivo recibido y ganancia pagada) en un solo paso
+ruta('POST', '/api/admin/sueldos/:id/pagado', ({ req, params, body }) => {
+  const quien = requiereRol(req, 'admin');
+  const pid = Number(params.id);
+  if (!db.prepare("SELECT 1 FROM usuarios WHERE id = ? AND rol = 'mensajero'").get(pid)) falla(404, 'No encontramos ese piloto.');
+  const c = cuentaPiloto(pid);
+  if (!c.envios && !c.descuentos) falla(400, 'Este piloto no tiene nada pendiente.');
+  if (body.neto !== undefined && redondear(numero(body.neto)) !== c.neto) falla(409, 'La cuenta cambió mientras la veías (entró otro envío). Revísala de nuevo.');
+  const nota = texto(body.nota, 300);
+  let cuentaId;
+  db.exec('BEGIN');
+  try {
+    let liq = null, pago = null;
+    const conEfectivo = db.prepare(`SELECT e.id, ${SQL_EFECTIVO} AS efectivo FROM envios e WHERE e.mensajero_id = ? AND e.piloto_cerro_en IS NOT NULL AND e.liquidado_id IS NULL AND ${SQL_EFECTIVO} > 0`).all(pid);
+    if (conEfectivo.length) {
+      const esperado = redondear(conEfectivo.reduce((t, x) => t + x.efectivo, 0));
+      liq = Number(db.prepare('INSERT INTO liquidaciones (piloto_id, esperado, recibido, envios, nota) VALUES (?, ?, ?, ?, ?)').run(pid, esperado, esperado, conEfectivo.length, 'Cuenta cerrada: ' + (nota || 'pagado')).lastInsertRowid);
+      for (const x of conEfectivo) db.prepare('UPDATE envios SET liquidado_id = ? WHERE id = ?').run(liq, x.id);
+    }
+    const porPagar = db.prepare('SELECT id FROM envios WHERE mensajero_id = ? AND piloto_cerro_en IS NOT NULL AND pago_piloto_id IS NULL').all(pid);
+    if (porPagar.length || c.descuentos) {
+      pago = Number(db.prepare('INSERT INTO pagos_piloto (piloto_id, monto, envios, nota) VALUES (?, ?, ?, ?)').run(pid, redondear(c.ganancia - c.descuentos), porPagar.length,
+        [`Cuenta cerrada. Neto ${c.neto >= 0 ? 'pagado al piloto' : 'entregado por el piloto'}: Q${Math.abs(c.neto).toFixed(2)}`, c.descuentos ? `Descuento por reclamos: Q${c.descuentos.toFixed(2)}` : '', nota].filter(Boolean).join('. ')).lastInsertRowid);
+      for (const x of porPagar) db.prepare('UPDATE envios SET pago_piloto_id = ? WHERE id = ?').run(pago, x.id);
+      for (const x of c.descuentos_detalle) db.prepare('UPDATE reclamos SET descontado_pago_id = ? WHERE id = ?').run(pago, x.id);
+    }
+    cuentaId = Number(db.prepare(`INSERT INTO cuentas_piloto (piloto_id, envios, ganancia, descuentos, efectivo, transferencias, neto, liquidacion_id, pago_id, cerrado_por, nota)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(pid, c.envios, c.ganancia, c.descuentos, c.efectivo, c.transferencias, c.neto, liq, pago, quien.nombre.split(' ')[0], nota || null).lastInsertRowid);
+    db.exec('COMMIT');
+  } catch (err) { db.exec('ROLLBACK'); throw err; }
+  avisar(pid, { titulo: 'Cuenta cerrada', cuerpo: c.neto >= 0 ? `Vaelo te pagó Q${c.neto.toFixed(2)} por ${c.envios} envío(s).` : `Entregaste Q${(-c.neto).toFixed(2)} de efectivo. Cuenta al día.`, url: RUTA_PILOTO + '?pestana=ganancias' });
+  return { ok: true, id: cuentaId, neto: c.neto };
+});
+ruta('PUT', '/api/piloto/frecuencia', ({ req, body }) => {
+  const p = requierePiloto(req);
+  if (!FRECUENCIAS[body.frecuencia]) falla(400, 'Elige cada día, cada semana o cada quincena.');
+  db.prepare('UPDATE usuarios SET frecuencia_pago = ? WHERE id = ?').run(body.frecuencia, p.id);
+  return { ok: true };
+});
+
+// ---------- Cierre del día (botón) y reportes en Excel ----------
+const DIR_REPORTES = path.join(DATA_DIR, 'reportes');
+const utcAhora = () => db.prepare("SELECT datetime('now') AS t").get().t;
+const diaJornada = (utc) => new Date(fechaMs(utc) - 6 * 3600_000 - 5 * 3600_000).toISOString().slice(0, 10);   // el día empieza a las 5 a. m.
+function inicioJornada() {
+  return db.prepare('SELECT hasta FROM cierres ORDER BY id DESC LIMIT 1').get()?.hasta
+    || db.prepare("SELECT datetime(MIN(creado)) AS t FROM envios").get()?.t || db.prepare("SELECT datetime('now', '-1 day') AS t").get().t;
+}
+function datosPeriodo(desde, hasta) {
+  const rango = (col) => `${col} >= ? AND ${col} < ?`;
+  const envios = db.prepare(`${SQL_ENVIO} WHERE (${rango('e.creado')}) OR (${rango('e.piloto_cerro_en')}) ORDER BY e.id`).all(desde, hasta, desde, hasta);
+  const hechos = envios.filter((e) => e.piloto_cerro_en && e.piloto_cerro_en >= desde && e.piloto_cerro_en < hasta);
+  const ingresos = redondear(hechos.filter((e) => e.estado !== 'cancelado').reduce((t, e) => t + e.precio + (e.cargos_extra || 0), 0));
+  const ganancias = redondear(hechos.reduce((t, e) => t + (e.ganancia_piloto || 0), 0));
+  const cuentas = db.prepare(`SELECT c.*, u.nombre FROM cuentas_piloto c JOIN usuarios u ON u.id = c.piloto_id WHERE ${rango('c.creado')} ORDER BY c.id`).all(desde, hasta);
+  const liquidaciones = db.prepare(`SELECT l.*, u.nombre FROM liquidaciones l JOIN usuarios u ON u.id = l.piloto_id WHERE ${rango('l.creado')} ORDER BY l.id`).all(desde, hasta);
+  const pagos = db.prepare(`SELECT p.*, u.nombre FROM pagos_piloto p JOIN usuarios u ON u.id = p.piloto_id WHERE ${rango('p.creado')} ORDER BY p.id`).all(desde, hasta);
+  const porPiloto = {};
+  for (const e of hechos) if (e.mensajero_id) {
+    const k = e.mensajero_id;
+    porPiloto[k] = porPiloto[k] || { nombre: e.mensajero_nombre, entregas: 0, fallidos: 0, ganancia: 0, efectivo: 0, transferencias: 0 };
+    if (e.estado === 'entregado') porPiloto[k].entregas++; else porPiloto[k].fallidos++;
+    porPiloto[k].ganancia += e.ganancia_piloto || 0;
+    if (e.metodo_pago === 'transferencia') porPiloto[k].transferencias += e.precio + (e.cargos_extra || 0);
+  }
+  for (const e of db.prepare(`SELECT e.mensajero_id, ${SQL_EFECTIVO} AS ef FROM envios e WHERE e.mensajero_id IS NOT NULL AND ${rango('e.piloto_cerro_en')}`).all(desde, hasta)) if (porPiloto[e.mensajero_id]) porPiloto[e.mensajero_id].efectivo += e.ef || 0;
+  const empresas = db.prepare(`SELECT COALESCE(u.empresa_nombre, u.nombre) AS empresa, COUNT(*) AS pedidos, SUM(e.estado = 'entregado') AS entregados, SUM(e.estado IN ('fallido','a_sede','en_sede')) AS sede
+    FROM envios e JOIN usuarios u ON u.id = e.usuario_id WHERE e.pedido_id IS NOT NULL AND ((${rango('e.creado')}) OR (${rango('e.piloto_cerro_en')})) GROUP BY u.id ORDER BY pedidos DESC`).all(desde, hasta, desde, hasta);
+  const resumen = {
+    desde, hasta, creados: envios.filter((e) => e.creado >= desde && e.creado < hasta).length, entregados: hechos.filter((e) => e.estado === 'entregado').length,
+    no_entregados: hechos.filter((e) => !['entregado', 'cancelado'].includes(e.estado)).length, cancelados: envios.filter((e) => e.estado === 'cancelado' && e.actualizado >= desde && e.actualizado < hasta).length,
+    ingresos, ganancias_pilotos: ganancias, vaelo: redondear(ingresos - ganancias),
+    efectivo_recibido: redondear(liquidaciones.reduce((t, l) => t + l.recibido, 0)), pagado_pilotos: redondear(pagos.reduce((t, p) => t + p.monto, 0)),
+    transferencias: redondear(hechos.filter((e) => e.metodo_pago === 'transferencia' && e.estado !== 'cancelado').reduce((t, e) => t + e.precio + (e.cargos_extra || 0), 0)),
+    cuentas_cerradas: cuentas.length, pedidos_empresa: empresas.reduce((t, x) => t + x.pedidos, 0),
+  };
+  return { resumen, envios, hechos, cuentas, pilotos: Object.values(porPiloto), empresas };
+}
+const fechaGT = (utc) => utc ? new Date(fechaMs(utc) - 6 * 3600_000).toISOString().slice(0, 16).replace('T', ' ') : '';
+const ESTADO_TEXTO = { pendiente: 'Pendiente', recogido: 'Recogido', en_camino: 'En camino', entregado: 'Entregado', fallido: 'No entregado', devolviendo: 'Devolviendo', devuelto: 'Devuelto', a_sede: 'Va a la sede', en_sede: 'En la sede', reenviado: 'Reenviado', cancelado: 'Cancelado' };
+function excelPeriodo(titulo, d) {
+  const r = d.resumen;
+  const tot = (lista, i) => redondear(lista.reduce((t, f) => t + (Number(f[i]) || 0), 0));
+  const filasPil = d.pilotos.map((p) => [p.nombre, p.entregas, p.fallidos, redondear(p.ganancia), redondear(p.efectivo), redondear(p.transferencias), redondear(p.ganancia - p.efectivo)]);
+  const filasCuentas = d.cuentas.map((c) => [fechaGT(c.creado), c.nombre, c.envios, c.ganancia, c.descuentos, c.efectivo, c.neto, c.cerrado_por, c.nota || '']);
+  return crearExcel([
+    { nombre: 'Resumen', titulo, columnas: [{ titulo: 'Concepto', ancho: 36 }, { titulo: 'Valor', ancho: 18, tipo: 'numero' }],
+      filas: [['Desde', fechaGT(r.desde)], ['Hasta', fechaGT(r.hasta)], ['Envíos creados', r.creados], ['Entregados', r.entregados], ['No entregados (sede o devolución)', r.no_entregados],
+        ['Cancelados', r.cancelados], ['Pedidos de empresas', r.pedidos_empresa], ['Ingresos por envíos (Q)', r.ingresos], ['Ganancia de pilotos (Q)', r.ganancias_pilotos], ['Para Vaelo (Q)', r.vaelo],
+        ['Efectivo recibido de pilotos (Q)', r.efectivo_recibido], ['Pagado a pilotos (Q)', r.pagado_pilotos], ['Cobrado por transferencia (Q)', r.transferencias], ['Cuentas de pilotos cerradas', r.cuentas_cerradas]] },
+    { nombre: 'Envíos', columnas: [{ titulo: 'Guía', ancho: 14 }, { titulo: 'Creado', ancho: 17 }, { titulo: 'Terminado', ancho: 17 }, { titulo: 'Cliente', ancho: 24 }, { titulo: 'Recibe', ancho: 22 },
+      { titulo: 'Zona', ancho: 14 }, { titulo: 'Vehículo', ancho: 10 }, { titulo: 'Piloto', ancho: 20 }, { titulo: 'Estado', ancho: 14 }, { titulo: 'Pago', ancho: 14 },
+      { titulo: 'Precio', tipo: 'dinero', ancho: 11 }, { titulo: 'Cargos', tipo: 'dinero', ancho: 10 }, { titulo: 'Gana piloto', tipo: 'dinero', ancho: 12 }],
+      filas: d.envios.map((e) => [e.guia, fechaGT(e.creado), fechaGT(e.piloto_cerro_en), e.pedido_id ? `${e.cliente_nombre} (empresa)` : e.cliente_nombre, e.destino_nombre, e.destino_zona, e.vehiculo,
+        e.mensajero_nombre || '', ESTADO_TEXTO[e.estado] || e.estado, { efectivo: 'Efectivo', transferencia: 'Transferencia', recibe: 'Paga quien recibe', credito: 'Crédito' }[e.metodo_pago] || e.metodo_pago,
+        e.precio, e.cargos_extra || 0, e.ganancia_piloto ?? '']) },
+    { nombre: 'Pilotos y sueldos', columnas: [{ titulo: 'Piloto', ancho: 24 }, { titulo: 'Entregas', tipo: 'numero' }, { titulo: 'No entregados', tipo: 'numero' }, { titulo: 'Ganó', tipo: 'dinero' },
+      { titulo: 'Efectivo cobrado', tipo: 'dinero' }, { titulo: 'Transferencias', tipo: 'dinero' }, { titulo: 'Neto (+ Vaelo paga / − piloto entrega)', tipo: 'dinero', ancho: 34 }],
+      filas: filasPil, total: filasPil.length ? ['Total', tot(filasPil, 1), tot(filasPil, 2), tot(filasPil, 3), tot(filasPil, 4), tot(filasPil, 5), tot(filasPil, 6)] : null },
+    { nombre: 'Cuentas cerradas', columnas: [{ titulo: 'Fecha', ancho: 17 }, { titulo: 'Piloto', ancho: 24 }, { titulo: 'Envíos', tipo: 'numero' }, { titulo: 'Ganancia', tipo: 'dinero' },
+      { titulo: 'Descuentos', tipo: 'dinero' }, { titulo: 'Efectivo', tipo: 'dinero' }, { titulo: 'Neto', tipo: 'dinero' }, { titulo: 'Cerró', ancho: 12 }, { titulo: 'Nota', ancho: 30 }],
+      filas: filasCuentas, total: filasCuentas.length ? ['Total', '', tot(filasCuentas, 2), tot(filasCuentas, 3), tot(filasCuentas, 4), tot(filasCuentas, 5), tot(filasCuentas, 6), '', ''] : null },
+    { nombre: 'Empresas', columnas: [{ titulo: 'Empresa', ancho: 30 }, { titulo: 'Pedidos', tipo: 'numero' }, { titulo: 'Entregados', tipo: 'numero' }, { titulo: 'En sede', tipo: 'numero' }],
+      filas: d.empresas.map((x) => [x.empresa, x.pedidos, x.entregados || 0, x.sede || 0]) },
+  ]);
+}
+ruta('GET', '/api/admin/cierres', ({ req }) => {
+  requiereRol(req, 'admin');
+  const desde = inicioJornada(), ahora = utcAhora();
+  const d = datosPeriodo(desde, ahora);
+  const horas = Math.round((Date.now() - fechaMs(desde)) / 3600_000);
+  return { jornada: { desde, horas, dia: diaJornada(ahora), resumen: d.resumen, pendiente_cerrar: horas >= 20 },
+    cierres: db.prepare('SELECT id, desde, hasta, dia, resumen, cerrado_por, creado FROM cierres ORDER BY id DESC LIMIT 60').all().map((c) => ({ ...c, resumen: JSON.parse(c.resumen) })) };
+});
+ruta('POST', '/api/admin/cierres', ({ req, body }) => {
+  const quien = requiereRol(req, 'admin');
+  const desde = inicioJornada(), hasta = utcAhora();
+  if (db.prepare('SELECT 1 FROM cierres LIMIT 1').get() && fechaMs(hasta) - fechaMs(desde) < 60_000) falla(400, 'El día se acaba de cerrar.');
+  const dia = diaJornada(hasta);
+  const d = datosPeriodo(desde, hasta);
+  const buf = excelPeriodo(`Vaelo · cierre del ${fechaLarga(dia)}`, d);
+  fs.mkdirSync(DIR_REPORTES, { recursive: true, mode: 0o750 });
+  const archivo = `cierre-${dia}-${crypto.randomBytes(4).toString('hex')}.xlsx`;
+  fs.writeFileSync(path.join(DIR_REPORTES, archivo), buf, { mode: 0o640 });
+  const id = Number(db.prepare('INSERT INTO cierres (desde, hasta, dia, resumen, archivo, cerrado_por) VALUES (?, ?, ?, ?, ?, ?)').run(desde, hasta, dia, JSON.stringify({ ...d.resumen, nota: texto(body.nota, 300) || null }), archivo, quien.nombre.split(' ')[0]).lastInsertRowid);
+  const r = d.resumen;
+  enviarCorreo(ADMIN_EMAIL, `Cierre del ${fechaLarga(dia)}`, correoVaelo(`Cierre del ${fechaLarga(dia)}`, [`${r.entregados} entregados, ${r.no_entregados} no entregados y ${r.creados} envíos nuevos.`,
+    `Ingresos Q${r.ingresos.toFixed(2)}; para Vaelo Q${r.vaelo.toFixed(2)}. Pagado a pilotos Q${r.pagado_pilotos.toFixed(2)}; efectivo recibido Q${r.efectivo_recibido.toFixed(2)}.`,
+    'El Excel del día está en el panel, en Reportes > Cierres del día.'], { texto: 'Abrir el panel', url: RUTA_ADMIN }), `Cierre del ${dia}`).catch(() => {});
+  return { _status: 201, ok: true, id, dia, resumen: d.resumen };
+});
+ruta('GET', '/api/admin/cierres/:id/excel', ({ req, res, params }) => {
+  requiereRol(req, 'admin');
+  const c = db.prepare('SELECT * FROM cierres WHERE id = ?').get(Number(params.id)) || falla(404, 'No encontramos ese cierre.');
+  let buf;
+  try { buf = fs.readFileSync(path.join(DIR_REPORTES, path.basename(c.archivo || ''))); } catch { buf = excelPeriodo(`Vaelo · cierre del ${fechaLarga(c.dia)}`, datosPeriodo(c.desde, c.hasta)); }
+  return enviarExcel(res, buf, `vaelo-cierre-${c.dia}.xlsx`);
+});
+// Semana, mes o año (siempre al día, calculado al pedirlo)
+ruta('GET', '/api/admin/reporte-excel', ({ req, res, query }) => {
+  requiereRol(req, 'admin');
+  const periodo = ['dia', 'semana', 'mes', 'anio'].includes(query.get('periodo')) ? query.get('periodo') : 'mes';
+  const f = /^\d{4}-\d{2}-\d{2}$/.test(query.get('fecha') || '') ? query.get('fecha') : hoyGT();
+  let ini = f, fin = sumarDias(f, 1), nombre = `día ${f}`;
+  if (periodo === 'semana') { const dow = (new Date(f + 'T12:00:00Z').getUTCDay() + 6) % 7; ini = sumarDias(f, -dow); fin = sumarDias(ini, 7); nombre = `semana del ${ini}`; }
+  if (periodo === 'mes') { ini = f.slice(0, 8) + '01'; fin = sumarMeses(ini, 1); nombre = `mes ${f.slice(0, 7)}`; }
+  if (periodo === 'anio') { ini = f.slice(0, 4) + '-01-01'; fin = (Number(f.slice(0, 4)) + 1) + '-01-01'; nombre = `año ${f.slice(0, 4)}`; }
+  // Días de Guatemala desde las 5 a. m. hasta las 5 a. m. del día siguiente (en hora UTC: +11 horas)
+  const aUtc = (dia) => new Date(Date.parse(dia + 'T05:00:00Z') + 6 * 3600_000).toISOString().slice(0, 19).replace('T', ' ');
+  const buf = excelPeriodo(`Vaelo · ${nombre}`, datosPeriodo(aUtc(ini), aUtc(fin)));
+  return enviarExcel(res, buf, `vaelo-${periodo}-${ini}.xlsx`);
+});
+
+// ---------- Buscador del panel: pilotos, envíos, pedidos, empresas y clientes ----------
+ruta('GET', '/api/admin/buscar', ({ req, query }) => {
+  const quien = requiereStaff(req);
+  const q = (query.get('q') || '').trim().slice(0, 60);
+  if (q.length < 2) return { pilotos: [], envios: [], pedidos: [], empresas: [], clientes: [] };
+  const like = `%${q}%`, tel = digitos(q), likeTel = tel.length >= 3 ? `%${tel}%` : '%__nada__%';
+  const codigo = q.toUpperCase().replace(/\s+/g, '');
+  const pilotos = db.prepare(`SELECT u.id, u.nombre, u.telefono, u.veh_placa, u.estado_piloto, u.foto_perfil IS NOT NULL AS tiene_foto, v.nombre AS vehiculo FROM usuarios u LEFT JOIN vehiculos v ON v.id = u.vehiculo_id
+    WHERE u.rol = 'mensajero' AND (u.nombre LIKE ? OR REPLACE(u.telefono, '-', '') LIKE ? OR u.veh_placa LIKE ? OR u.dpi LIKE ?) ORDER BY u.estado_piloto = 'aprobado' DESC, u.nombre LIMIT 6`).all(like, likeTel, like, likeTel)
+    .map((p) => { if (!esOperador(quien)) { const c = cuentaPiloto(p.id); p.neto = c.neto; p.pendiente = c.envios > 0; } return p; });
+  const envios = db.prepare(`SELECT e.id, e.guia, e.estado, e.destino_nombre, e.destino_zona, e.creado, u.nombre AS cliente, u.empresa_nombre, m.nombre AS piloto FROM envios e JOIN usuarios u ON u.id = e.usuario_id
+    LEFT JOIN usuarios m ON m.id = e.mensajero_id WHERE e.guia LIKE ? OR e.destino_nombre LIKE ? OR REPLACE(e.destino_telefono, '-', '') LIKE ? ORDER BY e.guia = ? DESC, e.id DESC LIMIT 8`).all(`%${codigo}%`, like, likeTel, codigo);
+  const pedidos = db.prepare(`SELECT p.id, p.codigo, p.estado, p.cliente_nombre, p.dia, p.usuario_id, COALESCE(u.empresa_nombre, u.nombre) AS empresa FROM pedidos_empresa p JOIN usuarios u ON u.id = p.usuario_id
+    WHERE p.envio_id IS NULL AND p.estado != 'cancelado' AND (p.codigo LIKE ? OR p.cliente_nombre LIKE ? OR REPLACE(p.cliente_telefono, '-', '') LIKE ?) ORDER BY p.id DESC LIMIT 6`).all(`%${codigo}%`, like, likeTel);
+  const empresas = db.prepare(`SELECT id, COALESCE(empresa_nombre, nombre) AS nombre, telefono FROM usuarios WHERE tipo_cuenta = 'empresa' AND rol = 'cliente' AND (empresa_nombre LIKE ? OR nombre LIKE ?) LIMIT 5`).all(like, like);
+  const clientes = db.prepare(`SELECT id, nombre, telefono, email FROM usuarios WHERE rol = 'cliente' AND COALESCE(tipo_cuenta, 'personal') != 'empresa' AND (nombre LIKE ? OR email LIKE ? OR REPLACE(telefono, '-', '') LIKE ?) LIMIT 5`).all(like, like, likeTel);
+  return { pilotos, envios, pedidos, empresas, clientes };
+});
+
 // ---------- Asignación automática al piloto más cercano ----------
 // Cada 10 segundos: si un piloto no acepta a tiempo pasa al siguiente; los envíos sin piloto se ofrecen al más cercano libre.
 function asignacionAutomatica() {
@@ -2976,13 +3945,13 @@ function asignacionAutomatica() {
   const excluidos = (e) => { try { return JSON.parse(e.excluidos || '[]'); } catch { return []; } };
   // 1) Se venció el tiempo para aceptar
   for (const e of db.prepare(`SELECT e.*, u.nombre AS piloto FROM envios e JOIN usuarios u ON u.id = e.mensajero_id
-      WHERE e.asignacion = 'por_aceptar' AND e.estado = 'pendiente' AND e.asignado_en < datetime('now', ?)`).all(`-${segundos} seconds`)) {
+      WHERE e.asignacion = 'por_aceptar' AND e.estado = 'pendiente' AND COALESCE(e.asignado_por, '') != 'oficina' AND e.asignado_en < datetime('now', ?)`).all(`-${segundos} seconds`)) {
     db.prepare('UPDATE envios SET mensajero_id = NULL, asignacion = NULL, excluidos = ? WHERE id = ?').run(JSON.stringify([...excluidos(e), e.mensajero_id]), e.id);
     db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(e.id, e.estado, `${e.piloto.split(' ')[0]} no respondió a tiempo. Buscando otro piloto`);
   }
   // 2) Envíos sin piloto (los programados, 30 minutos antes)
   const pendientes = db.prepare(`SELECT * FROM envios WHERE estado = 'pendiente' AND mensajero_id IS NULL AND origen_lat IS NOT NULL
-    AND (programado_para IS NULL OR programado_para <= datetime('now', '+30 minutes')) ORDER BY COALESCE(programado_para, creado) LIMIT 40`).all();
+    AND (programado_para IS NULL OR programado_para <= datetime('now', '+30 minutes')) ORDER BY pedido_id IS NULL, COALESCE(programado_para, creado), parada LIMIT 60`).all();
   if (exigeReceptor()) for (let i = pendientes.length - 1; i >= 0; i--) if (!receptorListo(pendientes[i])) pendientes.splice(i, 1);
   // Transferencias sin pago confirmado y paquetes de empresa que todavía no llegan a la sede: no se ofrecen a pilotos
   for (let i = pendientes.length - 1; i >= 0; i--) if (!listoParaPiloto(pendientes[i])) pendientes.splice(i, 1);
@@ -3034,7 +4003,7 @@ ruta('GET', '/api/admin/resumen', ({ req }) => {
   // Ingresos del mes por la fecha en que se hizo el viaje (no por la última vez que se modificó el envío)
   const mes = db.prepare(`SELECT SUM(e.estado = 'entregado') AS n, COALESCE(SUM(e.precio), 0) AS total FROM envios e
     WHERE ${SQL_VIAJE_HECHO} AND strftime('%Y-%m', COALESCE(e.piloto_cerro_en, e.entregado_en, e.actualizado), '-6 hours') = strftime('%Y-%m', 'now', '-6 hours')`).get();
-  const sinAsignar = db.prepare("SELECT COUNT(*) AS n FROM envios WHERE mensajero_id IS NULL AND estado = 'pendiente'").get().n;
+  const sinAsignar = db.prepare("SELECT COUNT(*) AS n FROM envios WHERE mensajero_id IS NULL AND estado = 'pendiente' AND pedido_id IS NULL").get().n;
   const clientes = db.prepare("SELECT COUNT(*) AS n FROM usuarios WHERE rol = 'cliente'").get().n;
   return { porEstado, hoy, sinAsignar, entregadosMes: mes.n || 0, ingresosMes: esOperador(quien) ? null : redondear(mes.total), clientes,
     rol: esOperador(quien) ? 'operador' : 'admin', nombre: quien.nombre };
@@ -3064,6 +4033,9 @@ ruta('GET', '/api/admin/envios', ({ req, query }) => {
   else if (estado === 'atencion') cond.push("e.estado IN ('fallido','devolviendo','a_sede','en_sede')");
   else if (estado && ESTADOS.includes(estado)) { cond.push('e.estado = ?'); args.push(estado); }
   const q = (query.get('q') || '').trim().slice(0, 100);
+  // Los pedidos de empresas viven en su pestaña; aquí solo con el filtro "De empresas" o al buscar
+  if (estado === 'empresas') cond.push('e.pedido_id IS NOT NULL');
+  else if (!q) cond.push('e.pedido_id IS NULL');
   if (q) {
     cond.push('(e.guia LIKE ? OR e.destino_nombre LIKE ? OR u.nombre LIKE ? OR e.destino_telefono LIKE ? OR u.telefono LIKE ?)');
     const like = `%${q}%`;
@@ -3267,7 +4239,7 @@ const VERSION_ARCHIVOS = Date.now().toString(36);
 // Si hay clave de Mapbox (se pone en el panel, Tarifas y ajustes), las páginas con mapa cargan Mapbox; si no, el mapa gratis
 const MAPBOX_VERSION = 'v3.8.0';
 function conVersion(html) {
-  let out = html.replace(/(\/js\/comun\.js|\/css\/styles\.css)\?v=[a-z0-9]+/g, `$1?v=${VERSION_ARCHIVOS}`);
+  let out = html.replace(/(\/js\/(?:comun|empresa|qr)\.js|\/css\/styles\.css)\?v=[a-z0-9]+/g, `$1?v=${VERSION_ARCHIVOS}`);
   const token = getAjustes().mapbox_token || process.env.MAPBOX_TOKEN || '';
   if (token && /^pk\.[A-Za-z0-9._-]+$/.test(token) && out.includes('/vendor/maplibre/maplibre-gl.js')) {
     out = out.replace(/(<link rel="stylesheet" href="\/vendor\/maplibre\/maplibre-gl\.css[^"]*">)/,
@@ -3360,6 +4332,7 @@ const servidor = http.createServer(async (req, res) => {
     // Página para quien recibe: /recibe/<clave>
     if (/^\/(recibe|entrega)\/[a-f0-9]{32}$/.test(limpia)) return servirEstatico(req, res, '/recibe.html');
     if (/^\/flete\/[a-f0-9]{32}$/.test(limpia)) return servirEstatico(req, res, '/flete.html');
+    if (/^\/pedido\/[a-f0-9]{32}$/.test(limpia)) return servirEstatico(req, res, '/pedido.html');
     if (PIDEN_CUENTA[limpia] && usuarioActual(req)?.rol === 'mensajero') return redirigir(res, RUTA_PILOTO);
     if (PIDEN_CUENTA[limpia]) {
       const u = usuarioActual(req);
