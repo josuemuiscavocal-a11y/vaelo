@@ -768,3 +768,27 @@ test('documentos por vencer: aviso al piloto 15, 7 y 1 día antes y al vencer, u
   assert.ok(db.prepare("SELECT 1 FROM avisos_vencimiento WHERE piloto_id = ? AND hito = 1").get(pilotoId));
   db.prepare('UPDATE usuarios SET licencia_vence = ? WHERE id = ?').run(en(400), pilotoId);
 });
+
+test('queja con compensación: descuento solo para ese cliente en su próximo envío; cupones por horas', async () => {
+  const e = { id: (await envioEnCamino()).id };
+  db.prepare("UPDATE envios SET estado = 'entregado', entregado_en = datetime('now'), piloto_cerro_en = COALESCE(piloto_cerro_en, datetime('now')), ganancia_piloto = COALESCE(ganancia_piloto, 30) WHERE id = ?").run(e.id);
+  assert.equal((await ana('POST', `/api/envios/${e.id}/reclamo`, { tipo: 'otro', descripcion: 'El piloto llegó dos horas tarde y fue grosero' })).status, 201);
+  const rec = (await admin('GET', '/api/admin/reclamos')).j.reclamos.find((x) => x.envio_id === e.id);
+  assert.equal((await admin('POST', `/api/admin/reclamos/${rec.id}`, { accion: 'aprobar', monto_cliente: 0, monto_piloto: 10, cupon_monto: 15, resolucion: 'Se confirmó el retraso con el GPS' })).status, 200);
+  const cot = { vehiculo_id: 1, peso: 2, origen_zona: 'Zona 1', destino_zona: 'Zona 1' };
+  const conCupon = (await ana('POST', '/api/cotizar', cot)).j;
+  assert.equal(conCupon.descuento, 15, JSON.stringify(conCupon));
+  const otro = cliente(); await otro('POST', '/api/login', { email: 'lucia@prueba.com', password: 'clave-lucia-123' });
+  assert.notEqual((await otro('POST', '/api/cotizar', cot)).j.descuento, 15, 'otro cliente no lo tiene');
+  assert.ok(!(await cliente()('GET', '/api/config')).j.promocion || !/Disculpa/.test((await cliente()('GET', '/api/config')).j.promocion.nombre));
+  db.prepare('DELETE FROM promociones WHERE reclamo_id = ?').run(rec.id);
+  // Cupón por horas: vale solo en su rango de hora
+  const ahora = new Date(Date.now() - 6 * 3600_000), hhmm = (d) => d.toISOString().slice(11, 16), dia = (d) => d.toISOString().slice(0, 10);
+  const antes = new Date(ahora.getTime() - 3 * 3600_000), desp = new Date(ahora.getTime() - 3600_000);
+  assert.equal((await admin('POST', '/api/admin/promociones', { nombre: 'Flash vencida', tipo: 'monto', valor: 7, desde: dia(antes), desde_hora: hhmm(antes), hasta: dia(desp), hasta_hora: hhmm(desp), codigo: 'FLASHX' })).status, 201);
+  assert.match((await ana('POST', '/api/cotizar', { ...cot, cupon: 'FLASHX' })).j.error_cupon || '', /venció/);
+  const fin = new Date(ahora.getTime() + 2 * 3600_000);
+  assert.equal((await admin('POST', '/api/admin/promociones', { nombre: 'Flash 2 horas', tipo: 'monto', valor: 7, desde: dia(antes), desde_hora: hhmm(antes), hasta: dia(fin), hasta_hora: hhmm(fin), codigo: 'FLASH2H' })).status, 201);
+  assert.equal((await ana('POST', '/api/cotizar', { ...cot, cupon: 'FLASH2H' })).j.descuento, 7);
+  db.prepare("UPDATE promociones SET activa = 0 WHERE codigo IN ('FLASHX','FLASH2H')").run();
+});

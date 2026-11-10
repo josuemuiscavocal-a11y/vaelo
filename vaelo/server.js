@@ -1860,7 +1860,10 @@ const gananciaPiloto = (precio) => {
 };
 
 // ---------- Descuentos y promociones ----------
-const promocionesVigentes = () => { const hoy = hoyGT(); return db.prepare('SELECT * FROM promociones WHERE activa = 1 AND desde <= ? AND hasta >= ? ORDER BY id').all(hoy, hoy); };
+// Fecha y hora de Guatemala "AAAA-MM-DD HH:MM" (las promociones pueden durar horas: inicio y fin con hora)
+const ahoraGT = () => new Date(Date.now() - 6 * 3600_000).toISOString().slice(0, 16).replace('T', ' ');
+const inicioPromo = (p) => `${p.desde} ${p.desde_hora || '00:00'}`, finPromo = (p) => `${p.hasta} ${p.hasta_hora || '23:59'}`;
+const promocionesVigentes = () => { const ahora = ahoraGT(); return db.prepare('SELECT * FROM promociones WHERE activa = 1 ORDER BY id').all().filter((p) => inicioPromo(p) <= ahora && finPromo(p) >= ahora); };
 function montoPromo(p, precio) {
   if (p.tipo === 'gratis') return precio;
   if (p.tipo === 'porcentaje') return redondear((precio * Math.min(100, p.valor)) / 100);
@@ -1873,6 +1876,7 @@ function mejorDescuento(precio, usuarioId, cupon) {
   const opciones = [];
   let cuponValido = !codigo, motivoCupon = '';
   for (const p of promocionesVigentes()) {
+    if (p.usuario_id && p.usuario_id !== u?.id) continue;   // cupón personal (compensación de un reclamo): solo para ese cliente
     const conCodigo = !!p.codigo;
     if (conCodigo && p.codigo.toUpperCase() !== codigo) continue;
     const motivo = (() => {
@@ -1896,7 +1900,7 @@ function mejorDescuento(precio, usuarioId, cupon) {
 }
 // Promoción automática que se anuncia en la página (la de mayor beneficio entre las que no piden código)
 function promocionAnunciada() {
-  const p = promocionesVigentes().filter((x) => !x.codigo && !x.solo_primer_envio)
+  const p = promocionesVigentes().filter((x) => !x.codigo && !x.solo_primer_envio && !x.usuario_id)
     .sort((a, b) => (b.tipo === 'gratis') - (a.tipo === 'gratis') || b.valor - a.valor)[0];
   return p ? { nombre: p.nombre, tipo: p.tipo, valor: p.valor, hasta: p.hasta } : null;
 }
@@ -2456,7 +2460,10 @@ function leerPromocion(body) {
   const codigo = texto(body.codigo, 30).toUpperCase().replace(/\s/g, '') || null;
   if (codigo && !/^[A-Z0-9-]{3,30}$/.test(codigo)) falla(400, 'El cupón solo puede tener letras, números y guiones (mínimo 3).');
   const entero = (v) => (v === '' || v == null ? null : Math.max(1, Math.round(numero(v))) || null);
-  return { nombre, tipo, valor, desde, hasta, codigo, solo_primer_envio: body.solo_primer_envio ? 1 : 0,
+  const hora = (v) => { const t = texto(v, 5); if (!t) return null; if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(t)) falla(400, 'Revisa la hora (formato 24 h, por ejemplo 18:00).'); return t; };
+  const desde_hora = hora(body.desde_hora), hasta_hora = hora(body.hasta_hora);
+  if (`${hasta} ${hasta_hora || '23:59'}` <= `${desde} ${desde_hora || '00:00'}`) falla(400, 'El fin debe ser después del inicio.');
+  return { nombre, tipo, valor, desde, hasta, desde_hora, hasta_hora, codigo, solo_primer_envio: body.solo_primer_envio ? 1 : 0,
     usos_max: entero(body.usos_max), usos_por_cliente: entero(body.usos_por_cliente), minimo: body.minimo ? numero(body.minimo) || null : null };
 }
 ruta('GET', '/api/admin/promociones', ({ req }) => {
@@ -2464,15 +2471,16 @@ ruta('GET', '/api/admin/promociones', ({ req }) => {
   const hoy = hoyGT();
   return { hoy, promociones: db.prepare(`SELECT p.*, (SELECT COUNT(*) FROM envios e WHERE e.promocion_id = p.id AND e.estado != 'cancelado') AS usos,
     (SELECT COALESCE(SUM(e.descuento), 0) FROM envios e WHERE e.promocion_id = p.id AND e.estado != 'cancelado') AS total_descontado
-    FROM promociones p ORDER BY p.hasta DESC, p.id DESC`).all().map((p) => ({ ...p,
-      estado: !p.activa ? 'pausada' : p.hasta < hoy ? 'terminada' : p.desde > hoy ? 'programada' : 'activa' })) };
+    FROM promociones p ORDER BY p.hasta DESC, p.id DESC`).all().map((p) => { const ahora = ahoraGT(); return { ...p,
+      cliente: p.usuario_id ? db.prepare('SELECT nombre FROM usuarios WHERE id = ?').get(p.usuario_id)?.nombre || null : null,
+      estado: !p.activa ? 'pausada' : finPromo(p) < ahora ? 'terminada' : inicioPromo(p) > ahora ? 'programada' : 'activa' }; }) };
 });
 ruta('POST', '/api/admin/promociones', ({ req, body }) => {
   requiereRol(req, 'admin');
   const p = leerPromocion(body);
   if (p.codigo && db.prepare('SELECT 1 FROM promociones WHERE codigo = ?').get(p.codigo)) falla(409, 'Ya existe una promoción con ese cupón.');
-  db.prepare(`INSERT INTO promociones (nombre, codigo, tipo, valor, desde, hasta, solo_primer_envio, usos_max, usos_por_cliente, minimo)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(p.nombre, p.codigo, p.tipo, p.valor, p.desde, p.hasta, p.solo_primer_envio, p.usos_max, p.usos_por_cliente, p.minimo);
+  db.prepare(`INSERT INTO promociones (nombre, codigo, tipo, valor, desde, hasta, desde_hora, hasta_hora, solo_primer_envio, usos_max, usos_por_cliente, minimo)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(p.nombre, p.codigo, p.tipo, p.valor, p.desde, p.hasta, p.desde_hora, p.hasta_hora, p.solo_primer_envio, p.usos_max, p.usos_por_cliente, p.minimo);
   return { _status: 201, ok: true };
 });
 ruta('PUT', '/api/admin/promociones/:id', ({ req, params, body }) => {
@@ -2482,8 +2490,8 @@ ruta('PUT', '/api/admin/promociones/:id', ({ req, params, body }) => {
   if (body.activa !== undefined && Object.keys(body).length === 1) { db.prepare('UPDATE promociones SET activa = ? WHERE id = ?').run(body.activa ? 1 : 0, actual.id); return { ok: true }; }
   const p = leerPromocion(body);
   if (p.codigo && db.prepare('SELECT 1 FROM promociones WHERE codigo = ? AND id != ?').get(p.codigo, actual.id)) falla(409, 'Ya existe una promoción con ese cupón.');
-  db.prepare(`UPDATE promociones SET nombre = ?, codigo = ?, tipo = ?, valor = ?, desde = ?, hasta = ?, solo_primer_envio = ?, usos_max = ?, usos_por_cliente = ?, minimo = ? WHERE id = ?`)
-    .run(p.nombre, p.codigo, p.tipo, p.valor, p.desde, p.hasta, p.solo_primer_envio, p.usos_max, p.usos_por_cliente, p.minimo, actual.id);
+  db.prepare(`UPDATE promociones SET nombre = ?, codigo = ?, tipo = ?, valor = ?, desde = ?, hasta = ?, desde_hora = ?, hasta_hora = ?, solo_primer_envio = ?, usos_max = ?, usos_por_cliente = ?, minimo = ? WHERE id = ?`)
+    .run(p.nombre, p.codigo, p.tipo, p.valor, p.desde, p.hasta, p.desde_hora, p.hasta_hora, p.solo_primer_envio, p.usos_max, p.usos_por_cliente, p.minimo, actual.id);
   return { ok: true };
 });
 
@@ -3133,19 +3141,29 @@ ruta('POST', '/api/admin/reclamos/:id', ({ req, params, body }) => {
     if (r.estado !== 'abierto') falla(400, 'Este reclamo ya se resolvió.');
     const resolucion = texto(body.resolucion, 500);
     if (resolucion.length < 5) falla(400, 'Escribe qué se evaluó y qué se decidió. El cliente lo verá.');
+    let cupon = 0;
     if (body.accion === 'aprobar') {
       const mc = numero(body.monto_cliente) || 0, mp = numero(body.monto_piloto) || 0;
-      if (!(mc >= 0 && mc <= 100000) || !(mp >= 0 && mp <= 100000)) falla(400, 'Revisa los montos.');
+      cupon = numero(body.cupon_monto) || 0;
+      if (!(mc >= 0 && mc <= 100000) || !(mp >= 0 && mp <= 100000) || !(cupon >= 0 && cupon <= 5000)) falla(400, 'Revisa los montos.');
       db.prepare("UPDATE reclamos SET estado = 'aprobado', monto_cliente = ?, monto_piloto = ?, resolucion = ?, resuelto_por = ?, resuelto_en = datetime('now') WHERE id = ?")
         .run(redondear(mc), r.piloto_id ? redondear(mp) : 0, resolucion, nombre, r.id);
-      db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(e.id, e.estado, `Reclamo evaluado: se devolverán Q${redondear(mc).toFixed(2)} al cliente`);
+      // Descuento para su próximo envío: solo para este cliente, se usa una vez y vale 30 días (se aplica solo al cotizar)
+      if (cupon > 0) {
+        const hoy = hoyGT();
+        const pr = db.prepare(`INSERT INTO promociones (nombre, codigo, tipo, valor, desde, hasta, usos_max, usos_por_cliente, usuario_id, reclamo_id)
+          VALUES (?, NULL, 'monto', ?, ?, ?, 1, 1, ?, ?)`).run(`Disculpa por ${e.guia}`, redondear(cupon), hoy, sumarDias(hoy, 30), r.usuario_id, r.id);
+        db.prepare('UPDATE reclamos SET cupon_monto = ?, cupon_promo_id = ? WHERE id = ?').run(redondear(cupon), Number(pr.lastInsertRowid), r.id);
+      }
+      db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(e.id, e.estado, `Reclamo evaluado: se devolverán Q${redondear(mc).toFixed(2)} al cliente${cupon > 0 ? ` y tiene Q${redondear(cupon).toFixed(2)} de descuento en su próximo envío` : ''}`);
       if (r.piloto_id && mp > 0) avisar(r.piloto_id, { titulo: 'Descuento por reclamo', cuerpo: `${e.guia}: se descontarán Q${redondear(mp).toFixed(2)} de tu próximo pago. ${resolucion}`, url: RUTA_PILOTO });
     } else {
       db.prepare("UPDATE reclamos SET estado = 'rechazado', resolucion = ?, resuelto_por = ?, resuelto_en = datetime('now') WHERE id = ?").run(resolucion, nombre, r.id);
     }
-    avisar(r.usuario_id, { titulo: 'Revisamos tu reporte', cuerpo: `${e.guia}: ${resolucion}`, url: `/mi-cuenta?envio=${e.id}` });
+    const textoCupon = cupon > 0 ? `Además tienes Q${redondear(cupon).toFixed(2)} de descuento en tu próximo envío (se aplica solo, vale 30 días).` : '';
+    avisar(r.usuario_id, { titulo: 'Revisamos tu reporte', cuerpo: `${e.guia}: ${resolucion}${textoCupon ? ' ' + textoCupon : ''}`, url: `/mi-cuenta?envio=${e.id}` });
     correoA(r.usuario_id, `Tu reporte del envío ${e.guia}`, 'Revisamos tu reporte', [resolucion,
-      body.accion === 'aprobar' && numero(body.monto_cliente) > 0 ? `Te devolveremos Q${redondear(numero(body.monto_cliente)).toFixed(2)}. Te contactaremos para coordinar la devolución.` : ''].filter(Boolean),
+      body.accion === 'aprobar' && numero(body.monto_cliente) > 0 ? `Te devolveremos Q${redondear(numero(body.monto_cliente)).toFixed(2)}. Te contactaremos para coordinar la devolución.` : '', textoCupon].filter(Boolean),
       { texto: 'Ver mi envío', url: `/mi-cuenta?envio=${e.id}` });
     return { ok: true };
   }

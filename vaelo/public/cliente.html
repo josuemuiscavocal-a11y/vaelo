@@ -307,6 +307,8 @@
       const acciones = el('div', { class: 'acciones' },
         el('button', { class: 'boton chico', type: 'button', text: terminado ? 'Ver detalle' : 'Ver en el mapa', onclick: () => verDetalle(e.id) }),
         e.estado !== 'cancelado' ? el('button', { class: 'boton borde chico', type: 'button', text: 'Guía', onclick: () => verGuia(e) }) : null,
+        e.estado === 'entregado' && (!e.entregado_en || Date.now() - new Date(e.entregado_en.replace(' ', 'T') + 'Z') < 7 * 86400e3)
+          ? el('button', { class: 'boton borde chico', type: 'button', text: 'Reportar un problema', title: 'Si tu paquete llegó dañado, incompleto o se perdió', onclick: async () => { await verDetalle(e.id); document.querySelector('#dlg .reclamo > button')?.click(); document.querySelector('#dlg .reclamo')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); } }) : null,
         el('button', { class: 'boton borde chico', type: 'button', text: 'Enviar otra vez', title: `Mandar otro paquete a ${e.destino_nombre || 'esta persona'} con los mismos datos`, onclick: () => repetirEnvio(e) }));
       if (e.estado === 'pendiente') {
         acciones.append(el('button', { class: 'boton peligro chico', type: 'button', text: 'Cancelar envío', onclick: (ev) => cancelarEnvio(e, ev.target) }));
@@ -581,7 +583,8 @@
       const vistos = lista.map(r => el('div', { class: 'mensaje ' + (r.estado === 'abierto' ? 'aviso' : r.estado === 'aprobado' ? 'exito' : 'error') },
         el('strong', { text: `Tu reporte: ${r.tipo_texto}` }), el('br'),
         r.estado === 'abierto' ? 'Lo estamos evaluando según lo que llevaba el paquete. Te contactaremos.' : r.resolucion,
-        r.estado === 'aprobado' && r.monto_cliente > 0 ? [el('br'), el('strong', { text: `Devolución: ${dinero(r.monto_cliente)}${r.devuelto_en ? ' (pagada)' : ' (pendiente de pagarte)'}` })] : null));
+        r.estado === 'aprobado' && r.monto_cliente > 0 ? [el('br'), el('strong', { text: `Devolución: ${dinero(r.monto_cliente)}${r.devuelto_en ? ' (pagada)' : ' (pendiente de pagarte)'}` })] : null,
+        r.estado === 'aprobado' && r.cupon_monto > 0 ? [el('br'), el('strong', { text: `Tienes ${dinero(r.cupon_monto)} de descuento en tu próximo envío (se aplica solo).` })] : null));
       const puede = !['pendiente', 'cancelado'].includes(e.estado) && !lista.some(r => r.estado === 'abierto')
         && !(e.estado === 'entregado' && e.entregado_en && Date.now() - new Date(e.entregado_en.replace(' ', 'T') + 'Z') > datos.dias_reclamo * 86400e3);
       if (!puede) return vistos.length ? el('div', {}, vistos) : null;

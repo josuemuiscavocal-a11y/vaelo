@@ -1447,3 +1447,4 @@ dialog.dlg-ruta .dialogo { padding: 1rem; }
   .tabla-envoltura:has(.tabla-tarjetas) { overflow: visible; border: 0; background: transparent; box-shadow: none; }
 }
 fieldset { min-width: 0; } .recientes { max-width: 100%; min-width: 0; }
+.fecha-hora { display: grid; grid-template-columns: 1fr 7.5rem; gap: .35rem; } .duracion-rapida { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; margin: .2rem 0 .7rem; }

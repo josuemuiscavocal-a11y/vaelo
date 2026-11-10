@@ -418,6 +418,10 @@ function filaPedido(p, r, c, recargar) {
       if (!confirm(`¿Quitar el envío de ${p.cliente_nombre}?`)) return;
       await api(`/api/empresa/pedidos/${p.id}`, { method: 'DELETE' }).catch((x) => alert(x.message)); recargar();
     } })] : [];
+  // Pedido ya en manos de Vaelo o entregado: se puede reportar un problema (llegó dañado, incompleto, se perdió)
+  if (!editable && e && ['recogido', 'en_camino', 'entregado', 'fallido', 'a_sede', 'en_sede'].includes(e.estado)) {
+    opciones.push(el('button', { type: 'button', text: 'Reportar un problema', onclick: () => dialogoReclamo(p, e, recargar) }));
+  }
   const menu = opciones.length ? el('details', { class: 'menu-acciones' }, el('summary', { 'aria-label': 'Más opciones', title: 'Más opciones' }, '⋯'), el('div', { class: 'menu-lista' }, opciones)) : null;
   return el('li', { class: 'pedido-fila' },
     el('div', { class: 'pedido-info' },
@@ -452,6 +456,38 @@ async function dialogoMover(p, r, c, recargar) {
     otras.length ? el('div', { class: 'lista-mover' }, otras.map((x) => el('button', { class: 'opcion-mover', type: 'button', onclick: mover(x.id) },
       el('strong', { text: x.nombre }), el('small', { text: `Entrega ${diaEmp(x.dia)} · ${x.total} envío(s)` })))) : el('p', { text: 'No tienes otra carpeta abierta.' }),
     el('button', { class: 'boton borde', type: 'button', style: 'margin-top:1rem', text: '+ Crear carpeta nueva y mover', onclick: () => { dlg.close(); dialogoCarpeta(null, r, async (nueva) => { try { const x = await api(`/api/empresa/pedidos/${p.id}/carpeta`, { method: 'PUT', body: { carpeta_id: nueva.id } }); recargar(); if (x.reconfirmar) alert(`Listo. Mándale el enlace otra vez a ${p.cliente_nombre} para que confirme la nueva fecha.`); } catch (e) { alert(e.message); } }); } }));
+  dlg.addEventListener('close', () => dlg.remove());
+  document.body.append(dlg); dlg.showModal();
+}
+// Reportar un problema con un pedido (queja): la oficina lo evalúa y, si fue culpa del piloto, se le descuenta y se compensa
+const TIPOS_RECLAMO_EMP = { danado: 'Llegó dañado', incompleto: 'Llegó incompleto', perdido: 'El paquete se perdió', otro: 'Otro problema (trato, retraso, etc.)' };
+async function dialogoReclamo(p, e, recargar) {
+  let previos = { reclamos: [] };
+  try { previos = await api(`/api/envios/${e.id}/reclamos`); } catch { /* sin historial */ }
+  const dlg = el('dialog', { class: 'dialogo' });
+  const msg = el('div', { class: 'mensaje', role: 'alert' });
+  const abierto = previos.reclamos.find((r) => r.estado === 'abierto');
+  const historial = previos.reclamos.map((r) => el('div', { class: 'mensaje ' + (r.estado === 'abierto' ? 'aviso' : r.estado === 'aprobado' ? 'exito' : 'error') },
+    el('strong', { text: `${r.tipo_texto}: ` }), r.estado === 'abierto' ? 'lo estamos evaluando. Te contactaremos.' : r.resolucion || '',
+    r.monto_cliente > 0 ? ` Devolución: Q${Number(r.monto_cliente).toFixed(2)}.` : '', r.cupon_monto > 0 ? ` Descuento de Q${Number(r.cupon_monto).toFixed(2)} en tu próximo envío.` : ''));
+  const tipo = el('select', {}, Object.entries(TIPOS_RECLAMO_EMP).map(([k, t]) => el('option', { value: k, text: t })));
+  const desc = el('textarea', { rows: 4, maxlength: 1000, placeholder: 'Qué pasó y qué llevaba el paquete (por ejemplo: la camisa llegó manchada; el cliente la devolvió)' });
+  const foto = el('input', { type: 'file', accept: 'image/*' });
+  const enviar = el('button', { class: 'boton', type: 'button', text: 'Enviar reporte', onclick: async () => {
+    enviar.disabled = true; enviar.textContent = 'Enviando…';
+    try {
+      await api(`/api/envios/${e.id}/reclamo`, { body: { tipo: tipo.value, descripcion: desc.value, foto: foto.files[0] ? await prepararArchivo(foto.files[0], false) : '' } });
+      dlg.close(); recargar(); alert('Recibimos tu reporte. La administración lo revisa y te avisamos la resolución.');
+    } catch (err) { mostrarMensaje(msg, err.message); enviar.disabled = false; enviar.textContent = 'Enviar reporte'; }
+  } });
+  dlg.append(el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: () => dlg.close() }),
+    el('h2', { text: 'Reportar un problema' }),
+    el('p', { class: 'pista', text: `Pedido ${p.codigo} de ${p.cliente_nombre}. Revisamos cada caso con la foto del paquete y la foto de entrega. Si fue culpa del piloto, se le descuenta y te compensamos.` }),
+    ...historial, msg,
+    ...(abierto ? [el('p', { class: 'pista', text: 'Ya tienes un reporte abierto para este pedido.' })] : [
+      el('div', { class: 'campo' }, el('label', { text: '¿Qué pasó?' }), tipo),
+      el('div', { class: 'campo' }, el('label', { text: 'Detalle' }), desc),
+      el('div', { class: 'campo' }, el('label', { text: 'Foto del problema (opcional)' }), foto), enviar]));
   dlg.addEventListener('close', () => dlg.remove());
   document.body.append(dlg); dlg.showModal();
 }

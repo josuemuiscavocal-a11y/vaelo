@@ -197,8 +197,8 @@
             <div class="campo"><label for="promo-valor">Valor</label><input id="promo-valor" type="number" min="0" step="0.5"></div>
           </div>
           <div class="fila">
-            <div class="campo"><label for="promo-desde">Desde</label><input id="promo-desde" type="date"></div>
-            <div class="campo"><label for="promo-hasta">Hasta</label><input id="promo-hasta" type="date"></div>
+            <div class="campo"><label for="promo-desde">Desde</label><div class="fecha-hora"><input id="promo-desde" type="date"><input id="promo-desde-hora" type="time" aria-label="Hora de inicio (opcional)"></div></div>
+            <div class="campo"><label for="promo-hasta">Hasta</label><div class="fecha-hora"><input id="promo-hasta" type="date"><input id="promo-hasta-hora" type="time" aria-label="Hora de fin (opcional)"></div></div>
             <div class="campo"><label for="promo-codigo">Cupón <span class="ayuda">Vacío = automática</span></label><input id="promo-codigo" maxlength="30" style="text-transform:uppercase" placeholder="NAVIDAD10"></div>
           </div>
           <div class="fila">
@@ -206,6 +206,10 @@
             <div class="campo"><label for="promo-por-cliente">Usos por cliente</label><input id="promo-por-cliente" type="number" min="1"></div>
             <div class="campo"><label for="promo-minimo">Envío mínimo (Q)</label><input id="promo-minimo" type="number" min="0" step="1"></div>
           </div>
+          <div class="duracion-rapida"><span class="etiqueta-campo">Que dure, desde ahora:</span>
+            <button type="button" class="chip" data-duracion="2h">2 horas</button><button type="button" class="chip" data-duracion="6h">6 horas</button><button type="button" class="chip" data-duracion="24h">24 horas</button>
+            <button type="button" class="chip" data-duracion="3d">3 días</button><button type="button" class="chip" data-duracion="7d">1 semana</button><button type="button" class="chip" data-duracion="30d">1 mes</button></div>
+          <p class="pista" style="margin-top:-.3rem">La hora es opcional: sin hora, vale todo el día. Para limitar por usos, llena «Usos en total» (ej. los primeros 50) o «Usos por cliente».</p>
           <label class="casilla"><input type="checkbox" id="promo-primer" style="width:auto"> Solo para el primer envío del cliente</label>
           <div style="display:flex;gap:.5rem;flex-wrap:wrap">
             <button class="boton" type="submit" id="guardar-promo">Crear promoción</button>
@@ -537,21 +541,23 @@ null))));
         r.tiene_foto ? el('a', { class: 'prueba-img', href: `/api/admin/reclamos/${r.id}/foto`, target: '_blank', rel: 'noopener' }, el('img', { src: `/api/admin/reclamos/${r.id}/foto`, alt: 'Foto del reclamo' }), el('small', { text: 'Foto del cliente' })) : null);
       if (r.estado !== 'abierto') {
         caja.append(el('p', { class: r.estado === 'aprobado' ? 'mensaje exito' : 'mensaje error' }, `${r.estado === 'aprobado' ? 'Aprobado' : 'Rechazado'} por ${r.resuelto_por}: ${r.resolucion}`,
-          r.estado === 'aprobado' ? ` Devolución al cliente ${dinero(r.monto_cliente)}${r.devuelto_en ? ' (pagada)' : ' (pendiente)'}${r.monto_piloto ? `; paga el piloto ${dinero(r.monto_piloto)}` : ''}.` : ''));
+          r.estado === 'aprobado' ? ` Devolución al cliente ${dinero(r.monto_cliente)}${r.devuelto_en ? ' (pagada)' : ' (pendiente)'}${r.monto_piloto ? `; paga el piloto ${dinero(r.monto_piloto)}` : ''}${r.cupon_monto ? `; descuento de ${dinero(r.cupon_monto)} en su próximo envío` : ''}.` : ''));
         if (r.estado === 'aprobado' && r.monto_cliente > 0 && !r.devuelto_en && rolPanel === 'admin') caja.append(el('button', { class: 'boton chico', type: 'button', text: 'Ya se le devolvió el dinero', onclick: async () => {
           try { await api(`/api/admin/reclamos/${r.id}`, { body: { accion: 'devuelto' } }); alListo(); } catch (e) { mostrarMensaje(msg, e.message); } } }), msg);
         return caja;
       }
       if (rolPanel !== 'admin') { caja.append(el('p', { class: 'pista', text: 'La administración lo está evaluando.' })); return caja; }
       const mc = el('input', { type: 'number', min: 0, step: '0.01', placeholder: '0.00' }), mp = el('input', { type: 'number', min: 0, step: '0.01', placeholder: '0.00' });
+      const cup = el('input', { type: 'number', min: 0, step: '1', placeholder: '0' });
       const res = el('textarea', { rows: 2, maxlength: 500, placeholder: 'Qué se evaluó y qué se decidió. Lo ve el cliente.' });
       caja.append(el('div', { class: 'fila' },
         el('div', { class: 'campo' }, el('label', { text: 'Devolver al cliente (Q)' }), mc),
-        el('div', { class: 'campo' }, el('label', {}, 'Paga el piloto (Q) ', el('span', { class: 'ayuda', text: r.piloto ? r.piloto + ', se descuenta de su pago' : 'Sin piloto' })), mp)),
+        el('div', { class: 'campo' }, el('label', {}, 'Paga el piloto (Q) ', el('span', { class: 'ayuda', text: r.piloto ? r.piloto + ', se descuenta de su pago' : 'Sin piloto' })), mp),
+        el('div', { class: 'campo' }, el('label', {}, 'Descuento en su próximo envío (Q) ', el('span', { class: 'ayuda', text: 'Solo para este cliente, una vez, 30 días' })), cup)),
         el('div', { class: 'campo' }, el('label', { text: 'Resolución' }), res), msg,
         el('div', { class: 'navegar' },
-          el('button', { class: 'boton chico', type: 'button', text: 'Aprobar devolución', onclick: async () => {
-            try { await api(`/api/admin/reclamos/${r.id}`, { body: { accion: 'aprobar', monto_cliente: mc.value, monto_piloto: mp.value, resolucion: res.value } }); alListo(); } catch (e) { mostrarMensaje(msg, e.message); } } }),
+          el('button', { class: 'boton chico', type: 'button', text: 'Aprobar', onclick: async () => {
+            try { await api(`/api/admin/reclamos/${r.id}`, { body: { accion: 'aprobar', monto_cliente: mc.value, monto_piloto: mp.value, cupon_monto: cup.value, resolucion: res.value } }); alListo(); } catch (e) { mostrarMensaje(msg, e.message); } } }),
           el('button', { class: 'boton peligro chico', type: 'button', text: 'Rechazar', onclick: async () => {
             try { await api(`/api/admin/reclamos/${r.id}`, { body: { accion: 'rechazar', resolucion: res.value } }); alListo(); } catch (e) { mostrarMensaje(msg, e.message); } } })));
       return caja;
@@ -1802,9 +1808,9 @@ null))));
       poner($('tabla-promos'), ...(promos.length ? promos.map(p => {
         const [txt, clase] = ESTADO_PROMO[p.estado];
         return el('tr', {},
-          el('td', {}, el('strong', { text: p.nombre }), el('br'), sub(p.codigo ? 'Cupón: ' + p.codigo : 'Automática' + (p.solo_primer_envio ? ', primer envío' : ''))),
+          el('td', {}, el('strong', { text: p.nombre }), el('br'), sub(p.usuario_id ? `Solo para ${p.cliente || 'un cliente'} (por un reclamo)` : p.codigo ? 'Cupón: ' + p.codigo : 'Automática' + (p.solo_primer_envio ? ', primer envío' : ''))),
           el('td', { text: textoPromo(p) + (p.minimo ? ` (desde ${dinero(p.minimo)})` : '') }),
-          el('td', { text: `${fechaCorta(p.desde)} al ${fechaCorta(p.hasta)}` }),
+          el('td', { text: `${fechaCorta(p.desde)}${p.desde_hora ? ' ' + p.desde_hora : ''} al ${fechaCorta(p.hasta)}${p.hasta_hora ? ' ' + p.hasta_hora : ''}` }),
           el('td', {}, el('span', { class: clase, text: txt })),
           el('td', {}, `${p.usos}${p.usos_max ? ' de ' + p.usos_max : ''}`, el('br'), sub(dinero(p.total_descontado) + ' descontado')),
           el('td', {}, el('button', { class: 'boton borde chico', type: 'button', text: 'Editar', onclick: () => editarPromo(p) }), ' ',
@@ -1813,7 +1819,17 @@ null))));
             } })));
       }) : [el('tr', {}, el('td', { colspan: 6, style: 'text-align:center;color:var(--suave);padding:1.5rem', text: 'Todavía no hay promociones.' }))]));
     }
-    const camposPromo = { nombre: 'promo-nombre', tipo: 'promo-tipo', valor: 'promo-valor', desde: 'promo-desde', hasta: 'promo-hasta', codigo: 'promo-codigo', usos_max: 'promo-usos', usos_por_cliente: 'promo-por-cliente', minimo: 'promo-minimo' };
+    const camposPromo = { nombre: 'promo-nombre', tipo: 'promo-tipo', valor: 'promo-valor', desde: 'promo-desde', hasta: 'promo-hasta', desde_hora: 'promo-desde-hora', hasta_hora: 'promo-hasta-hora', codigo: 'promo-codigo', usos_max: 'promo-usos', usos_por_cliente: 'promo-por-cliente', minimo: 'promo-minimo' };
+    // Duración rápida: desde ahora (hora de Guatemala) por N horas o días
+    document.querySelectorAll('[data-duracion]').forEach(b => b.addEventListener('click', () => {
+      const n = parseInt(b.dataset.duracion, 10), horas = b.dataset.duracion.endsWith('h') ? n : n * 24;
+      const gt = (ms) => new Date(ms - 6 * 3600e3).toISOString();
+      const ahora = Date.now(), fin = ahora + horas * 3600e3;
+      const conHora = horas < 72;   // por horas: con hora exacta; por días: días completos
+      $('promo-desde').value = gt(ahora).slice(0, 10); $('promo-desde-hora').value = conHora ? gt(ahora).slice(11, 16) : '';
+      $('promo-hasta').value = gt(conHora ? fin : fin - 86400e3).slice(0, 10); $('promo-hasta-hora').value = conHora ? gt(fin).slice(11, 16) : '';
+      document.querySelectorAll('[data-duracion]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    }));
     function llenarPromo(p) {
       for (const [k, id] of Object.entries(camposPromo)) $(id).value = p[k] ?? '';
       $('promo-primer').checked = !!p.solo_primer_envio;
