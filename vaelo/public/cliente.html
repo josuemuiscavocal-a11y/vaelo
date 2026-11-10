@@ -437,12 +437,16 @@
 
     // ---------- Mi ubicación en vivo para la recogida ----------
     // Mientras tengas paquetes por recoger que entregas tú, Vaelo comparte tu ubicación con el piloto (solo con esta página abierta)
+    // Si ya estamos compartiendo tu ubicación y es reciente, se usa esa (enviar es inmediato).
+    // Si no, se pide con GPS; si el GPS tarda (dentro de casa), se intenta con la ubicación aproximada del teléfono.
     function miUbicacion() {
-      return new Promise((ok, mal) => {
-        if (!navigator.geolocation) return mal(new Error('Tu navegador no puede compartir tu ubicación. Abre Vaelo en Chrome o Safari.'));
-        navigator.geolocation.getCurrentPosition((p) => ok({ lat: p.coords.latitude, lng: p.coords.longitude, precision: p.coords.accuracy }),
-          (err) => mal(new Error(err.code === 1 ? 'Necesitamos tu ubicación para que el piloto llegue a recoger a donde estás. Permite la ubicación en el candado junto a la dirección de la página.' : 'No pudimos leer tu ubicación. Enciende el GPS del teléfono e inténtalo de nuevo.')),
-          { enableHighAccuracy: true, timeout: 25000, maximumAge: 10000 });
+      if (lecturaCliente && Date.now() - lecturaCliente.t < 120000) return Promise.resolve(lecturaCliente);
+      const pedir = (alta, espera) => new Promise((ok, mal) => navigator.geolocation.getCurrentPosition(
+        (p) => ok({ lat: p.coords.latitude, lng: p.coords.longitude, precision: p.coords.accuracy, t: Date.now() }), mal,
+        { enableHighAccuracy: alta, timeout: espera, maximumAge: 30000 }));
+      if (!navigator.geolocation) return Promise.reject(new Error('Tu navegador no puede compartir tu ubicación. Abre Vaelo en Chrome o Safari.'));
+      return pedir(true, 12000).catch((err) => err.code === 1 ? Promise.reject(err) : pedir(false, 12000)).catch((err) => {
+        throw new Error(err.code === 1 ? 'Necesitamos tu ubicación para que el piloto llegue a recoger a donde estás. Permite la ubicación en el candado junto a la dirección de la página.' : 'No pudimos leer tu ubicación. Enciende el GPS del teléfono e inténtalo de nuevo.');
       });
     }
     // La zona de recogida sale sola de tu ubicación (así no se elige una zona equivocada)
@@ -478,7 +482,7 @@
       if (vigiaCliente == null && navigator.geolocation) {
         vigiaCliente = navigator.geolocation.watchPosition((p) => {
           const primera = !lecturaCliente; errorUbic = '';
-          lecturaCliente = { lat: p.coords.latitude, lng: p.coords.longitude, precision: p.coords.accuracy };
+          lecturaCliente = { lat: p.coords.latitude, lng: p.coords.longitude, precision: p.coords.accuracy, t: Date.now() };
           mandarMiUbicacion(primera); pintar();
         }, (err) => { errorUbic = err.code === 1 ? 'Le negaste la ubicación a Vaelo. Actívala en el candado junto a la dirección de la página.' : 'No pudimos leer tu ubicación. Revisa el GPS.'; pintar(); },
         { enableHighAccuracy: true, maximumAge: 5000, timeout: 30000 });
