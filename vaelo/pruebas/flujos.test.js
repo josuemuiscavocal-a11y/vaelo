@@ -86,15 +86,15 @@ test('un login correcto no cuenta como intento fallido', async () => {
   for (let i = 0; i < 12; i++) assert.equal((await cliente()('POST', '/api/login', { email: 'ana@prueba.com', password: 'clave-de-prueba-123' })).status, 200);
 });
 
-test('la tarifa fija cambia a precio por km si la entrega queda lejos', async () => {
+test('si la entrega queda lejos se cobra la tarifa fija de fuera (Q45), sin km', async () => {
   const r = await ana('POST', '/api/envios', { vehiculo_id: 1, peso: 2, origen_zona: 'Zona 1', destino_zona: 'Zona 16', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng,
     destino_nombre: 'Luis', destino_telefono: '55554444', destino_direccion: 'x', metodo_pago: 'efectivo', foto_paquete: FOTO });
   assert.equal(r.j.precio, 35);
   const token = r.j.enlace_receptor.split('/').pop();
   await cliente()('POST', `/api/recibe/${token}/confirmar`, { nombre: 'Luis Gómez', lat: LEJOS.lat, lng: LEJOS.lng });
   const e = fila(r.j.id);
-  assert.equal(e.tipo_tarifa, 'km');
-  assert.ok(e.precio > 100, `precio por km ${e.precio}`);
+  assert.equal(e.tipo_tarifa, 'km', 'en la base, km = fuera de zonas');
+  assert.equal(e.precio, 45, 'fuera de zonas: Q45 fijo');
   // Quien recibe se acerca más de 1 km: se recalcula y vuelve a tarifa fija
   await cliente()('POST', `/api/recibe/${token}/ubicacion`, { lat: CERCA.lat, lng: CERCA.lng });
   assert.equal(fila(r.j.id).precio, 35);
@@ -106,7 +106,7 @@ test('con zonas dibujadas, fuera de la forma no hay tarifa fija', async () => {
   const forma = [[-90.53, 14.63], [-90.50, 14.63], [-90.50, 14.65], [-90.53, 14.65]];
   assert.equal((await admin('PUT', `/api/admin/zonas/${z}`, { poligono: forma })).status, 200);
   const c = await ana('POST', '/api/cotizar', { vehiculo_id: 1, peso: 2, origen_zona: 'Zona 1', destino_zona: 'Zona 1', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng, destino_lat: CERCA.lat, destino_lng: CERCA.lng });
-  assert.equal(c.j.tipo, 'km');
+  assert.equal(c.j.tipo, 'fuera'); assert.equal(c.j.precio, 45);
   assert.equal((await cliente()('GET', `/api/zona?lat=${ZONA1.lat}&lng=${ZONA1.lng}`)).j.zona, 'Zona 1');
   await admin('PUT', `/api/admin/zonas/${z}`, { poligono: null });
 });
@@ -229,6 +229,20 @@ test('caja de envíos: varios destinatarios en un solo viaje, cada uno con su en
   assert.ok(a.grupo && a.grupo === b.grupo, 'van juntos en un solo viaje');
   assert.equal(b.destino_nombre, 'Marta');
   db.prepare("UPDATE envios SET estado = 'cancelado' WHERE grupo = ?").run(a.grupo);
+});
+
+test('oficina: asignar al piloto en línea más cercano con un toque', async () => {
+  const r = await ana('POST', '/api/envios', { vehiculo_id: 1, peso: 1, origen_zona: 'Zona 1', destino_zona: 'Zona 16', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng,
+    destino_nombre: 'Luis', destino_telefono: '55554444', metodo_pago: 'efectivo', foto_paquete: FOTO });
+  db.prepare("UPDATE envios SET receptor_omitido = 'prueba' WHERE id = ?").run(r.j.id);
+  db.prepare("UPDATE usuarios SET en_linea = 1, ubic_lat = ?, ubic_lng = ?, ubic_fecha = datetime('now') WHERE id = ?").run(ZONA1.lat, ZONA1.lng, pilotoId);
+  const x = await admin('POST', `/api/admin/envios/${r.j.id}/asignar-cercano`, {});
+  assert.equal(x.status, 200, JSON.stringify(x.j));
+  assert.equal(fila(r.j.id).mensajero_id, pilotoId);
+  assert.equal((await admin('POST', `/api/admin/envios/${r.j.id}/asignar-cercano`, {})).status, 400, 'ya tiene piloto');
+  const det = (await admin('GET', `/api/admin/envios/${r.j.id}`)).j.envio;
+  assert.deepEqual(det.reparto, { piloto: 30, vaelo: 5 }, 'Vaelo se queda con Q5');
+  await ana('POST', `/api/envios/${r.j.id}/cancelar`, { aceptar_cargo: true });
 });
 
 test('contraseña nueva con el enlace del correo', async () => {
@@ -419,9 +433,14 @@ test('carpetas de empresa: añadir envíos, enlace del cliente, enviar a Vaelo, 
   assert.equal(rec.status, 200); assert.ok(['una_moto', 'motos'].includes(rec.j.recomendacion.modo));
   const env = await beto('POST', `/api/empresa/carpetas/${carpeta}/enviar`, { modo: 'motos', recogida: 'empresa' });
   assert.equal(env.status, 201, JSON.stringify(env.j)); assert.equal(env.j.pedidos, 10); assert.equal(env.j.pendientes, 1, 'Juan pasa a una carpeta nueva');
+  // Juan (no podía) se mueve a otra carpeta: queda esperando que confirme la nueva fecha
+  const otra = (await beto('POST', '/api/empresa/carpetas', { dia: new Date(Date.now() - 6 * 3600_000 + 2 * 86400_000).toISOString().slice(0, 10) })).j.carpeta;
+  const mov = await beto('PUT', `/api/empresa/pedidos/${juan.id}/carpeta`, { carpeta_id: otra.id });
+  assert.equal(mov.status, 200, JSON.stringify(mov.j)); assert.equal(mov.j.reconfirmar, true);
+  assert.equal(db.prepare('SELECT carpeta_id, estado FROM pedidos_empresa WHERE id = ?').get(juan.id).estado, 'pendiente');
   const carpetas = (await beto('GET', '/api/empresa/carpetas')).j;
   assert.equal(carpetas.enviadas[0].id, carpeta);
-  assert.ok(carpetas.abiertas.some((c) => c.nombre.includes('pendientes') && c.no_puede === 1));
+  assert.ok(carpetas.abiertas.some((c) => c.id === otra.id && c.total === 1));
   assert.equal((await anon('POST', `/api/pedido/${token}`, { horario: 'tarde', direccion: 'x', zona: 'Zona 16', lat: CERCA.lat, lng: CERCA.lng, recibe_nombre: 'Rosa', recibe_telefono: '55557001' })).status, 400, 'ya no se cambia');
   // Panel: la empresa aparece primero, se calculan 2 rutas y se confirman
   const emp = (await admin('GET', '/api/admin/empresas-activas')).j;

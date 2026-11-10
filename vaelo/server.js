@@ -175,7 +175,9 @@ function aplicaTarifaFija(oz, dz, origen, destino, km) {
   return km == null || km <= kmMaxFija();
 }
 
-// Calcula el precio: tarifa fija si recogida y entrega están en zonas cubiertas; si no, por kilómetro
+// Precio fijo: tarifa de zona preferencial (ej. Q35) si recogida y entrega están en zonas cubiertas; si no, tarifa de fuera (ej. Q45).
+// Ya no se cobra por kilómetro. En la base, tarifa_base guarda la tarifa de fuera de las zonas.
+const tarifaFuera = (v) => redondear(Math.max(v.tarifa_zona, v.tarifa_base || 0));
 async function cotizar(body) {
   const vehiculo = db.prepare('SELECT * FROM vehiculos WHERE id = ? AND activo = 1').get(numero(body.vehiculo_id));
   if (!vehiculo) falla(400, 'Elige el vehículo para tu envío.');
@@ -184,24 +186,20 @@ async function cotizar(body) {
   if (!(peso > 0)) falla(400, 'Escribe el peso aproximado del paquete en libras.');
   if (peso > vehiculo.peso_max) falla(400, `Ese peso supera lo que lleva una ${vehiculo.nombre.toLowerCase()} (máximo ${vehiculo.peso_max} lb). Elige otro vehículo.`);
   const nombresZonas = zonasFijas().map((z) => z.nombre);
-  const oz = texto(body.origen_zona, 60), dz = texto(body.destino_zona, 60);
-  for (const z of [oz, dz]) if (z !== OTRA_ZONA && !nombresZonas.includes(z)) falla(400, 'Elige la zona de recogida y la de entrega.');
   const origen = coordenada(body.origen_lat, body.origen_lng);
   const destino = coordenada(body.destino_lat, body.destino_lng);
-  const km = origen && destino ? (await kilometros(origen, destino)) : null;
-
-  if (aplicaTarifaFija(oz, dz, origen, destino, km ? km.km : null)) {
-    return conExtras({ tipo: 'zona', km: km ? km.km : null, precio: redondear(vehiculo.tarifa_zona), vehiculo, peso,
-      detalle: `Tarifa fija en zonas cubiertas (${vehiculo.nombre})` }, body);
+  // Si no eligieron zona pero hay ubicación, se toma la del mapa
+  let oz = texto(body.origen_zona, 60), dz = texto(body.destino_zona, 60);
+  if (!oz && origen) oz = zonaDePunto(origen) || OTRA_ZONA;
+  if (!dz && destino) dz = zonaDePunto(destino) || OTRA_ZONA;
+  for (const z of [oz, dz]) if (z !== OTRA_ZONA && !nombresZonas.includes(z)) falla(400, 'Elige la zona de recogida y la de entrega.');
+  const km = origen && destino ? Math.round(distanciaRecta(origen, destino) * 1.3 * 10) / 10 : null;
+  if (aplicaTarifaFija(oz, dz, origen, destino, km)) {
+    return conExtras({ tipo: 'zona', km, precio: redondear(vehiculo.tarifa_zona), vehiculo, peso,
+      detalle: `Zona preferencial (${vehiculo.nombre})` }, body);
   }
-  // Todavía no se conocen las dos ubicaciones en vivo: se muestra la tarifa mínima y el precio final se calcula después
-  if (!km) {
-    return conExtras({ tipo: 'km', km: null, por_confirmar: true, precio: redondear(Math.max(vehiculo.tarifa_zona, vehiculo.tarifa_base)), vehiculo, peso,
-      detalle: `Precio desde. Fuera de las zonas fijas se cobra Q${vehiculo.tarifa_base.toFixed(2)} + Q${vehiculo.precio_km.toFixed(2)} por km; el total se calcula cuando quien entrega y quien recibe compartan su ubicación` }, body);
-  }
-  const precio = redondear(Math.max(vehiculo.tarifa_zona, vehiculo.tarifa_base + km.km * vehiculo.precio_km));
-  return conExtras({ tipo: 'km', km: km.km, precio, vehiculo, peso, fuente: km.fuente,
-    detalle: `Q${vehiculo.tarifa_base.toFixed(2)} + ${km.km} km × Q${vehiculo.precio_km.toFixed(2)}${km.fuente === 'estimado' ? ' (distancia aproximada)' : ''}` }, body);
+  return conExtras({ tipo: 'fuera', km, precio: tarifaFuera(vehiculo), vehiculo, peso,
+    detalle: `Fuera de las zonas preferenciales (${vehiculo.nombre})` }, body);
 }
 // Paquete frágil (recargo de Tarifas y ajustes)
 function conExtras(c, body) {
@@ -1432,6 +1430,27 @@ ruta('GET', '/api/admin/envios/:id/cercanos', ({ req, params }) => {
   return { pilotos: lista, con_ubicacion: !!o };
 });
 
+// Un toque: asignar al piloto en línea más cercano con el vehículo correcto
+ruta('POST', '/api/admin/envios/:id/asignar-cercano', ({ req, params }) => {
+  const quien = requiereStaff(req);
+  const e = db.prepare('SELECT * FROM envios WHERE id = ?').get(Number(params.id));
+  if (!e) falla(404, 'No encontramos ese envío.');
+  if (e.mensajero_id && e.asignacion) falla(400, 'Este envío ya tiene piloto.');
+  if (!listoParaPiloto(e)) falla(400, motivoNoListo(e));
+  const o = e.origen_lat != null ? { lat: e.origen_lat, lng: e.origen_lng } : null;
+  const lista = db.prepare(`${SQL_PILOTO} WHERE u.rol = 'mensajero' AND u.estado_piloto = 'aprobado' AND u.activo = 1 AND u.vehiculo_id = ?`).all(e.vehiculo_id)
+    .filter((p) => puedeTrabajar(p) && enLineaReal(p))
+    .map((p) => ({ p, km: o && p.ubic_lat != null ? distanciaRecta(o, { lat: p.ubic_lat, lng: p.ubic_lng }) : 999 }))
+    .sort((a, b) => (a.p.activos - b.p.activos) * 2 + (a.km - b.km));
+  if (!lista.length) falla(400, 'No hay pilotos en línea con ese vehículo. Elige uno de la lista o espera a que alguien se conecte.');
+  const m = lista[0].p;
+  db.prepare(`UPDATE envios SET mensajero_id = ?, asignacion = 'por_aceptar', asignado_en = datetime('now'), llego_origen = 0, llegando_destino = 0,
+    actualizado = datetime('now') WHERE id = ?`).run(m.id, e.id);
+  db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(e.id, e.estado, `Asignado a ${m.nombre.split(' ')[0]} (el más cercano), esperando que acepte`);
+  avisarEnvio(e.id, 'asignado');
+  return { ok: true, piloto: m.nombre.split(' ')[0], km: Math.round(lista[0].km * 10) / 10 };
+});
+
 ruta('GET', '/api/admin/envios/:id/recorrido', ({ req, params }) => {
   const quien = requiereStaff(req);
   return { puntos: db.prepare('SELECT lat, lng, creado FROM ubicaciones WHERE envio_id = ? ORDER BY id').all(Number(params.id)) };
@@ -1607,7 +1626,7 @@ function insertarEnvio(u, body, d, c, desc, programado, grupo = null) {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${o ? "datetime('now')" : 'NULL'}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
     guia, u.id, c.vehiculo.id, c.peso, d.descripcion, d.origen_direccion, texto(body.origen_zona, 60), d.origen_telefono,
     o ? o.lat : null, o ? o.lng : null, d.destino_nombre, d.destino_telefono, d.destino_direccion, texto(body.destino_zona, 60),
-    de ? de.lat : null, de ? de.lng : null, c.tipo, c.km, desc.precio, d.metodo_pago, redondear(d.cobro_destinatario), d.notas,
+    de ? de.lat : null, de ? de.lng : null, c.tipo === 'zona' ? 'zona' : 'km', c.km, desc.precio, d.metodo_pago, redondear(d.cobro_destinatario), d.notas,
     c.fragil ? 1 : 0, c.recargo_fragil, c.precio, desc.descuento, desc.promocion_id, codigo, programado, token,
     d.origen_quien, d.origen_nombre, tokenEntrega, o ? (Number.isFinite(numero(body.origen_precision)) ? Math.round(numero(body.origen_precision)) : null) : null, c.por_confirmar ? 1 : 0,
     c.valor_declarado || 0, c.seguro || 0, grupo, o ? o.lat : null, o ? o.lng : null, d.metodo_pago === 'transferencia' ? 'sin_comprobante' : null,
@@ -1800,9 +1819,9 @@ async function revisarPrecio(id) {
   const movido = (lat, lng, p) => lat == null || distanciaRecta({ lat, lng }, p) > 1;
   if (!e.precio_por_confirmar && !movido(e.precio_o_lat, e.precio_o_lng, o) && !movido(e.precio_d_lat, e.precio_d_lng, d)) return;
   const v = db.prepare('SELECT * FROM vehiculos WHERE id = ?').get(e.vehiculo_id);
-  const { km } = await kilometros(o, d);
+  const km = Math.round(distanciaRecta(o, d) * 1.3 * 10) / 10;
   const fija = aplicaTarifaFija(e.origen_zona, e.destino_zona, o, d, km);
-  const viaje = fija ? v.tarifa_zona : Math.max(v.tarifa_zona, v.tarifa_base + km * v.precio_km);
+  const viaje = fija ? v.tarifa_zona : tarifaFuera(v);
   const base = redondear(viaje + (e.recargo_fragil || 0) + (e.seguro || 0));
   let descuento = 0;
   const p = e.promocion_id ? db.prepare('SELECT * FROM promociones WHERE id = ?').get(e.promocion_id) : null;
@@ -1816,8 +1835,8 @@ async function revisarPrecio(id) {
       precio_o_lat = ?, precio_o_lng = ?, precio_d_lat = ?, precio_d_lng = ? WHERE id = ? AND estado IN ('pendiente','recogido','en_camino')`)
     .run(fija ? 'zona' : 'km', km, base, descuento, precio, o.lat, o.lng, d.lat, d.lng, id);
   if (!r.changes || Math.abs(precio - e.precio) < 0.01) return;
-  const razon = e.tipo_tarifa === 'zona' && !fija ? 'La entrega queda fuera de las zonas con tarifa fija' : e.precio_por_confirmar ? 'Precio final' : 'Cambió el punto de recogida o de entrega';
-  db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(id, e.estado, `${razon}: ${'Q' + precio.toFixed(2)}${fija ? ' (tarifa fija)' : ` por ${km} km`}`);
+  const razon = e.tipo_tarifa === 'zona' && !fija ? 'La entrega queda fuera de las zonas preferenciales' : fija && e.tipo_tarifa !== 'zona' ? 'La entrega está en una zona preferencial' : 'Cambió el punto de recogida o de entrega';
+  db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(id, e.estado, `${razon}: ${'Q' + precio.toFixed(2)}`);
   avisarEnvio(id, 'precio', { precio, razon });
 }
 
@@ -1830,7 +1849,7 @@ ruta('GET', '/api/recibe/:token', ({ params }) => {
   if (activo && e.mensajero_id && e.asignacion === 'aceptado') {
     const p = pilotoPorId(e.mensajero_id);
     const vivo = p && p.ubic_fecha && Date.now() - fechaMs(p.ubic_fecha) < 10 * 60_000;
-    if (p) piloto = { nombre: p.nombre.split(' ')[0], vehiculo: p.vehiculo, color: p.veh_color, placa: p.veh_placa, tiene_foto: !!p.foto_perfil,
+    if (p) piloto = { nombre: p.nombre.split(' ')[0], vehiculo: p.vehiculo, color: p.veh_color, placa: p.veh_placa, tiene_foto: !!p.foto_perfil, telefono: p.telefono,
       lat: vivo ? p.ubic_lat : null, lng: vivo ? p.ubic_lng : null, actualizado: vivo ? p.ubic_fecha : null };
   }
   const confirmado = entrega ? !!e.origen_confirmado_en : !!e.receptor_confirmado_en;
@@ -2909,7 +2928,8 @@ ruta('POST', '/api/empresa/lote-sede', async ({ req, body }) => {
     const b = { destino_nombre: fila.destino_nombre, destino_telefono: fila.destino_telefono, destino_direccion: fila.destino_direccion, destino_zona: fila.destino_zona || OTRA_ZONA,
       peso: fila.peso || 1, descripcion: fila.descripcion, cobro_destinatario: fila.cobro_destinatario, notas: fila.notas, paquetes: fila.paquetes, fragil: fila.fragil === true || /^s/i.test(String(fila.fragil || '')),
       vehiculo_id: db.prepare('SELECT id FROM vehiculos WHERE activo = 1 AND solo_oficina = 0 ORDER BY orden, id LIMIT 1').get()?.id,
-      origen_quien: 'sede', origen_zona: zonaDePunto(sedeUbicacion()) || OTRA_ZONA, origen_direccion: aj.sede_direccion || 'Sede Vaelo', origen_telefono: u.telefono, metodo_pago: metodo, _lote_sede_id: -1 };
+      origen_quien: 'sede', origen_zona: zonaDePunto(sedeUbicacion()) || zonasFijas()[0]?.nombre || OTRA_ZONA,   // la sede cuenta como zona preferencial
+      origen_direccion: aj.sede_direccion || 'Sede Vaelo', origen_telefono: u.telefono, metodo_pago: metodo, _lote_sede_id: -1 };
     try {
       const d = validarPedido(u, b);
       const c = await cotizar({ ...b, origen_lat: sedeUbicacion().lat, origen_lng: sedeUbicacion().lng });
@@ -3016,7 +3036,7 @@ function precioPedido(p) {
   const conZona = !!p.zona && p.zona !== OTRA_ZONA && zonasFijas().some((z) => z.nombre === p.zona);
   const formas = zonasConForma();
   const dentro = conZona && (!formas.length || p.lat == null || formas.some((z) => dentroDe({ lat: p.lat, lng: p.lng }, z.puntos)));
-  return { precio: redondear(dentro ? (moto ? moto.tarifa_zona : 35) : ajNum('tarifa_empresa_fuera', 45)), preferencial: dentro };
+  return { precio: redondear(dentro ? (moto ? moto.tarifa_zona : 35) : (moto ? tarifaFuera(moto) : 45)), preferencial: dentro };
 }
 const pedidoCompleto = (p) => !!(p.dia && p.horario && p.lat != null && p.direccion && p.zona && p.recibe_nombre && p.recibe_telefono && p.metodo_pago);
 function estadoPedido(p) { return p.estado === 'pendiente' && p.enlace_enviado_en ? 'esperando' : p.estado === 'confirmado' && p.lote_id ? 'en_vaelo' : p.estado; }
@@ -3492,6 +3512,22 @@ ruta('POST', '/api/empresa/carpetas/:id/archivo', ({ req, params, body }) => {
   } catch (err) { db.exec('ROLLBACK'); throw err; }
   return { _status: 201, ok: true, creados: listos.length };
 }, { limite: 3_000_000 });
+// Mover un envío a otra carpeta (otro día). Si su cliente ya había confirmado, confirma de nuevo con la nueva fecha.
+ruta('PUT', '/api/empresa/pedidos/:id/carpeta', ({ req, params, body }) => {
+  const u = requiereEmpresa(req);
+  const p = pedidoDeEmpresa(u, params.id);
+  editable(p);
+  const c = carpetaDeEmpresa(u, body.carpeta_id);
+  carpetaAbierta(c);
+  if (c.id === p.carpeta_id) return { pedido: pedidoSalida(p) };
+  const datos = { carpeta_id: c.id, dia: c.dia };
+  if (c.dia !== p.dia && (p.confirmado_por === 'cliente' || ['no_puede', 'vencido'].includes(p.estado))) Object.assign(datos, { estado: 'pendiente', confirmado_en: null, no_puede_nota: null, recordado_en: null });
+  else if (['no_puede', 'vencido'].includes(p.estado)) Object.assign(datos, { estado: 'pendiente', no_puede_nota: null });
+  const reconfirmar = datos.estado === 'pendiente';
+  let f = guardarPedido(p.id, datos);
+  if (!reconfirmar) f = revisarConfirmado(f, 'empresa');
+  return { pedido: pedidoSalida(f), reconfirmar };
+});
 ruta('GET', '/api/empresa/carpetas/:id/recomendacion', ({ req, params }) => {
   const u = requiereEmpresa(req);
   const c = carpetaDeEmpresa(u, params.id);
@@ -3533,7 +3569,7 @@ ruta('GET', '/api/pedido/:token', ({ params }) => {
     recibe_nombre: p.recibe_nombre || p.cliente_nombre, recibe_telefono: p.recibe_telefono || p.cliente_telefono, metodo_pago: p.metodo_pago,
     editable: ['pendiente', 'confirmado', 'vencido', 'no_puede'].includes(p.estado) && !p.lote_id, en_lote: !!p.lote_id,
     dia_fijo: p.carpeta_id ? carpetaDe(p)?.dia || null : null, no_puede_nota: p.no_puede_nota,
-    precio: p.lat != null || p.zona ? precioPedido(p) : null, tarifa_zona: vehiculoMoto()?.tarifa_zona ?? 35, tarifa_fuera: ajNum('tarifa_empresa_fuera', 45),
+    precio: p.lat != null || p.zona ? precioPedido(p) : null, tarifa_zona: vehiculoMoto()?.tarifa_zona ?? 35, tarifa_fuera: vehiculoMoto() ? tarifaFuera(vehiculoMoto()) : 45,
     zonas: [...zonasFijas().map((z) => z.nombre), OTRA_ZONA], horarios: HORARIOS, hoy: hoyGT() };
   if (p.envio_id) {
     const e = db.prepare(`${SQL_ENVIO} WHERE e.id = ?`).get(p.envio_id);
@@ -4189,6 +4225,7 @@ ruta('GET', '/api/admin/envios', ({ req, query }) => {
   const estado = query.get('estado');
   if (estado === 'sin_asignar') cond.push("e.mensajero_id IS NULL AND e.estado = 'pendiente'");
   else if (estado === 'atencion') cond.push("e.estado IN ('fallido','devolviendo','a_sede','en_sede')");
+  else if (estado === 'activos') cond.push("e.estado IN ('pendiente','recogido','en_camino','fallido','devolviendo','a_sede','en_sede')");
   else if (estado && ESTADOS.includes(estado)) { cond.push('e.estado = ?'); args.push(estado); }
   const q = (query.get('q') || '').trim().slice(0, 100);
   // Los pedidos de empresas viven en su pestaña; aquí solo con el filtro "De empresas" o al buscar
@@ -4220,6 +4257,8 @@ ruta('GET', '/api/admin/envios/:id', ({ req, params }) => {
   out.reclamos = reclamosDe(e.id);
   out.listo_para_piloto = listoParaPiloto(e); out.motivo_no_listo = out.listo_para_piloto ? null : motivoNoListo(e);
   out.flete_enlace = e.flete && !e.flete_configurado_en && e.flete_token ? '/flete/' + e.flete_token : null;
+  // Cuánto es del piloto y cuánto de Vaelo (Vaelo se queda con su parte fija de cada envío)
+  { const piloto = e.ganancia_piloto ?? gananciaPiloto(e.precio); out.reparto = { piloto: redondear(piloto), vaelo: redondear(e.precio - piloto) }; }
   out.receptor = { ...datosReceptor(e, true), enlace: ESTADOS_ACTIVOS.includes(e.estado) ? '/recibe/' + tokenReceptor(e) : null };
   out.origen = { ...datosOrigen(e, true), enlace: e.origen_quien === 'tercero' && e.estado === 'pendiente' && e.origen_token ? '/entrega/' + e.origen_token : null };
   sinCamposReceptor(out);
@@ -4281,7 +4320,7 @@ ruta('PUT', '/api/admin/vehiculos/:id', ({ req, params, body }) => {
   if (!v) falla(404, 'No encontramos ese vehículo.');
   const nombre = texto(body.nombre ?? v.nombre, 40), descripcion = texto(body.descripcion ?? v.descripcion, 120);
   const nums = {};
-  for (const k of ['peso_max', 'tarifa_zona', 'tarifa_base', 'precio_km']) {
+  for (const k of ['peso_max', 'tarifa_zona', 'tarifa_base']) {
     nums[k] = body[k] !== undefined ? numero(body[k]) : v[k];
     if (!(nums[k] >= 0 && nums[k] <= 100000)) falla(400, 'Revisa los números: deben ser cantidades válidas.');
   }
@@ -4289,7 +4328,7 @@ ruta('PUT', '/api/admin/vehiculos/:id', ({ req, params, body }) => {
   const activo = body.activo !== undefined ? (body.activo ? 1 : 0) : v.activo;
   const soloOficina = body.solo_oficina !== undefined ? (body.solo_oficina ? 1 : 0) : v.solo_oficina;
   db.prepare('UPDATE vehiculos SET nombre=?, descripcion=?, peso_max=?, tarifa_zona=?, tarifa_base=?, precio_km=?, activo=?, solo_oficina=? WHERE id=?')
-    .run(nombre, descripcion, nums.peso_max, redondear(nums.tarifa_zona), redondear(nums.tarifa_base), redondear(nums.precio_km), activo, soloOficina, v.id);
+    .run(nombre, descripcion, nums.peso_max, redondear(nums.tarifa_zona), redondear(nums.tarifa_base), 0, activo, soloOficina, v.id);
   return { ok: true };
 });
 

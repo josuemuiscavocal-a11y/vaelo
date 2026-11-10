@@ -1128,3 +1128,62 @@ dialog.escaner video { width: 100%; border-radius: 10px; background: #000; aspec
 .caja-enlaces li { display: flex; justify-content: space-between; align-items: center; gap: .75rem; padding: .6rem .75rem; border: 1px solid var(--linea); border-radius: 8px; }
 .caja-enlaces li span { display: grid; }
 .caja-enlaces small { color: var(--suave); }
+
+/* Avisos que se pueden cerrar */
+.avisos-push, .instalar { position: relative; }
+.cerrar-aviso { position: absolute; top: .35rem; right: .45rem; width: 2rem; height: 2rem; border: 0; background: transparent; color: var(--suave);
+  font-size: 1.3rem; line-height: 1; border-radius: 50%; cursor: pointer; }
+.cerrar-aviso:hover { background: var(--gris); color: var(--tinta); }
+.avisos-push > div, .instalar > div { padding-right: 1.6rem; }
+
+/* Barra fija para enviar (solo celular) */
+.barra-enviar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 45; display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+  padding: .7rem 1rem calc(.7rem + env(safe-area-inset-bottom)); background: #fff; border-top: 1px solid var(--linea); box-shadow: 0 -8px 24px rgba(14, 36, 99, .12); }
+.barra-enviar span { display: grid; line-height: 1.15; }
+.barra-enviar small { color: var(--suave); font-size: .78rem; }
+.barra-enviar strong { font-size: 1.35rem; color: var(--azul-hondo); font-variant-numeric: tabular-nums; }
+.barra-enviar .boton { flex: 0 1 58%; padding: .8rem 1rem; }
+@media (min-width: 900px) { .barra-enviar { display: none !important; } }
+
+/* Pestañas en celular: caben más y se deslizan */
+@media (max-width: 600px) {
+  .pestanas { scrollbar-width: none; }
+  .pestanas::-webkit-scrollbar { display: none; }
+  .cliente-cuerpo > .contenedor > .pestanas button, .pestanas button { padding: .55rem .7rem; font-size: .9rem; }
+}
+/* Menú "⋯" de acciones de un envío */
+.pedido-acciones { display: flex; align-items: center; gap: .4rem; flex-wrap: nowrap; }
+.menu-acciones { position: relative; }
+.menu-acciones > summary { list-style: none; width: 2.4rem; height: 2.4rem; display: grid; place-items: center; border: 1.5px solid var(--linea); border-radius: 8px;
+  cursor: pointer; font-size: 1.3rem; font-weight: 700; color: var(--azul-hondo); background: #fff; user-select: none; }
+.menu-acciones > summary::-webkit-details-marker { display: none; }
+.menu-acciones[open] > summary { border-color: var(--tinta); background: var(--gris); }
+.menu-lista { position: absolute; right: 0; top: calc(100% + .35rem); z-index: 30; min-width: 230px; display: grid; background: #fff; border: 1px solid var(--linea);
+  border-radius: 10px; box-shadow: 0 12px 30px rgba(14, 36, 99, .18); padding: .35rem; }
+.menu-lista > a, .menu-lista > button, .menu-lista > label { display: block; text-align: left; font: inherit; font-size: .93rem; padding: .6rem .7rem; border: 0; background: none;
+  color: var(--tinta); border-radius: 6px; cursor: pointer; text-decoration: none; }
+.menu-lista > a:hover, .menu-lista > button:hover, .menu-lista > label:hover { background: var(--gris); }
+.peligro-texto { color: var(--alerta, #b42318) !important; }
+.lista-mover { display: grid; gap: .5rem; margin-top: .75rem; }
+.opcion-mover { display: grid; text-align: left; font: inherit; padding: .75rem .9rem; border: 1.5px solid var(--linea); border-radius: 10px; background: #fff; cursor: pointer; }
+.opcion-mover:hover { border-color: var(--tinta); }
+.opcion-mover small { color: var(--suave); }
+.pegar-mensaje { margin-bottom: .8rem; display: grid; gap: .3rem; }
+.pegar-mensaje textarea { width: 100%; font: inherit; padding: .6rem .7rem; border: 1.5px dashed var(--azul); border-radius: 8px; background: #f6f8ff; }
+details.plegable > summary { cursor: pointer; list-style: none; padding: .1rem 0; }
+details.plegable > summary::-webkit-details-marker { display: none; }
+details.plegable > summary::before { content: '▸ '; color: var(--azul); }
+details.plegable[open] > summary::before { content: '▾ '; }
+details.plegable[open] > summary { margin-bottom: .6rem; }
+.boton-cercano { white-space: nowrap; }
+
+/* App del piloto: terminados plegados, emergencia más compacta, foto de entrega */
+details.terminados { margin-top: 1rem; }
+details.terminados > summary { cursor: pointer; list-style: none; font-weight: 700; color: var(--suave); padding: .7rem .2rem; }
+details.terminados > summary::-webkit-details-marker { display: none; }
+details.terminados > summary::before { content: '▸ '; }
+details.terminados[open] > summary::before { content: '▾ '; }
+details.terminados > article { opacity: .85; }
+body.app-piloto .boton-emergencia { padding: .55rem .95rem; font-size: .88rem; box-shadow: 0 4px 12px rgba(180,38,28,.35); }
+body.app-piloto main { padding-bottom: 9rem; }
+.foto-entrega .foto-paquete-boton img { max-height: 180px; width: auto; margin: 0 auto; object-fit: contain; }

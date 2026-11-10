@@ -2,7 +2,7 @@
 
 Página web y app (instalable en el celular) de Vaelo, mensajería en moto y pickup en Guatemala. Los clientes crean su cuenta, envían paquetes marcando recogida y entrega en el mapa, y siguen al mensajero hasta la entrega.
 
-**Precios:** tarifa fija cuando recogida y entrega están en las zonas cubiertas (1, 6, 16, 17, 18 y 24, editables). Fuera de ellas: arranque + kilómetros × precio por km, según el vehículo. Todo se edita en el panel → Tarifas y ajustes.
+**Precios:** tarifa fija cuando recogida y entrega están en las zonas cubiertas (1, 6, 16, 17, 18 y 24, editables). Fuera de ellas: otra tarifa fija (Q35 dentro y Q45 fuera en moto). Ya no se cobra por kilómetro. De cada envío Vaelo se queda con Q5 y el resto es del piloto. Todo se edita en el panel → Tarifas y ajustes.
 
 ## Qué incluye
 
@@ -50,7 +50,7 @@ Página web y app (instalable en el celular) de Vaelo, mensajería en moto y pic
 - Si el paquete lo entrega otra persona (una tienda, un familiar), quien pide escribe su nombre y teléfono, y le manda un enlace (`/entrega/...`) para que comparta su ubicación.
 - Entrega: donde está quien recibe. Recibe un enlace (`/recibe/...`), confirma su nombre, comparte su ubicación (foto opcional) y ve a su piloto, el mapa y su código de entrega.
 - El piloto ve a cada persona con su teléfono y referencias, y los botones "Recoger el pedido" (bajo quien entrega) y "Dejar el pedido" (bajo quien recibe) en Waze o Google Maps, siempre a la última ubicación.
-- Precio: por la zona elegida en la lista. Fuera de las zonas fijas se muestra un precio "desde" y el total por kilómetro se calcula cuando las dos personas comparten su ubicación.
+- Precio: por la zona elegida en la lista. Fuera de las zonas preferenciales se cobra la tarifa fija de fuera (Q45). Si la ubicación real que comparte quien recibe cae en otra zona, el precio se ajusta solo y se avisa.
 - Hasta tener las dos ubicaciones no se busca piloto ni se puede recoger. En cada envío el panel puede autorizar una excepción con motivo; también se puede apagar en Tarifas y ajustes ("Pedir ubicaciones en vivo antes de recoger").
 - Quien envía no ve la ubicación de quien recibe, ni aparece en el rastreo público. Las ubicaciones se dejan de compartir al recoger y al entregar, y se borran 30 días después.
 
@@ -91,6 +91,10 @@ Página web y app (instalable en el celular) de Vaelo, mensajería en moto y pic
 - Cada pedido tiene su código, que es también la guía, y la empresa imprime **etiquetas con código QR** para pegarlas en los paquetes.
 - Si un pedido no se entrega, **queda en la sede de Vaelo**: la empresa manda a alguien a recogerlo con el código y la bodega se le cobra por día por WhatsApp.
 
+- En cada envío hay un botón principal (Tomar foto / Mandar enlace / Recordar) y el menú **«⋯»** con lo demás: copiar enlace, llenar datos, cambiar foto, **mover a otra carpeta** (si el cliente no puede ese día) y quitar.
+- **«Recordar a los que faltan»** abre la lista de clientes sin confirmar con un botón de WhatsApp para cada uno.
+- **«📋 Pegar datos de WhatsApp»** al añadir un envío: pegas lo que mandó el cliente (nombre, teléfono, dirección) y se llenan solos los campos.
+
 ### En el panel de Vaelo (Empresas)
 - Lista de empresas activas, con las que tienen pedidos por repartir arriba. Al tocar una: **Por repartir, En ruta, En sede, Historial y Datos**. Las solicitudes de contrato están en su propia sub-pestaña.
 - **Dividir pedidos:** el mapa arma las rutas solo (primero la mañana, después lo más cercano). «Dividir entre N motos», «Una moto», «Un paquete por moto» o «Pickup»; se pueden pasar pedidos entre rutas y cambiar el orden. Luego se asigna cada ruta a un piloto.
@@ -111,7 +115,7 @@ Página web y app (instalable en el celular) de Vaelo, mensajería en moto y pic
 ## Precio con los puntos reales
 
 - Cada zona con tarifa fija se puede **dibujar en el mapa** (Tarifas y ajustes > Zonas > Dibujar).
-- Con zonas dibujadas, la tarifa fija solo vale si la recogida y la entrega reales caen dentro de alguna. Si no, se cobra por km.
+- Con zonas dibujadas, la tarifa fija solo vale si la recogida y la entrega reales caen dentro de alguna. Si no, se cobra la tarifa de fuera de zonas.
 - Sin zonas dibujadas, la tarifa fija vale hasta 15 km (editable).
 - Si quien recibe (o quien entrega) se mueve más de 1 km, el precio se vuelve a calcular y se le avisa al cliente.
 - Con clave de Mapbox, los km se miden con el servicio de rutas de Mapbox (más confiable que el servidor público de OSRM).
@@ -124,6 +128,11 @@ Página web y app (instalable en el celular) de Vaelo, mensajería en moto y pic
 - Oficina: pedido nuevo, entrega fallida, envío sin piloto.
 - En iPhone los avisos funcionan solo con Vaelo instalado en la pantalla de inicio (iOS 16.4 o más nuevo).
 - **Límite que sigue igual:** el GPS del piloto solo funciona con la app abierta y la pantalla encendida.
+
+## Para usar todos los días
+- **Cliente:** la zona de recogida sale sola con su ubicación; en el celular el precio y el botón «Enviar» quedan fijos abajo; los avisos de «Instalar» y «Activar avisos» se pueden cerrar; «Mis envíos» separa **En curso** e **Historial**; **«Repetir»** copia un envío anterior (solo falta la foto nueva). Quien recibe ve **«Llamar a [piloto]»**.
+- **Oficina:** la lista de envíos abre en **Activos**; los que no tienen piloto traen el botón **«Al más cercano»** (asigna al piloto en línea más cercano con ese vehículo). En el detalle se ve el **reparto**: cuánto es del piloto y cuánto de Vaelo. «Cambiar estado a mano» queda plegado.
+- **Piloto:** lo terminado queda plegado en «Terminados»; la foto de entrega se toma con un botón de cámara; el botón de emergencia es más chico.
 
 ## Otras funciones
 

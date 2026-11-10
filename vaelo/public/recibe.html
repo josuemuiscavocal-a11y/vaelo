@@ -191,10 +191,11 @@
       const p = r.piloto;
       const tarjeta = p
         ? el('div', { class: 'receptor-piloto' },
-            p.tiene_foto ? el('img', { src: API + '/foto-piloto', alt: 'Foto de ' + p.nombre }) : el('div', { class: 'sin-foto-piloto', text: p.nombre.charAt(0) }),
+            p.tiene_foto ? el('img', { src: API + '/foto-piloto', alt: 'Foto de ' + p.nombre, onerror: (ev) => ev.target.replaceWith(el('div', { class: 'sin-foto-piloto', text: p.nombre.charAt(0) })) }) : el('div', { class: 'sin-foto-piloto', text: p.nombre.charAt(0) }),
             el('div', {}, el('span', { class: 'mini', text: r.rol === 'entrega' ? 'Piloto que viene a recoger' : 'Tu piloto Vaelo' }), el('strong', { style: 'font-size:1.1rem', text: p.nombre }), el('br'),
               [p.vehiculo, p.color].filter(Boolean).join(' · '), ' ', p.placa ? el('span', { class: 'placa', text: p.placa }) : null,
-              el('div', { class: 'pista', text: r.rol === 'entrega' ? 'Revisa que la placa coincida antes de entregar el paquete.' : 'Revisa que la placa coincida antes de recibir.' })))
+              el('div', { class: 'pista', text: r.rol === 'entrega' ? 'Revisa que la placa coincida antes de entregar el paquete.' : 'Revisa que la placa coincida antes de recibir.' }),
+              p.telefono ? el('a', { class: 'boton borde chico', style: 'margin-top:.5rem', href: 'tel:' + String(p.telefono).replace(/[^\d+]/g, ''), text: 'Llamar a ' + p.nombre }) : null))
         : el('div', { class: 'receptor-piloto' }, el('div', { class: 'sin-foto-piloto', text: '?' }),
             el('div', {}, el('strong', { text: 'Asignando piloto' }), el('div', { class: 'pista', text: 'Aquí verás su nombre, foto y placa en cuanto acepte el envío.' })));
       const nodos = [

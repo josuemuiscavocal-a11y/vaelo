@@ -589,16 +589,26 @@
         e.avisos_cliente ? el('small', { class: 'pista', text: 'Tiene los avisos activados: le llegan solos.' }) : el('small', { class: 'pista', text: 'No activó los avisos: avísale por WhatsApp.' }),
         el('a', { class: 'boton chico ' + (e.avisos_cliente ? 'borde' : 'cinta'), href: `https://wa.me/${waTel(e.destino_telefono)}?text=${encodeURIComponent(texto)}`, target: '_blank', rel: 'noopener', text: 'Avisar por WhatsApp' }));
     }
+    // Lo que está en curso va arriba; lo terminado queda plegado en "Terminados" para que no estorbe
+    const TERMINADOS = ['entregado', 'devuelto', 'en_sede', 'cancelado'];
+    let verTerminados = false;
     function tarjetas() {
-      const nodos = [], vistos = new Set();
+      const activos = [], hechos = [], vistos = new Set();
       for (const e of envios) {
         if (e.pedido_id && e.grupo) {
           if (vistos.has(e.grupo)) continue;
           vistos.add(e.grupo);
-          nodos.push(tarjetaRuta(envios.filter(x => x.grupo === e.grupo).sort((a, b) => (a.parada || 0) - (b.parada || 0))));
-        } else nodos.push(tarjeta(e));
+          const ruta = envios.filter(x => x.grupo === e.grupo).sort((a, b) => (a.parada || 0) - (b.parada || 0));
+          (ruta.every(x => TERMINADOS.includes(x.estado)) ? hechos : activos).push(tarjetaRuta(ruta));
+        } else (TERMINADOS.includes(e.estado) ? hechos : activos).push(tarjeta(e));
       }
-      return nodos;
+      if (!activos.length) activos.push(el('div', { class: 'vacio', text: enLinea ? 'Estás en línea. Aquí aparecerán los envíos que te asignen.' : 'No tienes entregas en curso. Conéctate para recibir envíos.' }));
+      if (hechos.length) {
+        const d = el('details', { class: 'terminados', open: verTerminados || null, ontoggle: (ev) => { verTerminados = ev.target.open; } },
+          el('summary', {}, `Terminados (${hechos.length})`), ...hechos);
+        activos.push(d);
+      }
+      return activos;
     }
     function tarjetaRuta(lista) {
       const e0 = lista[0];
@@ -904,8 +914,9 @@
       const codigo = el('input', { id: 'en-codigo', inputmode: 'numeric', pattern: '[0-9]*', maxlength: 4, autocomplete: 'one-time-code', class: 'entrada-codigo', placeholder: '0000', oninput: (ev) => { ev.target.value = ev.target.value.replace(/\D/g, '').slice(0, 4); } });
       const recibio = el('input', { id: 'en-recibio', maxlength: 100, value: e.destino_nombre, placeholder: 'Nombre de quien recibe' });
       const foto = el('input', { id: 'en-foto', type: 'file', accept: 'image/*', capture: 'environment' });
-      const vista = el('img', { class: 'vista-previa', alt: '', hidden: true });
-      foto.addEventListener('change', () => { if (foto.files[0]) { vista.src = URL.createObjectURL(foto.files[0]); vista.hidden = false; } });
+      const vista = el('img', { alt: '', hidden: true });
+      const vacioFoto = el('span', { class: 'foto-paquete-vacio' }, el('strong', { text: 'Tomar foto del paquete entregado' }), el('small', { text: 'En las manos de quien recibe o en la puerta' }));
+      foto.addEventListener('change', () => { if (foto.files[0]) { vista.src = URL.createObjectURL(foto.files[0]); vista.hidden = false; vacioFoto.hidden = true; } });
       const lienzo = el('canvas', { class: 'firma', width: 600, height: 220, 'aria-label': 'Firma de quien recibe' });
       let firmado = false;
       const ctx = lienzo.getContext('2d');
@@ -937,7 +948,7 @@
         Number(e.cobro_destinatario) > 0 ? el('div', { class: 'cobro', text: `Antes de entregar, cobra ${dinero(e.cobro_destinatario)}` }) : '',
         el('div', { class: 'campo' }, el('label', { for: 'en-codigo', text: 'Código de entrega (te lo da quien recibe)' }), codigo),
         el('div', { class: 'campo' }, el('label', { for: 'en-recibio', text: '¿Quién recibió?' }), recibio),
-        el('div', { class: 'campo' }, el('label', { for: 'en-foto', text: 'Foto del paquete entregado' }), foto, vista),
+        el('div', { class: 'foto-paquete foto-paquete-chica foto-entrega' }, el('label', { class: 'foto-paquete-boton', for: 'en-foto' }, vista, vacioFoto, foto)),
         el('div', { class: 'campo' }, el('span', { class: 'etiqueta-campo', text: 'Firma de quien recibe (opcional)' }), lienzo,
           el('button', { class: 'boton borde chico', type: 'button', text: 'Borrar firma', onclick: () => { ctx.clearRect(0, 0, lienzo.width, lienzo.height); firmado = false; } })),
         boton);

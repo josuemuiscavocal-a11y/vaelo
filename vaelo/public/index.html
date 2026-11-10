@@ -89,7 +89,7 @@
       <div class="contenedor cotizador">
         <div>
           <h2>¿Cuánto cuesta tu envío?</h2>
-          <p class="intro">Precio fijo cuando recogemos y entregamos dentro de <strong id="lista-zonas">las zonas 1, 6, 16, 17, 18 y 24</strong>. Hacia municipios y otras zonas cobramos por kilómetro recorrido.</p>
+          <p class="intro">Precio fijo cuando recogemos y entregamos dentro de <strong id="lista-zonas">las zonas 1, 6, 16, 17, 18 y 24</strong>. Hacia municipios y otras zonas también es precio fijo, un poco más alto.</p>
         </div>
         <div class="panel">
           <div class="campo">
@@ -186,8 +186,8 @@
         const v = cfg.vehiculos.find(x => String(x.id) === document.querySelector('input[name="cot-veh"]:checked')?.value);
         if (!v) return;
         const precio = document.getElementById('cot-precio'), nota = document.getElementById('cot-nota');
-        if (so.value !== cfg.otraZona && sd.value !== cfg.otraZona) { precio.textContent = dinero(v.tarifa_zona); nota.textContent = 'precio fijo'; }
-        else { precio.textContent = dinero(v.precio_km) + '/km'; nota.textContent = `más ${dinero(v.tarifa_base)} de arranque. El total se calcula cuando quien entrega y quien recibe comparten su ubicación.`; }
+        if (so.value !== cfg.otraZona && sd.value !== cfg.otraZona) { precio.textContent = dinero(v.tarifa_zona); nota.textContent = 'precio fijo en zona preferencial'; }
+        else { precio.textContent = dinero(Math.max(v.tarifa_zona, v.tarifa_base)); nota.textContent = 'precio fijo fuera de las zonas preferenciales'; }
       };
       [so, sd].forEach(s => s.addEventListener('change', calcular));
       vehs.addEventListener('change', calcular);

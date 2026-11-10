@@ -648,11 +648,15 @@ async function activarPush() {
   await api('/api/push/suscribir', { body: { suscripcion: sub.toJSON() } });
   return sub;
 }
+// Avisos que se pueden cerrar: no vuelven a salir en 7 días
+const cerradoHasta = (k) => { try { return Number(localStorage.getItem('cerrado-' + k) || 0) > Date.now(); } catch { return false; } };
+const botonCerrarAviso = (k, caja) => el('button', { class: 'cerrar-aviso', type: 'button', 'aria-label': 'Cerrar este aviso', title: 'Ocultar por una semana', text: '×',
+  onclick: () => { try { localStorage.setItem('cerrado-' + k, String(Date.now() + 7 * 86400e3)); } catch { /* sin almacenamiento */ } caja.hidden = true; } });
 // Tarjeta para activar los avisos. texto: qué avisos recibirá
 function bloqueAvisos(texto) {
   const caja = el('div', { class: 'avisos-push', hidden: true });
   const pintar = async () => {
-    if (!pushDisponible() && !(esIos() && !yaInstalada())) { caja.hidden = true; return; }
+    if ((!pushDisponible() && !(esIos() && !yaInstalada())) || cerradoHasta('avisos')) { caja.hidden = true; return; }
     let sub = null;
     try { sub = await suscripcionPush(); } catch { /* sin servicio */ }
     if (sub && Notification.permission === 'granted') {
@@ -665,7 +669,7 @@ function bloqueAvisos(texto) {
         ev.target.disabled = true;
         try { await activarPush(); await api('/api/push/probar', { body: {} }).catch(() => {}); caja.hidden = true; }
         catch (e) { msg.textContent = e.message; ev.target.disabled = false; }
-      } }));
+      } }), botonCerrarAviso('avisos', caja));
     caja.hidden = false;
   };
   setTimeout(pintar, 0);
@@ -693,13 +697,13 @@ async function pedirInstalar() {
 function bloqueInstalar(nombreApp) {
   const caja = el('div', { class: 'instalar', hidden: true });
   const mostrar = () => {
-    if (yaInstalada()) { caja.hidden = true; return; }
+    if (yaInstalada() || cerradoHasta('instalar')) { caja.hidden = true; return; }
     if (eventoInstalar) {
       caja.replaceChildren(el('div', {}, el('strong', { text: `Instala ${nombreApp} en tu celular` }), el('small', { text: 'Queda en tu pantalla de inicio y se abre como cualquier app, sin descargar archivos.' })),
-        el('button', { class: 'boton chico', type: 'button', text: 'Instalar', onclick: async () => { await pedirInstalar(); mostrar(); } }));
+        el('button', { class: 'boton chico', type: 'button', text: 'Instalar', onclick: async () => { await pedirInstalar(); mostrar(); } }), botonCerrarAviso('instalar', caja));
       caja.hidden = false;
     } else if (esCelular()) {
-      caja.replaceChildren(el('div', {}, el('strong', { text: `Instala ${nombreApp} en tu celular` }), el('small', { text: pasosInstalar() })));
+      caja.replaceChildren(el('div', {}, el('strong', { text: `Instala ${nombreApp} en tu celular` }), el('small', { text: pasosInstalar() })), botonCerrarAviso('instalar', caja));
       caja.hidden = false;
     } else caja.hidden = true;
   };

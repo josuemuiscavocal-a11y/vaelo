@@ -274,7 +274,7 @@ db.prepare("UPDATE usuarios SET rol = 'cliente' WHERE rol = 'admin' AND email !=
 if (!db.prepare('SELECT COUNT(*) AS n FROM vehiculos').get().n) {
   const ins = db.prepare(`INSERT INTO vehiculos (nombre, descripcion, peso_max, tarifa_zona, tarifa_base, precio_km, orden)
     VALUES (?, ?, ?, ?, ?, ?, ?)`);
-  ins.run('Moto', 'Sobres, paquetes y cajas pequeñas', 30, 35, 35, 4, 1);
+  ins.run('Moto', 'Sobres, paquetes y cajas pequeñas', 30, 35, 45, 0, 1);
   ins.run('Pickup', 'Cajas grandes, varios bultos o mercadería', 1500, 150, 150, 8, 2);
 }
 if (!db.prepare('SELECT COUNT(*) AS n FROM zonas_fijas').get().n) {
@@ -557,4 +557,12 @@ if (!db.prepare("SELECT 1 FROM ajustes WHERE clave = 'v6_carpetas'").get()) {
   db.exec("INSERT INTO ajustes (clave, valor) VALUES ('v6_carpetas', datetime('now'))");
 }
 
+// Precio fijo: Q35 en zonas preferenciales y Q45 fuera (tarifa_base guarda la de fuera). Ya no se cobra por km.
+if (!db.prepare("SELECT 1 FROM ajustes WHERE clave = 'v6_tarifa_fija'").get()) {
+  db.exec("UPDATE vehiculos SET tarifa_base = 45, precio_km = 0 WHERE solo_oficina = 0 AND lower(nombre) LIKE '%moto%'");
+  db.exec("UPDATE vehiculos SET precio_km = 0 WHERE solo_oficina = 0");
+  db.exec("INSERT INTO ajustes (clave, valor) VALUES ('comision_tipo', 'vaelo_fijo') ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor");
+  db.exec("INSERT INTO ajustes (clave, valor) VALUES ('comision_valor', '5') ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor");
+  db.exec("INSERT INTO ajustes (clave, valor) VALUES ('v6_tarifa_fija', datetime('now'))");
+}
 module.exports = { db, DB_PATH, DATA_DIR };

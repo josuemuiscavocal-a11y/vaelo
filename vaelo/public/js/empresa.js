@@ -272,7 +272,10 @@ async function vistaCarpeta(caja, yo, id) {
     msgArchivo,
     el('section', { class: 'bloque' },
       el('div', { class: 'cab-bloque' }, el('h2', { text: `Envíos (${pedidos.length})` }),
-        pedidos.length ? el('button', { class: 'boton borde chico', type: 'button', text: 'Imprimir etiquetas', onclick: () => imprimirEtiquetas(pedidos, r.empresa) }) : null),
+        el('div', { class: 'navegar' },
+          abierta && pedidos.some((p) => ['pendiente', 'esperando'].includes(p.estado)) ? el('button', { class: 'boton cinta chico', type: 'button', text: `Recordar a los que faltan (${pedidos.filter((p) => ['pendiente', 'esperando'].includes(p.estado)).length})`,
+            onclick: () => dialogoRecordar(pedidos.filter((p) => ['pendiente', 'esperando'].includes(p.estado)), r, c) }) : null,
+          pedidos.length ? el('button', { class: 'boton borde chico', type: 'button', text: 'Imprimir etiquetas', onclick: () => imprimirEtiquetas(pedidos, r.empresa) }) : null)),
       pedidos.length ? el('ul', { class: 'pedidos-lista' }, pedidos.map((p) => filaPedido(p, r, c, recargar)))
         : el('div', { class: 'carpetas-vacio' }, el('p', { text: 'La carpeta está vacía. Toca «Añadir envío» para registrar el primero.' }))));
 }
@@ -285,6 +288,23 @@ function filaPedido(p, r, c, recargar) {
   const mandar = async () => { api(`/api/empresa/pedidos/${p.id}/enlace`, { body: {} }).catch(() => {}); };
   const e = p.envio;
   const editable = ['pendiente', 'esperando', 'confirmado', 'vencido', 'no_puede'].includes(p.estado) && !p.lote_id;
+  const wa = `https://wa.me/${waNum(p.cliente_telefono)}?text=${encodeURIComponent(textoEnlace(p, r, c.dia))}`;
+  // Una acción principal a la vista; el resto en el menú "⋯"
+  const principal = !editable ? null
+    : p.estado === 'confirmado' ? null
+    : !p.tiene_foto ? el('label', { class: 'boton cinta chico doc-boton' }, 'Tomar foto', fotoInput)
+    : el('a', { class: 'boton cinta chico', href: wa, target: '_blank', rel: 'noopener', onclick: mandar, text: p.estado === 'esperando' ? 'Recordar' : 'Mandar enlace' });
+  const opciones = editable ? [
+    p.tiene_foto && p.estado !== 'confirmado' ? null : el('a', { href: wa, target: '_blank', rel: 'noopener', onclick: mandar, text: p.estado === 'confirmado' ? 'Mandar enlace otra vez' : 'Mandar enlace por WhatsApp' }),
+    el('button', { type: 'button', text: 'Copiar enlace', onclick: async (ev) => { mandar(); try { await navigator.clipboard.writeText(enlace); ev.target.textContent = 'Enlace copiado'; } catch { prompt('Enlace:', enlace); } } }),
+    el('button', { type: 'button', text: p.estado === 'confirmado' ? 'Editar datos de entrega' : 'Llenar yo los datos', onclick: () => dialogoLlenar(p, r, c, recargar) }),
+    p.tiene_foto ? el('label', { class: 'doc-boton' }, 'Cambiar foto', fotoInput) : null,
+    el('button', { type: 'button', text: 'Mover a otra carpeta', onclick: () => dialogoMover(p, r, c, recargar) }),
+    el('button', { type: 'button', class: 'peligro-texto', text: 'Quitar de la carpeta', onclick: async () => {
+      if (!confirm(`¿Quitar el envío de ${p.cliente_nombre}?`)) return;
+      await api(`/api/empresa/pedidos/${p.id}`, { method: 'DELETE' }).catch((x) => alert(x.message)); recargar();
+    } })] : [];
+  const menu = opciones.length ? el('details', { class: 'menu-acciones' }, el('summary', { 'aria-label': 'Más opciones', title: 'Más opciones' }, '⋯'), el('div', { class: 'menu-lista' }, opciones)) : null;
   return el('li', { class: 'pedido-fila' },
     el('div', { class: 'pedido-info' },
       el('div', {}, el('strong', { text: p.cliente_nombre }), ' ', el('span', { class: ESTADO_PEDIDO_CLASE[p.estado] || 'etiqueta-gris', text: p.estado_texto }),
@@ -292,20 +312,60 @@ function filaPedido(p, r, c, recargar) {
         p.avisos ? el('span', { class: 'etiqueta-azul', style: 'margin-left:.3rem', title: 'Tu cliente activó los avisos', text: 'Avisos activos' }) : null),
       el('small', { text: `${p.codigo} · ${p.descripcion} · ${p.tamano_texto}` }),
       p.estado === 'confirmado' || p.lote_id ? el('small', { text: `${p.horario_texto}${p.zona ? ' · ' + p.zona : ''}${p.direccion ? ' · ' + p.direccion : ''}` }) : null,
-      p.estado === 'no_puede' ? el('small', { class: 'error-texto', text: `No puede ese día${p.no_puede_nota ? ': ' + p.no_puede_nota : ''}. Llénalo tú con otro arreglo o quítalo de la carpeta.` }) : null,
+      p.estado === 'no_puede' ? el('small', { class: 'error-texto', text: `No puede ese día${p.no_puede_nota ? ': ' + p.no_puede_nota : ''}. Muévelo a otra carpeta desde «⋯».` }) : null,
       e ? el('small', { class: 'pedido-envio' }, el('b', { text: ESTADO_ENVIO_EMP[e.estado] || e.estado }),
         e.piloto ? ` · ${e.piloto}` : '', e.paradas > 1 ? ` · entrega ${e.parada} de ${e.paradas}` : '', e.recibio ? ` · recibió ${e.recibio}` : '',
         e.fallo ? ` · ${e.fallo}` : '', e.dias_sede ? ` · ${e.dias_sede} día(s) en la sede: pasa a recogerlo con el código` : '') : null),
-    el('div', { class: 'pedido-acciones' },
-      editable && p.estado !== 'confirmado' ? el('a', { class: 'boton cinta chico', href: `https://wa.me/${waNum(p.cliente_telefono)}?text=${encodeURIComponent(textoEnlace(p, r, c.dia))}`, target: '_blank', rel: 'noopener', onclick: mandar,
-        text: p.estado === 'esperando' ? 'Reenviar enlace' : 'Mandar enlace' }) : null,
-      editable ? el('button', { class: 'boton borde chico', type: 'button', text: 'Copiar enlace', onclick: async (ev) => { mandar(); try { await navigator.clipboard.writeText(enlace); ev.target.textContent = 'Copiado'; } catch { prompt('Enlace:', enlace); } } }) : null,
-      editable && !p.tiene_foto ? el('label', { class: 'boton borde chico doc-boton' }, 'Tomar foto', fotoInput) : null,
-      editable ? el('button', { class: 'boton borde chico', type: 'button', text: p.estado === 'confirmado' ? 'Editar' : 'Llenar yo', onclick: () => dialogoLlenar(p, r, c, recargar) }) : null,
-      editable ? el('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Quitar envío ' + p.codigo, title: 'Quitar de la carpeta', onclick: async () => {
-        if (!confirm(`¿Quitar el envío de ${p.cliente_nombre}?`)) return;
-        await api(`/api/empresa/pedidos/${p.id}`, { method: 'DELETE' }).catch((x) => alert(x.message)); recargar();
-      } }, '×') : null));
+    el('div', { class: 'pedido-acciones' }, principal, menu));
+}
+// Mover un envío a otra carpeta (otro día)
+async function dialogoMover(p, r, c, recargar) {
+  let lista;
+  try { lista = await api('/api/empresa/carpetas'); } catch (e) { alert(e.message); return; }
+  const otras = lista.abiertas.filter((x) => x.id !== c.id);
+  const dlg = el('dialog', { class: 'dialogo' });
+  const msg = el('div', { class: 'mensaje', role: 'alert' });
+  const mover = (id) => async (ev) => {
+    ev.target.disabled = true;
+    try {
+      const x = await api(`/api/empresa/pedidos/${p.id}/carpeta`, { method: 'PUT', body: { carpeta_id: id } });
+      dlg.close(); recargar();
+      if (x.reconfirmar) alert(`Listo. Mándale el enlace otra vez a ${p.cliente_nombre} para que confirme la nueva fecha.`);
+    } catch (e) { mostrarMensaje(msg, e.message); ev.target.disabled = false; }
+  };
+  dlg.append(el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: () => dlg.close() }),
+    el('h2', { text: `Mover a ${p.cliente_nombre}` }), el('p', { class: 'pista', text: 'Elige la carpeta del día en que se va a entregar.' }), msg,
+    otras.length ? el('div', { class: 'lista-mover' }, otras.map((x) => el('button', { class: 'opcion-mover', type: 'button', onclick: mover(x.id) },
+      el('strong', { text: x.nombre }), el('small', { text: `Entrega ${diaEmp(x.dia)} · ${x.total} envío(s)` })))) : el('p', { text: 'No tienes otra carpeta abierta.' }),
+    el('button', { class: 'boton borde', type: 'button', style: 'margin-top:1rem', text: '+ Crear carpeta nueva y mover', onclick: () => { dlg.close(); dialogoCarpeta(null, r, async (nueva) => { try { const x = await api(`/api/empresa/pedidos/${p.id}/carpeta`, { method: 'PUT', body: { carpeta_id: nueva.id } }); recargar(); if (x.reconfirmar) alert(`Listo. Mándale el enlace otra vez a ${p.cliente_nombre} para que confirme la nueva fecha.`); } catch (e) { alert(e.message); } }); } }));
+  dlg.addEventListener('close', () => dlg.remove());
+  document.body.append(dlg); dlg.showModal();
+}
+// Recordar a todos los que no han confirmado: un botón de WhatsApp por cliente, en una sola lista
+function dialogoRecordar(pedidos, r, c) {
+  const dlg = el('dialog', { class: 'dialogo hoja' });
+  dlg.append(el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: () => dlg.close() }),
+    el('h2', { text: 'Recordar a los que faltan' }), el('p', { class: 'pista', text: 'Toca cada uno: se abre WhatsApp con el mensaje y su enlace.' }),
+    el('ul', { class: 'caja-enlaces' }, pedidos.map((p) => el('li', {}, el('span', {}, el('strong', { text: p.cliente_nombre }), el('small', { text: `${p.estado_texto} · ${p.descripcion}` })),
+      el('a', { class: 'boton cinta chico', href: `https://wa.me/${waNum(p.cliente_telefono)}?text=${encodeURIComponent(textoEnlace(p, r, c.dia))}`, target: '_blank', rel: 'noopener',
+        onclick: (ev) => { api(`/api/empresa/pedidos/${p.id}/enlace`, { body: {} }).catch(() => {}); ev.currentTarget.textContent = 'Enviado ✓'; ev.currentTarget.classList.replace('cinta', 'borde'); }, text: 'Mandar' })))));
+  dlg.addEventListener('close', () => dlg.remove());
+  document.body.append(dlg); dlg.showModal();
+}
+// Pegar el mensaje de WhatsApp del cliente y sacar nombre, teléfono, dirección y zona
+function leerMensajeCliente(texto) {
+  const t = String(texto || '').replace(/\r/g, '');
+  const out = {};
+  const tel = t.match(/(?:\+?502[\s-]?)?(\d{4})[\s-]?(\d{4})/);
+  if (tel) out.telefono = tel[1] + tel[2];
+  const zona = t.match(/zona\s*(\d{1,2})/i);
+  if (zona) out.zona = 'Zona ' + Number(zona[1]);
+  const lineas = t.split(/\n|,(?=\s*[A-Za-zÁÉÍÓÚÑáéíóúñ])/).map((x) => x.replace(/^[\s\-•*]*(nombre|tel[eé]fono|cel|whats\w*|direcci[oó]n|dir)\s*[:.]?\s*/i, '').trim()).filter(Boolean);
+  const dir = lineas.find((l) => /\b(calle|avenida|av\.?|ave\.?|zona|colonia|col\.?|km|lote|casa|apto|edificio|residencial|calz)\b/i.test(l) && !/^\+?\d[\d\s-]{7,}$/.test(l));
+  if (dir) out.direccion = dir.slice(0, 300);
+  const nombre = lineas.find((l) => l !== dir && !/\d{4}/.test(l) && /^[A-Za-zÁÉÍÓÚÑáéíóúñ][A-Za-zÁÉÍÓÚÑáéíóúñ.\s]{2,60}$/.test(l));
+  if (nombre) out.nombre = nombre.replace(/\s+/g, ' ');
+  return out;
 }
 
 // "Añadir envío": lo mínimo del paquete y del cliente. Después se manda el enlace o lo llena la empresa.
@@ -331,7 +391,17 @@ function dialogoNuevoEnvio(c, r, recargar) {
   const guardar = el('button', { class: 'boton accion-principal', type: 'submit', text: 'Guardar y mandar enlace' });
   const otroChk = el('input', { type: 'checkbox', id: 'np-otro', style: 'width:auto', checked: true });
   const otro = el('label', { class: 'casilla', for: 'np-otro' }, otroChk, el('span', { text: 'Después de guardar, añadir otro' }));
+  // Pegar el mensaje del cliente (nombre, teléfono, dirección) y se llenan solos los campos
+  const pegado = el('textarea', { rows: 3, placeholder: 'Pega aquí lo que te mandó tu cliente por WhatsApp, ej.\nMaría López\n5555 1234\n7a avenida 10-25, zona 1' });
+  const cajaPegar = el('div', { class: 'pegar-mensaje', hidden: true }, pegado, el('small', { class: 'pista', text: 'Revisa que los datos queden bien.' }));
+  pegado.addEventListener('input', () => {
+    const d = leerMensajeCliente(pegado.value);
+    if (d.nombre) nombre.value = d.nombre;
+    if (d.telefono) tel.value = d.telefono;
+    if (d.direccion || d.zona) { datosEntrega.prellenar(d); if (!llenar) modos.querySelectorAll('input')[1].click(); }
+  });
   const form = el('form', { novalidate: true },
+    el('button', { class: 'boton borde chico', type: 'button', style: 'margin-bottom:.6rem', text: '📋 Pegar datos de WhatsApp', onclick: () => { cajaPegar.hidden = !cajaPegar.hidden; if (!cajaPegar.hidden) pegado.focus(); } }), cajaPegar,
     el('div', { class: 'campo' }, el('label', { for: 'np-desc', text: '¿Qué es el paquete?' }), desc),
     el('div', { class: 'campo' }, el('label', { text: 'Tamaño' }), tamanos),
     el('div', { class: 'foto-paquete foto-paquete-chica' }, el('label', { class: 'foto-paquete-boton', for: 'np-foto' }, vistaFoto, vacio, foto)),
@@ -388,6 +458,7 @@ function camposEntrega(p, r, c) {
     if (punto) sel.poner(punto.lat, punto.lng);
   };
   return { nodo, refrescar: asegurarMapa,
+    prellenar: (d) => { if (d.direccion) direccion.value = d.direccion; if (d.zona && [...zona.options].some((o) => o.value === d.zona)) zona.value = d.zona; if (d.nombre) rn.value = d.nombre; if (d.telefono) rt.value = d.telefono; },
     leer: () => {
       if (!punto) throw new Error('Marca en el mapa dónde se entrega.');
       return { dia: c.dia, horario, lat: punto.lat, lng: punto.lng, zona: zona.value, direccion: direccion.value, referencias: referencias.value, recibe_nombre: rn.value, recibe_telefono: rt.value };
@@ -528,3 +599,8 @@ async function panelAnalitica(caja) {
   poner(caja, chips, zonaCifras, zonaGraficas);
   pintarChips(); cargar();
 }
+
+// Los menús "⋯" se cierran al tocar fuera o al elegir una opción
+document.addEventListener('click', (ev) => {
+  document.querySelectorAll('details.menu-acciones[open]').forEach((d) => { if (!d.contains(ev.target) || ev.target.closest('.menu-lista > button, .menu-lista > a')) d.open = false; });
+});

@@ -75,7 +75,7 @@
             </div>
             <div class="campo" id="campo-origen-nombre" hidden style="margin-top:.75rem"><label for="origen_nombre">Nombre de quien entrega el paquete</label><input id="origen_nombre" maxlength="100" placeholder="Ej. Tienda La Esquina, María"></div>
             <div class="fila" style="margin-top:.75rem">
-              <div class="campo"><label for="origen_zona">Zona o municipio</label><select id="origen_zona" required></select></div>
+              <div class="campo"><label for="origen_zona">Zona o municipio</label><select id="origen_zona" required></select><small class="pista ok" id="pista-zona-origen" hidden></small></div>
               <div class="campo"><label for="origen_telefono" id="etiqueta-origen-tel">Tu teléfono</label><input id="origen_telefono" type="tel" maxlength="30" placeholder="0000-0000"></div>
             </div>
             <div class="campo"><label for="origen_direccion">Referencias <span class="ayuda">Opcional: casa, apartamento, color de puerta</span></label><input id="origen_direccion" maxlength="300" placeholder="Edificio azul, apartamento 5"></div>
@@ -132,9 +132,14 @@
           </div>
           <p class="pista" id="pista-caja">¿Mandas a varias personas desde el mismo lugar? Agrega cada destinatario a la caja y envíalos juntos: a cada uno le mandas su enlace para que comparta su ubicación.</p>
         </form>
+        <div class="barra-enviar" id="barra-enviar" hidden>
+          <span><small id="barra-detalle">Precio del envío</small><strong id="barra-precio">—</strong></span>
+          <button class="boton" type="button" id="barra-boton">Enviar paquete</button>
+        </div>
       </section>
 
       <section id="panel-lista" role="tabpanel" aria-labelledby="tab-lista" hidden>
+        <div class="filtros" id="filtro-envios" role="tablist"></div>
         <div id="lista" class="lista-envios"></div>
       </section>
 
@@ -184,6 +189,7 @@
   <script src="/js/qr.js?v=1"></script>
   <script src="/js/empresa.js?v=3"></script>
   <script>
+    const tarifaFueraDe = (id) => { const v = (cfg?.vehiculos || []).find((x) => String(x.id) === String(id)); return v ? Math.max(v.tarifa_zona, v.tarifa_base || 0) : 45; };
     let cfg = null, envios = [], selOrigen = null, selDestino = null, refresco = null;
     const $ = (id) => document.getElementById(id);
     // Íconos dibujados (líneas simples) para cada tipo de vehículo
@@ -203,6 +209,8 @@
     const tabs = ['nuevo', 'lista', 'empresa', 'cuenta'];
     function abrirTab(nombre) {
       tabs.forEach(t => { $('tab-' + t).setAttribute('aria-selected', String(t === nombre)); $('panel-' + t).hidden = t !== nombre; });
+      const pest = $('tab-' + nombre).parentElement, b = $('tab-' + nombre);
+      if (b.offsetLeft < pest.scrollLeft || b.offsetLeft + b.offsetWidth > pest.scrollLeft + pest.clientWidth) pest.scrollTo({ left: b.offsetLeft - 8, behavior: 'smooth' });
       if (nombre === 'lista') cargarEnvios();
       if (nombre === 'empresa') pintarEmpresa($('zona-empresa'), { alCrear: () => { abrirTab('lista'); } });
     }
@@ -226,12 +234,12 @@
         try {
           const r = await api('/api/cotizar', { body: datos });
           if (mio !== turno) return;
-          const textoPrecio = (r.tipo === 'km' && r.km == null ? 'Desde ' : '') + dinero(r.precio);
+          const textoPrecio = dinero(r.precio);
           if ($('precio').textContent !== textoPrecio) { $('precio').classList.remove('pulso'); void $('precio').offsetWidth; $('precio').classList.add('pulso'); }
           $('precio').textContent = textoPrecio;
           $('precio-antes').textContent = r.descuento ? dinero(r.precio_base) : '';
           $('desglose').textContent = r.detalle + (r.descuento ? `. ${r.promocion}: −${dinero(r.descuento)}` : '') +
-            (r.tipo === 'zona' ? '. Si la entrega queda fuera de las zonas cubiertas, se cobra por km.' : '');
+            (r.tipo === 'zona' ? `. Si la entrega queda fuera de las zonas preferenciales: ${dinero(tarifaFueraDe(datos.vehiculo_id))}.` : '');
           $('desglose-cargos').textContent = r.cargos_pendientes > 0 ? `Más ${dinero(r.cargos_pendientes)} de cargos pendientes que se cobran con este envío.` : '';
           const cm = $('cupon-msg');
           cm.textContent = r.error_cupon || (datos.cupon && r.descuento ? `Cupón aplicado: ${r.promocion}` : '');
@@ -289,9 +297,11 @@
     }
 
     function tarjetaEnvio(e) {
+      const terminado = !ACTIVOS_CLI.includes(e.estado);
       const acciones = el('div', { class: 'acciones' },
-        el('button', { class: 'boton chico', type: 'button', text: 'Ver en el mapa', onclick: () => verDetalle(e.id) }),
-        el('button', { class: 'boton borde chico', type: 'button', text: 'Guía', onclick: () => verGuia(e) }));
+        el('button', { class: 'boton chico', type: 'button', text: terminado ? 'Ver detalle' : 'Ver en el mapa', onclick: () => verDetalle(e.id) }),
+        e.estado !== 'cancelado' ? el('button', { class: 'boton borde chico', type: 'button', text: 'Guía', onclick: () => verGuia(e) }) : null,
+        el('button', { class: 'boton borde chico', type: 'button', text: 'Repetir', title: 'Mandar otro con los mismos datos', onclick: () => repetirEnvio(e) }));
       if (e.estado === 'pendiente') {
         acciones.append(el('button', { class: 'boton peligro chico', type: 'button', text: 'Cancelar envío', onclick: (ev) => cancelarEnvio(e, ev.target) }));
       }
@@ -319,8 +329,34 @@
         if (!envios.length) {
           lista.replaceChildren(el('div', { class: 'vacio' }, el('p', { text: 'Todavía no has enviado paquetes.' }),
             el('button', { class: 'boton', type: 'button', text: 'Enviar mi primer paquete', onclick: () => abrirTab('nuevo') })));
-        } else lista.replaceChildren(...envios.map(tarjetaEnvio));
+        } else pintarListaEnvios();
       } catch (e) { lista.replaceChildren(el('div', { class: 'mensaje error', text: e.message })); }
+    }
+
+    // En curso arriba; lo terminado en "Historial" para que no estorbe
+    const ACTIVOS_CLI = ['pendiente', 'recogido', 'en_camino', 'fallido', 'devolviendo', 'a_sede', 'en_sede'];
+    let filtroEnvios = 'curso';
+    function pintarListaEnvios() {
+      const enCurso = envios.filter((e) => ACTIVOS_CLI.includes(e.estado));
+      if (filtroEnvios === 'curso' && !enCurso.length) filtroEnvios = 'historial';
+      poner($('filtro-envios'), ...[['curso', `En curso (${enCurso.length})`], ['historial', `Historial (${envios.length - enCurso.length})`]].map(([k, t]) =>
+        el('button', { class: 'chip', type: 'button', 'aria-pressed': String(filtroEnvios === k), text: t, onclick: () => { filtroEnvios = k; pintarListaEnvios(); } })));
+      const ver = envios.filter((e) => (filtroEnvios === 'curso') === ACTIVOS_CLI.includes(e.estado));
+      poner($('lista'), ...(ver.length ? ver.map(tarjetaEnvio) : [el('p', { class: 'pista', text: filtroEnvios === 'curso' ? 'No tienes envíos en curso.' : 'Todavía no hay envíos terminados.' })]));
+    }
+    // Repetir un envío: mismos datos de quien recibe y del paquete; solo falta la foto nueva
+    function repetirEnvio(e) {
+      abrirTab('nuevo');
+      const f = $('form-envio');
+      const v = document.querySelector(`input[name="vehiculo_id"][value="${e.vehiculo_id}"]`); if (v) v.checked = true;
+      f.peso.value = e.peso || ''; f.descripcion.value = e.descripcion || '';
+      f.destino_nombre.value = e.destino_nombre || ''; f.destino_telefono.value = e.destino_telefono || '';
+      if ([...f.destino_zona.options].some((o) => o.value === e.destino_zona)) f.destino_zona.value = e.destino_zona;
+      f.destino_direccion.value = e.destino_direccion || ''; f.notas.value = e.notas || '';
+      $('fragil').checked = !!e.fragil;
+      actualizarPrecio();
+      mostrarMensaje($('msg-envio'), `Copiamos los datos de ${e.guia}. Toma la foto del paquete nuevo y envía.`, 'exito');
+      $('caja-foto-paquete').scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
 
     function cerrarDialogo() { $('dlg').close(); }
@@ -403,6 +439,22 @@
           (err) => mal(new Error(err.code === 1 ? 'Necesitamos tu ubicación para que el piloto llegue a recoger a donde estás. Permite la ubicación en el candado junto a la dirección de la página.' : 'No pudimos leer tu ubicación. Enciende el GPS del teléfono e inténtalo de nuevo.')),
           { enableHighAccuracy: true, timeout: 25000, maximumAge: 10000 });
       });
+    }
+    // La zona de recogida sale sola de tu ubicación (así no se elige una zona equivocada)
+    async function zonaDeMiUbicacion(pos) {
+      try {
+        const z = await api(`/api/zona?lat=${pos.lat}&lng=${pos.lng}`);
+        const sel = $('origen_zona');
+        if (z.zona && [...sel.options].some((o) => o.value === z.zona)) {
+          sel.value = z.zona; $('pista-zona-origen').textContent = `Detectamos tu zona con tu ubicación: ${z.zona}.`; $('pista-zona-origen').hidden = false; actualizarPrecio();
+        }
+      } catch { /* se queda la que eligió */ }
+    }
+    async function detectarZonaInicial() {
+      try {
+        const p = await navigator.permissions?.query({ name: 'geolocation' });
+        if (p && p.state === 'granted' && document.querySelector('input[name="origen_quien"]:checked')?.value === 'cliente') zonaDeMiUbicacion(await miUbicacion());
+      } catch { /* sin permiso: se pide al enviar */ }
     }
     let vigiaCliente = null, lecturaCliente = null, envioUbic = 0, errorUbic = '';
     async function mandarMiUbicacion(forzar) {
@@ -556,8 +608,7 @@
         $('opcion-recibe').hidden = yoCliente.tipo_cuenta !== 'empresa';
         $('campo-paquetes').hidden = yoCliente.tipo_cuenta !== 'empresa';
         $('tab-empresa').hidden = yoCliente.tipo_cuenta !== 'empresa';
-        if (yoCliente.tipo_cuenta === 'empresa') avisos.push(el('div', { class: 'mensaje exito' }, `Cuenta de empresa${yoCliente.empresa_nombre ? ': ' + yoCliente.empresa_nombre : ''}.`,
-          yoCliente.descuento_empresa > 0 ? ` Tienes ${yoCliente.descuento_empresa}% de descuento en tus envíos.` : ''));
+        if (yoCliente.tipo_cuenta === 'empresa' && yoCliente.descuento_empresa > 0) avisos.push(el('div', { class: 'mensaje exito', text: `Tu empresa tiene ${yoCliente.descuento_empresa}% de descuento en sus envíos.` }));
         if (correoActivo && !yoCliente.email_verificado) avisos.push(el('div', { class: 'mensaje aviso aviso-accion' },
           el('span', {}, 'Confirma tu correo: te enviamos un enlace a ', el('strong', { text: yoCliente.email }), '. Revisa también la carpeta de spam.'),
           el('button', { class: 'boton chico borde', type: 'button', text: 'Reenviar correo', onclick: async (ev) => {
@@ -616,7 +667,6 @@
           el('div', {}, el('span', { text: 'Recogida' }), [e.origen_quien === 'tercero' ? `Entrega ${e.origen.nombre}` : 'Tú', e.origen_zona, e.origen_direccion].filter(Boolean).join('. ')),
           el('div', {}, el('span', { text: 'Recibe' }), [e.destino_nombre, e.destino_zona, e.destino_direccion].filter(Boolean).join('. ')),
           el('div', {}, el('span', { text: 'Precio' }), `${e.precio_por_confirmar ? 'Desde ' : ''}${dinero(e.precio)}${e.km ? `, ${e.km} km` : ''}`,
-            e.precio_por_confirmar ? el('small', { style: 'display:block;color:var(--suave)', text: 'Se calcula por km cuando quien entrega y quien recibe compartan su ubicación.' }) : '',
             e.descuento > 0 ? el('small', { style: 'display:block;color:var(--ok)', text: `Ahorraste ${dinero(e.descuento)}` }) : ''),
           e.programado_para ? el('div', {}, el('span', { text: 'Recogida programada' }), fechaProgramada(e.programado_para)) : '',
           el('div', {}, el('span', { text: 'Pago' }), PAGOS[e.metodo_pago] || e.metodo_pago),
@@ -728,7 +778,7 @@
             envios.push({ ...resto, foto_paquete: await prepararArchivo(archivo, false) });
           }
           let pos = {};
-          if (quien === 'cliente') { boton.textContent = 'Buscando tu ubicación…'; pos = await miUbicacion(); }
+          if (quien === 'cliente') { boton.textContent = 'Buscando tu ubicación…'; pos = await miUbicacion(); await zonaDeMiUbicacion(pos); }
           const r = await api('/api/envios/caja', { body: {
             vehiculo_id: document.querySelector('input[name="vehiculo_id"]:checked')?.value, metodo_pago: f.metodo_pago.value, cupon: $('cupon').value.trim(), programado_para: programado,
             origen_quien: quien, origen_nombre: f.origen_nombre.value, origen_telefono: f.origen_telefono.value, origen_zona: f.origen_zona.value, origen_direccion: f.origen_direccion.value,
@@ -743,7 +793,7 @@
           const actual = leerEnvioActual();
           const fotoPaquete = await prepararArchivo(actual.archivo, false);
           let pos = {};
-          if (quien === 'cliente') { boton.textContent = 'Buscando tu ubicación…'; pos = await miUbicacion(); }
+          if (quien === 'cliente') { boton.textContent = 'Buscando tu ubicación…'; pos = await miUbicacion(); await zonaDeMiUbicacion(pos); }
           const r = await api('/api/envios', { body: {
             ...datosCotizacion(), programado_para: programado, origen_quien: quien, origen_nombre: f.origen_nombre.value,
             origen_lat: pos.lat, origen_lng: pos.lng, origen_precision: pos.precision, guardar_destino: $('guardar-destino').value.trim(),
@@ -799,7 +849,7 @@
           el('span', { class: 'icono', 'aria-hidden': 'true' }, iconoVehiculo(v.nombre)),
           el('strong', { text: v.nombre }),
           el('small', { text: `${v.descripcion}. Hasta ${v.peso_max} lb` }),
-          el('span', { class: 'precio-v', text: `${dinero(v.tarifa_zona)} en zonas cubiertas` })))));
+          el('span', { class: 'precio-v', text: `${dinero(v.tarifa_zona)} en zonas · ${dinero(Math.max(v.tarifa_zona, v.tarifa_base || 0))} fuera` })))));
       const opciones = () => [...cfg.zonas.map(z => el('option', { value: z, text: z })), el('option', { value: cfg.otraZona, text: cfg.otraZona })];
       $('origen_zona').replaceChildren(...opciones()); $('destino_zona').replaceChildren(...opciones());
 
@@ -844,6 +894,18 @@
       });
       $('vehiculos').addEventListener('change', actualizarPrecio);
       actualizarPrecio();
+      detectarZonaInicial();
+      // Barra fija abajo (celular): precio y botón de enviar siempre a la mano mientras llenas el formulario
+      const barra = $('barra-enviar');
+      const copiar = () => { $('barra-precio').textContent = $('precio').textContent; $('barra-boton').textContent = $('boton-enviar').textContent; $('barra-boton').disabled = $('boton-enviar').disabled; };
+      new MutationObserver(copiar).observe($('precio'), { childList: true, characterData: true, subtree: true });
+      new MutationObserver(copiar).observe($('boton-enviar'), { childList: true, attributes: true, subtree: true });
+      copiar();
+      let botonVisible = false, formVisible = false;
+      const ver = () => { barra.hidden = !formVisible || botonVisible || $('panel-nuevo').hidden; };
+      new IntersectionObserver(([x]) => { botonVisible = x.isIntersecting; ver(); }).observe($('boton-enviar'));
+      new IntersectionObserver(([x]) => { formVisible = x.isIntersecting; ver(); }).observe($('form-envio'));
+      $('barra-boton').addEventListener('click', () => $('form-envio').requestSubmit());
 
       if (location.pathname === '/mi-cuenta') abrirTab(usuario.tipo_cuenta === 'empresa' && !new URLSearchParams(location.search).get('envio') ? 'empresa' : 'lista'); else cargarEnvios();
       // Desde un aviso del celular: abre ese envío

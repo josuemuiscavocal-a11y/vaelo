@@ -239,17 +239,17 @@
         <div id="msg-tarifas" class="mensaje" role="alert"></div>
         <div class="bloque">
           <h2>Vehículos y precios</h2>
-          <p class="bloque-nota">Dentro de las zonas cubiertas se cobra la tarifa fija. Fuera de ellas: arranque + kilómetros × precio por km (nunca menos que la tarifa fija).</p>
+          <p class="bloque-nota">Precio fijo: «Zona preferencial» cuando recogida y entrega están dentro de las zonas, y «Fuera de zonas» para lo demás. De cada envío Vaelo se queda con Q5 y el resto es del piloto.</p>
           <div class="tabla-envoltura">
             <table>
-              <thead><tr><th>Vehículo</th><th>Descripción</th><th>Peso máx. (lb)</th><th>Tarifa zonas (Q)</th><th>Arranque (Q)</th><th>Por km (Q)</th><th>Solo flete <span class="ayuda">Por WhatsApp, precio a mano</span></th><th>Activo</th><th></th></tr></thead>
+              <thead><tr><th>Vehículo</th><th>Descripción</th><th>Peso máx. (lb)</th><th>Zona preferencial (Q)</th><th>Fuera de zonas (Q)</th><th>Solo flete <span class="ayuda">Por WhatsApp, precio a mano</span></th><th>Activo</th><th></th></tr></thead>
               <tbody id="tabla-vehiculos"></tbody>
             </table>
           </div>
         </div>
         <div class="bloque">
           <h2>Zonas con tarifa fija</h2>
-          <p class="bloque-nota">Dibuja cada zona en el mapa. Con zonas dibujadas, la tarifa fija solo se cobra cuando la recogida y la entrega reales caen dentro de alguna; si no, se cobra por km. Sin ninguna dibujada, la tarifa fija vale hasta el máximo de km de abajo.</p>
+          <p class="bloque-nota">Dibuja cada zona en el mapa. Con zonas dibujadas, la tarifa fija solo se cobra cuando la recogida y la entrega reales caen dentro de alguna; si no, se cobra la tarifa de fuera de zonas. Sin ninguna dibujada, la zona preferencial vale hasta el máximo de km de abajo.</p>
           <div class="mapa" id="mapa-zonas"></div>
           <div class="tabla-envoltura" style="margin:1rem 0">
             <table>
@@ -350,7 +350,7 @@
   <script src="/js/qr.js?v=1"></script>
   <script>
     const $ = (id) => document.getElementById(id);
-    let filtroEstado = '', temporizador = null, mensajeros = [], vehiculos = [], mapaFlota = null, capaFlota = null;
+    let filtroEstado = 'activos', temporizador = null, mensajeros = [], vehiculos = [], mapaFlota = null, capaFlota = null;
     const sub = (t) => el('small', { style: 'color:var(--suave)', text: t || '' });
 
     const tabs = ['envios', 'mensajeros', 'clientes', 'empresas', 'caja', 'descuentos', 'reportes', 'tarifas'];
@@ -393,7 +393,7 @@
     }
 
     function pintarChips() {
-      const opciones = [['', 'Todos'], ['sin_asignar', 'Sin piloto'], ['atencion', 'Requieren atención'], ...Object.entries(ESTADOS), ['empresas', 'De empresas']];
+      const opciones = [['activos', 'Activos'], ['sin_asignar', 'Sin piloto'], ['atencion', 'Requieren atención'], ...Object.entries(ESTADOS), ['empresas', 'De empresas'], ['', 'Todos']];
       poner($('chips'), ...opciones.map(([v, t]) => el('button', {
         class: 'chip', type: 'button', 'aria-pressed': String(v === filtroEstado), text: v === 'pendiente' ? 'Por recoger' : t,
         onclick: () => { filtroEstado = v; pintarChips(); cargarEnvios(); },
@@ -415,8 +415,14 @@
           el('td', {}, e.cliente_nombre, el('br'), sub(e.cliente_telefono)),
           el('td', {}, e.destino_nombre, el('br'), sub(e.destino_zona)),
           el('td', {}, e.vehiculo, el('br'), sub(e.peso + ' lb')),
-          el('td', {}, dinero(e.precio), el('br'), sub(e.tipo_tarifa === 'km' ? (e.km != null ? `${e.km} km` : 'Por km (falta ubicación)') : 'Tarifa fija')),
-          el('td', {}, e.mensajero_nombre ? [e.mensajero_nombre.split(' ')[0], e.asignacion === 'por_aceptar' ? el('br') : null, e.asignacion === 'por_aceptar' ? el('span', { class: 'etiqueta-azul', text: 'Por aceptar' }) : null] : el('span', { class: 'estado pendiente', text: 'Sin asignar' })),
+          el('td', {}, dinero(e.precio), el('br'), sub(e.tipo_tarifa === 'zona' ? 'Zona preferencial' : 'Fuera de zona')),
+          el('td', {}, e.mensajero_nombre ? [e.mensajero_nombre.split(' ')[0], e.asignacion === 'por_aceptar' ? el('br') : null, e.asignacion === 'por_aceptar' ? el('span', { class: 'etiqueta-azul', text: 'Por aceptar' }) : null]
+            : e.estado === 'pendiente' ? el('button', { class: 'boton cinta chico boton-cercano', type: 'button', title: 'Asignar al piloto en línea más cercano', text: 'Al más cercano', onclick: async (ev) => {
+                ev.stopPropagation(); ev.target.disabled = true;
+                try { const r = await api(`/api/admin/envios/${e.id}/asignar-cercano`, { body: {} }); ev.target.replaceWith(el('span', { class: 'etiqueta-azul', text: `${r.piloto} · por aceptar` })); cargarResumen(); }
+                catch (err) { alert(err.message); ev.target.disabled = false; }
+              } })
+            : el('span', { class: 'estado pendiente', text: 'Sin asignar' })),
           el('td', {}, chipEstado(e.estado),
             e.estado === 'pendiente' && !e.receptor_listo ? [el('br'), el('span', { class: 'receptor-estado no', text: 'Faltan ubicaciones' })] : null,
             e.estado === 'fallido' && e.fallo?.decidir_antes ? [el('br'), sub(`El cliente elige en ${faltaPara(e.fallo.decidir_antes)}`)] : null,
@@ -843,7 +849,8 @@ null))));
           el('div', { class: 'datos' },
             dato('Cliente', e.flete ? `${e.flete_cliente || 'Por completar'} (por WhatsApp) ` : `${e.cliente_nombre} `, telLink(e.flete ? e.flete_telefono : e.cliente_telefono)),
             e.paquetes > 1 ? dato('Paquetes', `${e.paquetes} para la misma dirección`) : null,
-            dato('Precio', `${e.precio_por_confirmar ? 'Desde ' : ''}${dinero(e.precio)}, ${PAGOS[e.metodo_pago] || e.metodo_pago}${e.km ? `. ${e.km} km` : ''}${e.fragil ? `. Incluye ${dinero(e.recargo_fragil)} por frágil` : ''}`),
+            dato('Precio', `${dinero(e.precio)} · ${e.tipo_tarifa === 'zona' ? 'zona preferencial' : 'fuera de zona'} · ${PAGOS[e.metodo_pago] || e.metodo_pago}${e.fragil ? `. Incluye ${dinero(e.recargo_fragil)} por frágil` : ''}`),
+            e.reparto ? dato('Reparto', `Piloto ${dinero(e.reparto.piloto)} · Vaelo ${dinero(e.reparto.vaelo)}`) : null,
             dato('Recoger', [e.origen_quien === 'tercero' ? (e.origen && e.origen.nombre) : 'El cliente', e.origen_zona, e.origen_direccion].filter(Boolean).join('. ')),
             dato('Entregar a', [e.destino_nombre, e.destino_zona, e.destino_direccion].filter(Boolean).join('. ')),
             dato('Vehículo y paquete', `${e.vehiculo}, ${e.peso} lb${e.descripcion ? '. ' + e.descripcion : ''}`),
@@ -874,8 +881,8 @@ null))));
               listaCercanos,
               e.mensajero_id ? el('button', { class: 'boton borde chico', type: 'button', style: 'margin-top:.6rem', text: 'Quitar piloto', onclick: (ev) =>
                 guardar(ev.target, () => api(`/api/admin/envios/${e.id}/asignar`, { body: { mensajero_id: '' } })) }) : null)),
-          !enCurso ? null : el('div', { class: 'bloque', style: 'background:var(--gris);border:0' },
-            el('h3', { text: 'Cambiar estado a mano' }),
+          !enCurso ? null : el('details', { class: 'bloque plegable', style: 'background:var(--gris);border:0' },
+            el('summary', {}, el('strong', { text: 'Cambiar estado a mano' }), el('small', { class: 'pista', text: ' · solo si algo falla' })),
             el('p', { class: 'pista', text: 'Normalmente cambia solo con el GPS del piloto. Úsalo si algo falla y escribe el motivo: queda en el historial.' }),
             el('div', { class: 'fila' },
               el('div', { class: 'campo' }, el('label', { for: 'nuevo-estado', text: 'Nuevo estado' }), selEstado),
@@ -1231,9 +1238,9 @@ null))));
       const num = (v, paso) => el('input', { type: 'number', min: 0, step: paso, value: v, style: 'min-width:90px' });
       poner($('tabla-vehiculos'), ...t.vehiculos.map(v => {
         const f = { nombre: el('input', { value: v.nombre, maxlength: 40, style: 'min-width:90px' }), descripcion: el('input', { value: v.descripcion, maxlength: 120, style: 'min-width:180px' }),
-          peso_max: num(v.peso_max, 1), tarifa_zona: num(v.tarifa_zona.toFixed(2), 0.5), tarifa_base: num(v.tarifa_base.toFixed(2), 0.5), precio_km: num(v.precio_km.toFixed(2), 0.25),
+          peso_max: num(v.peso_max, 1), tarifa_zona: num(v.tarifa_zona.toFixed(2), 0.5), tarifa_base: num(v.tarifa_base.toFixed(2), 0.5),
           solo_oficina: el('input', { type: 'checkbox', checked: !!v.solo_oficina, style: 'width:auto' }), activo: el('input', { type: 'checkbox', checked: !!v.activo, style: 'width:auto' }) };
-        return el('tr', {}, ...['nombre', 'descripcion', 'peso_max', 'tarifa_zona', 'tarifa_base', 'precio_km', 'solo_oficina', 'activo'].map(k => el('td', {}, f[k])),
+        return el('tr', {}, ...['nombre', 'descripcion', 'peso_max', 'tarifa_zona', 'tarifa_base', 'solo_oficina', 'activo'].map(k => el('td', {}, f[k])),
           el('td', {}, el('button', { class: 'boton borde chico', type: 'button', text: 'Guardar', onclick: async () => {
             const body = {}; for (const k in f) body[k] = ['activo', 'solo_oficina'].includes(k) ? f[k].checked : f[k].value;
             try { await api('/api/admin/vehiculos/' + v.id, { method: 'PUT', body }); mostrarMensaje($('msg-tarifas'), `${body.nombre} guardado.`, 'exito'); }
