@@ -29,6 +29,8 @@
     'use strict';
     const $ = (id) => document.getElementById(id);
     const app = $('app');
+    // Si la foto de un paquete no carga, se muestra un recuadro limpio en vez del ícono roto
+    document.addEventListener('error', (ev) => { const i = ev.target; if (i.tagName === 'IMG' && i.closest('.foto-lleva') && !i.dataset.fallo) { i.dataset.fallo = '1'; i.replaceWith(el('div', { class: 'foto-sin', text: 'Sin foto' })); } }, true);
     const CAMPOS_APROBADO = ['telefono', 'direccion', 'emergencia_nombre', 'emergencia_parentesco', 'emergencia_telefono', 'nit',
       'penales_fecha', 'policiacos_fecha', 'licencia_numero', 'licencia_tipo', 'licencia_vence', 'seguro_aseguradora', 'seguro_vence'];
     const DOCS_RENOVABLES = ['recibo', 'penales', 'policiacos', 'licencia_frente', 'licencia_reverso'];
@@ -166,7 +168,7 @@
       ];
       const chips = {}, marcas = {};
       const nav = el('nav', { class: 'perfil-pasos', 'aria-label': 'Secciones del perfil' }, SECCIONES.map(x => (chips[x.id] = el('button', { type: 'button',
-        onclick: () => document.getElementById('sec-' + x.id).scrollIntoView({ behavior: sinAnimacion() ? 'auto' : 'smooth', block: 'start' }) }, el('span', { class: 'marca-paso' }), x.titulo))));
+        onclick: () => { const sec = document.getElementById('sec-' + x.id); sec.classList.add('abierta'); sec.querySelector('.seccion-cab')?.setAttribute('aria-expanded', 'true'); sec.scrollIntoView({ behavior: sinAnimacion() ? 'auto' : 'smooth', block: 'start' }); } }, el('span', { class: 'marca-paso' }), x.titulo))));
       const anillo = el('div', { class: 'anillo' }, el('span'));
       const avanceTexto = el('div');
       const avance = el('div', { class: 'perfil-avance' }, anillo, avanceTexto);
@@ -187,9 +189,13 @@
       const seccion = (id, ...hijos) => {
         const x = SECCIONES.find(z => z.id === id);
         marcas[id] = el('span', { class: 'estado-seccion' });
-        return el('fieldset', { class: 'perfil-seccion', id: 'sec-' + id }, el('legend', { class: 'oculto', text: x.titulo }),
-          el('div', { class: 'seccion-cab' }, el('span', { class: 'num' }, icono(x.icono)), el('div', {}, el('h2', { text: x.titulo }), el('p', { class: 'pista', text: x.texto })), marcas[id]), ...hijos);
+        // Ya aprobado: cada sección se pliega (se abre tocando su título) para que el perfil no sea una página eterna
+        const cab = el('div', { class: 'seccion-cab', ...(aprobado ? { role: 'button', tabindex: '0', 'aria-expanded': 'false', onclick: (ev) => alternar(ev.currentTarget), onkeydown: (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); alternar(ev.currentTarget); } } } : {}) },
+          el('span', { class: 'num' }, icono(x.icono)), el('div', {}, el('h2', { text: x.titulo }), el('p', { class: 'pista', text: x.texto })), marcas[id]);
+        return el('fieldset', { class: 'perfil-seccion' + (aprobado ? ' plegable' : ''), id: 'sec-' + id }, el('legend', { class: 'oculto', text: x.titulo }),
+          cab, aprobado ? el('div', { class: 'seccion-cuerpo' }, ...hijos) : hijos);
       };
+      const alternar = (cab) => { const f = cab.closest('.perfil-seccion'); const abierta = f.classList.toggle('abierta'); cab.setAttribute('aria-expanded', String(abierta)); };
       // Vista de la licencia y vencimientos de antecedentes, se actualizan mientras escribes
       const tarjetaLic = el('div', { class: 'licencia-tarjeta' });
       const chipVence = (f, dias = 30) => {
@@ -280,7 +286,7 @@
       }
       if (r.vencidos.length) caja.append(el('div', { class: 'mensaje error', text: 'Vencido: ' + r.vencidos.join(', ') + '. Renueva el documento en Mi perfil para poder trabajar.' }));
       if (r.porVencer.length) caja.append(el('div', { class: 'mensaje aviso', text: 'Por vencer: ' + r.porVencer.join(', ') + '.' }));
-      return caja;
+      return caja.childNodes.length ? caja : el('div', { hidden: true });   // sin nada que avisar: no se muestra una caja vacía
     }
 
     function pintarSolicitud() {

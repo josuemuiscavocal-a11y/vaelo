@@ -234,6 +234,7 @@
         const mio = ++turno;
         const datos = datosCotizacion();
         if (!datos.peso) { precioUno = null; $('precio').textContent = '—'; $('desglose').textContent = 'Escribe el peso del paquete'; pintarTotal(); return; }
+        if (!datos.origen_zona || !datos.destino_zona) { precioUno = null; $('precio').textContent = '—'; $('desglose').textContent = 'Elige las zonas de recogida y de entrega'; pintarTotal(); return; }
         try {
           const r = await api('/api/cotizar', { body: datos });
           if (mio !== turno) return;
@@ -454,6 +455,7 @@
       try {
         const z = await api(`/api/zona?lat=${pos.lat}&lng=${pos.lng}`);
         const sel = $('origen_zona');
+        if (!z.zona && z.hay_formas && !sel.value) { sel.value = [...sel.options].at(-1).value; actualizarPrecio(); }   // fuera de las zonas dibujadas
         if (z.zona && [...sel.options].some((o) => o.value === z.zona)) {
           sel.value = z.zona; $('pista-zona-origen').textContent = `Detectamos tu zona con tu ubicación: ${z.zona}.`; $('pista-zona-origen').hidden = false; actualizarPrecio();
         }
@@ -808,6 +810,7 @@
       if (!$('foto_paquete').files[0]) { $('caja-foto-paquete').scrollIntoView({ behavior: 'smooth', block: 'center' }); throw new Error('Toma una foto del paquete.'); }
       if (f.destino_nombre.value.trim().length < 2) throw new Error('Escribe el nombre de quien recibe.');
       if (f.destino_telefono.value.replace(/\D/g, '').length < 8) throw new Error('Escribe el teléfono de quien recibe (8 dígitos).');
+      if (!f.origen_zona.value && document.querySelector('input[name="origen_quien"]:checked')?.value === 'tercero') throw new Error('Elige la zona donde se recoge el paquete.');
       if (!f.destino_zona.value) throw new Error('Elige la zona de quien recibe.');
       return { peso: f.peso.value, descripcion: f.descripcion.value, fragil: $('fragil').checked, paquetes: $('paquetes').value, archivo: $('foto_paquete').files[0],
         destino_nombre: f.destino_nombre.value.trim(), destino_telefono: f.destino_telefono.value, destino_zona: f.destino_zona.value,
@@ -855,7 +858,7 @@
             envios.push({ ...resto, foto_paquete: await prepararArchivo(archivo, false) });
           }
           let pos = {};
-          if (quien === 'cliente') { boton.textContent = 'Buscando tu ubicación…'; pos = await miUbicacion(); await zonaDeMiUbicacion(pos); }
+          if (quien === 'cliente') { boton.textContent = 'Buscando tu ubicación…'; pos = await miUbicacion(); await zonaDeMiUbicacion(pos); if (!f.origen_zona.value) throw new Error('Elige la zona donde estás (dónde se recoge el paquete).'); }
           const r = await api('/api/envios/caja', { body: {
             vehiculo_id: document.querySelector('input[name="vehiculo_id"]:checked')?.value, metodo_pago: f.metodo_pago.value, cupon: $('cupon').value.trim(), programado_para: programado,
             origen_quien: quien, origen_nombre: f.origen_nombre.value, origen_telefono: f.origen_telefono.value, origen_zona: f.origen_zona.value, origen_direccion: f.origen_direccion.value,
@@ -870,7 +873,7 @@
           const actual = leerEnvioActual();
           const fotoPaquete = await prepararArchivo(actual.archivo, false);
           let pos = {};
-          if (quien === 'cliente') { boton.textContent = 'Buscando tu ubicación…'; pos = await miUbicacion(); await zonaDeMiUbicacion(pos); }
+          if (quien === 'cliente') { boton.textContent = 'Buscando tu ubicación…'; pos = await miUbicacion(); await zonaDeMiUbicacion(pos); if (!f.origen_zona.value) throw new Error('Elige la zona donde estás (dónde se recoge el paquete).'); }
           const r = await api('/api/envios', { body: {
             ...datosCotizacion(), programado_para: programado, origen_quien: quien, origen_nombre: f.origen_nombre.value,
             origen_lat: pos.lat, origen_lng: pos.lng, origen_precision: pos.precision, guardar_destino: $('guardar-destino').value.trim(),
@@ -928,7 +931,9 @@
           el('small', { text: `${v.descripcion}. Hasta ${v.peso_max} lb` }),
           el('span', { class: 'precio-v', text: `${dinero(v.tarifa_zona)} en zonas · ${dinero(Math.max(v.tarifa_zona, v.tarifa_base || 0))} fuera` })))));
       const opciones = () => [...cfg.zonas.map(z => el('option', { value: z, text: z })), el('option', { value: cfg.otraZona, text: cfg.otraZona })];
-      $('origen_zona').replaceChildren(...opciones()); $('destino_zona').replaceChildren(...opciones());
+      // Sin zona elegida de entrada: así nadie se queda con "Zona 1" sin querer (la de recogida se llena sola con el GPS)
+      const vacia = () => el('option', { value: '', text: 'Elige la zona o municipio', disabled: true, selected: true });
+      $('origen_zona').replaceChildren(vacia(), ...opciones()); $('destino_zona').replaceChildren(vacia(), ...opciones());
 
       // Quién entrega el paquete al piloto: yo (mi ubicación en vivo) u otra persona (con su enlace)
       document.querySelectorAll('input[name="origen_quien"]').forEach(r => r.addEventListener('change', () => {

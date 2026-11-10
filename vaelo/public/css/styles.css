@@ -1413,3 +1413,16 @@ dialog.dlg-ruta .dialogo { padding: 1rem; }
 .ruta-efectivo small { color: #5b6478; font-size: .78rem; }
 .ruta-efectivo.fin div:first-child { background: #fff6e0; border: 1.5px solid #f2a516; }
 .paradas-plegables > summary { cursor: pointer; font-weight: 700; color: var(--azul-hondo); padding: .4rem 0; }
+/* Perfil del piloto aprobado: secciones plegables */
+.perfil-seccion.plegable > .seccion-cab { cursor: pointer; position: relative; padding-right: 2rem; }
+.perfil-seccion.plegable > .seccion-cab::after { content: ''; position: absolute; right: .3rem; top: 50%; width: .6rem; height: .6rem; border-right: 2.5px solid #5b6478; border-bottom: 2.5px solid #5b6478; transform: translateY(-70%) rotate(45deg); transition: transform .2s; }
+.perfil-seccion.plegable.abierta > .seccion-cab::after { transform: translateY(-30%) rotate(-135deg); }
+.perfil-seccion.plegable > .seccion-cuerpo { display: none; }
+.perfil-seccion.plegable.abierta > .seccion-cuerpo { display: block; margin-top: .8rem; }
+/* Botones pequeños de cerrar y estrellas: área de toque cómoda */
+.cerrar-aviso { min-width: 40px; min-height: 40px; }
+.calificar-cliente button, .estrellas-elegir button { min-width: 40px; min-height: 40px; }
+.entrega-tarjeta .estrellas button { min-width: 40px; min-height: 40px; }
+.foto-sin { width: 64px; height: 64px; border-radius: 6px; background: #e6e9f2; color: #5b6478; font-size: .7rem; display: grid; place-items: center; flex: none; }
+#opciones-origen .opcion { flex: 1 1 220px; } #opciones-origen .opcion span { height: 100%; }
+@media (max-width: 700px) { #cifras > .celda-cifra:last-child:nth-child(odd) { grid-column: 1 / -1; } }

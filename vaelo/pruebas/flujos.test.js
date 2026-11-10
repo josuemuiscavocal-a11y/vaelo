@@ -737,3 +737,18 @@ test('hora estimada: solo después de recoger, con ventana de margen, y la ve qu
   const vista = (await cliente()('GET', '/api/pedido/' + tok)).j;
   assert.ok(vista.envio.llega && vista.envio.llega.desde, JSON.stringify(vista.envio));
 });
+
+test('las páginas no tienen errores de sintaxis en su JavaScript', () => {
+  const fs = require('fs'), path = require('path'), vm = require('vm');
+  const raiz = path.join(__dirname, '..');
+  const paginas = [...fs.readdirSync(path.join(raiz, 'public')).filter((f) => f.endsWith('.html')).map((f) => path.join(raiz, 'public', f)),
+    ...fs.readdirSync(path.join(raiz, 'privado')).filter((f) => f.endsWith('.html')).map((f) => path.join(raiz, 'privado', f))];
+  for (const p of paginas) {
+    for (const [, codigo] of fs.readFileSync(p, 'utf8').matchAll(/<script>([\s\S]*?)<\/script>/g)) {
+      assert.doesNotThrow(() => new vm.Script(codigo, { filename: path.basename(p) }), `${path.basename(p)} tiene un error de sintaxis`);
+    }
+  }
+  for (const f of fs.readdirSync(path.join(raiz, 'public', 'js')).filter((f) => f.endsWith('.js'))) {
+    assert.doesNotThrow(() => new vm.Script(fs.readFileSync(path.join(raiz, 'public', 'js', f), 'utf8'), { filename: f }), `${f} tiene un error de sintaxis`);
+  }
+});
