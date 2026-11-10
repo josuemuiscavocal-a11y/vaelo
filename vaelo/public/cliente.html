@@ -90,6 +90,7 @@
 
           <fieldset id="fs-destino">
             <legend>¿Quién lo recibe?</legend>
+            <div class="recientes" id="recientes" hidden><span class="etiqueta-campo">Enviar otra vez a</span><div class="recientes-lista" id="recientes-lista"></div></div>
             <div class="campo dir-guardada" hidden><label for="dir-destino">Usar un contacto guardado</label><select id="dir-destino"></select></div>
             <div class="fila">
               <div class="campo"><label for="destino_nombre">Nombre de quien recibe</label><input id="destino_nombre" required maxlength="100"></div>
@@ -306,7 +307,7 @@
       const acciones = el('div', { class: 'acciones' },
         el('button', { class: 'boton chico', type: 'button', text: terminado ? 'Ver detalle' : 'Ver en el mapa', onclick: () => verDetalle(e.id) }),
         e.estado !== 'cancelado' ? el('button', { class: 'boton borde chico', type: 'button', text: 'Guía', onclick: () => verGuia(e) }) : null,
-        el('button', { class: 'boton borde chico', type: 'button', text: 'Repetir', title: 'Mandar otro con los mismos datos', onclick: () => repetirEnvio(e) }));
+        el('button', { class: 'boton borde chico', type: 'button', text: 'Enviar otra vez', title: `Mandar otro paquete a ${e.destino_nombre || 'esta persona'} con los mismos datos`, onclick: () => repetirEnvio(e) }));
       if (e.estado === 'pendiente') {
         acciones.append(el('button', { class: 'boton peligro chico', type: 'button', text: 'Cancelar envío', onclick: (ev) => cancelarEnvio(e, ev.target) }));
       }
@@ -328,6 +329,7 @@
       const lista = $('lista');
       try {
         envios = (await api('/api/envios')).envios;
+        pintarRecientes();
         actualizarCompartir();
         $('conteo').textContent = envios.length ? `(${envios.length})` : '';
         pintarResumenCliente();
@@ -348,6 +350,25 @@
         el('button', { class: 'chip', type: 'button', 'aria-pressed': String(filtroEnvios === k), text: t, onclick: () => { filtroEnvios = k; pintarListaEnvios(); } })));
       const ver = envios.filter((e) => (filtroEnvios === 'curso') === ACTIVOS_CLI.includes(e.estado));
       poner($('lista'), ...(ver.length ? ver.map(tarjetaEnvio) : [el('p', { class: 'pista', text: filtroEnvios === 'curso' ? 'No tienes envíos en curso.' : 'Todavía no hay envíos terminados.' })]));
+    }
+    // Personas a las que ya les enviaste: un toque llena nombre, teléfono, zona y dirección
+    function pintarRecientes() {
+      const vistos = new Set(), lista = [];
+      for (const e of envios) {
+        const tel = String(e.destino_telefono || '').replace(/\D/g, '');
+        if (!tel || vistos.has(tel) || e.estado === 'cancelado') continue;
+        vistos.add(tel); lista.push(e);
+        if (lista.length >= 6) break;
+      }
+      $('recientes').hidden = !lista.length;
+      poner($('recientes-lista'), lista.map(e => el('button', { type: 'button', class: 'reciente', onclick: (ev) => {
+        const f = $('form-envio');
+        f.destino_nombre.value = e.destino_nombre || ''; f.destino_telefono.value = e.destino_telefono || '';
+        if ([...f.destino_zona.options].some((o) => o.value === e.destino_zona)) f.destino_zona.value = e.destino_zona;
+        f.destino_direccion.value = e.destino_direccion || '';
+        document.querySelectorAll('.reciente').forEach(b => b.classList.toggle('si', b === ev.currentTarget));
+        actualizarPrecio();
+      } }, el('strong', { text: (e.destino_nombre || '').split(' ').slice(0, 2).join(' ') }), el('small', { text: e.destino_zona || '' }))));
     }
     // Repetir un envío: mismos datos de quien recibe y del paquete; solo falta la foto nueva
     function repetirEnvio(e) {

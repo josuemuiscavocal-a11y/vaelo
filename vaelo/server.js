@@ -849,6 +849,35 @@ function revisarPiloto(u) {
   if (u.licencia_tipo === 'M' && veh && !veh.includes('moto')) avisos.push(`Licencia tipo M: no es para ${u.vehiculo.toLowerCase()}`);
   return { faltan, vencidos, porVencer, avisos };
 }
+// Avisa al piloto 15, 7 y 1 día antes de que venza su licencia, antecedentes o seguro, y el día que vence (a la oficina también)
+const HITOS_VENCE = [15, 7, 1, 0];
+function avisarVencimientos() {
+  const hoy = hoyGT();
+  const meses = Number(getAjustes().vigencia_antecedentes) || 6;
+  const pilotos = db.prepare("SELECT * FROM usuarios WHERE rol = 'mensajero' AND estado_piloto = 'aprobado' AND activo = 1").all();
+  const marcar = db.prepare('INSERT OR IGNORE INTO avisos_vencimiento (piloto_id, doc, vence, hito) VALUES (?, ?, ?, ?)');
+  let enviados = 0;
+  for (const u of pilotos) {
+    const docs = [['licencia', 'Tu licencia', u.licencia_vence, true], ['penales', 'Tus antecedentes penales', u.penales_fecha ? sumarMeses(u.penales_fecha, meses) : null, true],
+      ['policiacos', 'Tus antecedentes policiacos', u.policiacos_fecha ? sumarMeses(u.policiacos_fecha, meses) : null, true], ['seguro', 'Tu seguro', u.seguro_vence, false]];
+    for (const [doc, nombre, vence, bloquea] of docs) {
+      if (!vence) continue;
+      const dias = Math.round((Date.parse(vence + 'T12:00:00Z') - Date.parse(hoy + 'T12:00:00Z')) / 86400_000);
+      const hito = HITOS_VENCE.find((h) => dias <= h && dias >= (h === 0 ? -1 : HITOS_VENCE[HITOS_VENCE.indexOf(h) + 1] + 1));
+      if (hito === undefined) continue;
+      if (!marcar.run(u.id, doc, vence, hito).changes) continue;   // ya se avisó
+      enviados++;
+      const cuando = dias <= 0 ? 'venció' : dias === 1 ? 'vence mañana' : `vence en ${dias} días`;
+      const consecuencia = bloquea ? (dias <= 0 ? 'No podrás recibir envíos hasta renovarlo.' : 'Si vence, no podrás recibir envíos.') : '';
+      avisar(u.id, { titulo: dias <= 0 ? `${nombre.replace('Tu ', '').replace('Tus ', '')} venció` : 'Documento por vencer', cuerpo: `${nombre} ${cuando} (${vence}). Renuévalo en Mi perfil. ${consecuencia}`.trim(),
+        url: RUTA_PILOTO, etiqueta: 'vence-' + doc, urgente: dias <= 1 });
+      correoA(u.id, `${nombre} ${cuando}`, 'Documento por vencer', [`${nombre} ${cuando} (${vence}).`, `Sube el documento nuevo en Mi perfil del modo mensajero. ${consecuencia}`.trim()], { texto: 'Ir a mi perfil', url: RUTA_PILOTO });
+      if (dias <= 0 && bloquea) avisarStaff({ titulo: 'Documento vencido de un piloto', cuerpo: `${u.nombre}: ${nombre.replace('Tu ', '').replace('Tus ', '').toLowerCase()} venció (${vence}).`, url: RUTA_ADMIN, etiqueta: 'vence-' + u.id });
+    }
+  }
+  return enviados;
+}
+if (require.main === module) setInterval(() => { try { avisarVencimientos(); } catch (err) { console.error('Vencimientos:', err.message); } }, 3600_000).unref();
 const enLineaReal = (u) => !!u.en_linea && !!u.ubic_fecha && Date.now() - fechaMs(u.ubic_fecha) < MIN_UBIC_VIVA * 60_000;
 // ---------- Renovaciones de licencia y antecedentes por revisar ----------
 const CAMPOS_RENOVACION = ['licencia_numero', 'licencia_tipo', 'licencia_vence', 'penales_fecha', 'policiacos_fecha'];
@@ -5208,4 +5237,4 @@ const servidor = http.createServer(async (req, res) => {
 if (require.main === module) {
   servidor.listen(PORT, HOST, () => console.log(`Vaelo funcionando en http://${HOST}:${PORT}`));
 }
-module.exports = { servidor, hashPassword, asignacionAutomatica, decisionesVencidas, push, enviosAtascados, ordenarParadas, estimarLlegadas };
+module.exports = { servidor, hashPassword, asignacionAutomatica, decisionesVencidas, push, enviosAtascados, ordenarParadas, estimarLlegadas, avisarVencimientos };

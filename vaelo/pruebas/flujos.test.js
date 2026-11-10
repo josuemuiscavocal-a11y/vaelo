@@ -752,3 +752,19 @@ test('las páginas no tienen errores de sintaxis en su JavaScript', () => {
     assert.doesNotThrow(() => new vm.Script(fs.readFileSync(path.join(raiz, 'public', 'js', f), 'utf8'), { filename: f }), `${f} tiene un error de sintaxis`);
   }
 });
+
+test('documentos por vencer: aviso al piloto 15, 7 y 1 día antes y al vencer, una sola vez cada uno', () => {
+  const { avisarVencimientos } = require('../server');
+  const hoy = new Date(Date.now() - 6 * 3600_000);
+  const en = (d) => new Date(hoy.getTime() + d * 86400_000).toISOString().slice(0, 10);
+  db.prepare('DELETE FROM avisos_vencimiento').run();
+  db.prepare("UPDATE usuarios SET licencia_vence = ?, seguro_vence = NULL, penales_fecha = NULL, policiacos_fecha = NULL WHERE id = ?").run(en(10), pilotoId);
+  avisarVencimientos();
+  assert.ok(db.prepare("SELECT 1 FROM avisos_vencimiento WHERE piloto_id = ? AND doc = 'licencia' AND hito = 15").get(pilotoId));
+  avisarVencimientos();
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM avisos_vencimiento WHERE piloto_id = ?").get(pilotoId).n, 1, 'no se repite');
+  db.prepare('UPDATE usuarios SET licencia_vence = ? WHERE id = ?').run(en(1), pilotoId);
+  avisarVencimientos();
+  assert.ok(db.prepare("SELECT 1 FROM avisos_vencimiento WHERE piloto_id = ? AND hito = 1").get(pilotoId));
+  db.prepare('UPDATE usuarios SET licencia_vence = ? WHERE id = ?').run(en(400), pilotoId);
+});

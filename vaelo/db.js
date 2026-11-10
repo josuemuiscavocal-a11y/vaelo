@@ -553,6 +553,9 @@ agregarColumnas('usuarios', [['permisos', 'TEXT']]);
 // Quien recibe también califica al piloto (de 1 a 5 estrellas)
 agregarColumnas('envios', [['calif_receptor', 'INTEGER'], ['calif_receptor_comentario', 'TEXT']]);
 // Empresas: recogida fija (días de la semana 0-6 separados por coma y hora) y datos para facturar
+// Avisos de documentos por vencer de cada piloto (uno por documento, fecha y aviso: 15, 7 y 1 día antes, y al vencer)
+db.exec(`CREATE TABLE IF NOT EXISTS avisos_vencimiento (id INTEGER PRIMARY KEY, piloto_id INTEGER NOT NULL, doc TEXT NOT NULL, vence TEXT NOT NULL, hito INTEGER NOT NULL,
+  creado TEXT NOT NULL DEFAULT (datetime('now')), UNIQUE (piloto_id, doc, vence, hito))`);
 // Hora estimada de llegada (rutas de empresa): se calcula al recoger y se ajusta con cada entrega
 agregarColumnas('envios', [['llega_desde', 'TEXT'], ['llega_hasta', 'TEXT']]);
 // Fletes: ayudantes que van con el piloto para subir, bajar y mover la carga (0 a 5)

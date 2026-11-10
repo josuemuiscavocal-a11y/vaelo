@@ -870,12 +870,21 @@
     function tarjetaTerminada(e) {
       const texto = { entregado: ['Entregado a ', e.recibio || e.destino_nombre], devuelto: ['Devuelto a ', e.devuelto_a || e.cliente_nombre], en_sede: ['Dejado en la sede', ''], cancelado: ['El cliente canceló con el piloto en camino', ''] }[e.estado];
       let estrellas = 0;
-      const botones = [1, 2, 3, 4, 5].map(n => el('button', { type: 'button', 'aria-label': `${n} de 5`, text: '★', onclick: async () => {
+      // Primero se eligen las estrellas y luego se envía: así un toque equivocado no deja mal calificado al cliente
+      const NOMBRES = ['', 'Muy mal', 'Mal', 'Regular', 'Bien', 'Excelente'];
+      const textoEstrellas = el('small', { class: 'pista', text: 'Toca las estrellas' });
+      const enviar = el('button', { class: 'boton chico', type: 'button', text: 'Enviar calificación', disabled: true, onclick: async () => {
+        enviar.disabled = true; enviar.textContent = 'Enviando…'; ocupado++;
+        try { await api(`/api/piloto/envios/${e.id}/calificar-cliente`, { body: { estrellas } }); poner(caja, el('p', { class: 'pista ok', text: `Calificaste a ${e.cliente_nombre.split(' ')[0]} con ${estrellas} de 5. Gracias.` })); }
+        catch (err) { alert(err.message); enviar.disabled = false; enviar.textContent = 'Enviar calificación'; }
+        ocupado = Math.max(0, ocupado - 1);
+      } });
+      const botones = [1, 2, 3, 4, 5].map(n => el('button', { type: 'button', 'aria-label': `${n} de 5`, text: '★', onclick: () => {
         estrellas = n; botones.forEach((b, i) => b.classList.toggle('si', i < n));
-        try { await api(`/api/piloto/envios/${e.id}/calificar-cliente`, { body: { estrellas } }); poner(caja, el('p', { class: 'pista ok', text: 'Gracias por calificar al cliente.' })); } catch (err) { alert(err.message); }
+        textoEstrellas.textContent = `${n} de 5 · ${NOMBRES[n]}`; enviar.disabled = false;
       } }));
       const caja = el('div', {}, e.ya_califique_cliente ? el('p', { class: 'pista ok', text: 'Ya calificaste a este cliente.' })
-        : el('div', {}, el('span', { class: 'pista', text: `¿Cómo te fue con ${e.cliente_nombre.split(' ')[0]}?` }), el('div', { class: 'estrellas' }, botones)));
+        : el('div', { class: 'calificar-bloque' }, el('span', { class: 'pista', text: `¿Cómo te fue con ${e.cliente_nombre.split(' ')[0]}?` }), el('div', { class: 'estrellas' }, botones), textoEstrellas, enviar));
       return el('article', { class: 'entrega-tarjeta' },
         el('div', { class: 'cab' }, el('strong', { class: 'guia', text: e.guia }), chipEstado(e.estado)),
         el('p', {}, texto[0], texto[1] ? el('strong', { text: texto[1] }) : ''),

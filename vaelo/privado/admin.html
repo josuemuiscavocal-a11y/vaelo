@@ -71,7 +71,7 @@
           <button class="boton cinta chico" type="button" id="nuevo-flete" style="margin-left:auto">Nuevo flete en pickup</button>
         </div>
         <div class="tabla-envoltura">
-          <table>
+          <table class="tabla-tarjetas">
             <thead><tr><th>Guía</th><th>Fecha</th><th>Cliente</th><th>Entrega</th><th>Vehículo</th><th>Precio</th><th>Mensajero</th><th>Estado</th></tr></thead>
             <tbody id="tabla-envios"></tbody>
           </table>
@@ -447,7 +447,14 @@
             e.estado === 'fallido' && e.fallo?.decidir_antes ? [el('br'), sub(`El cliente elige en ${faltaPara(e.fallo.decidir_antes)}`)] : null,
             e.estado === 'en_sede' && e.sede ? [el('br'), sub(`${e.sede.dias} día(s) · ${dinero(e.sede.cargo)}`)] : null,
 null))));
+        etiquetarTabla(cuerpo);
       } catch (e) { poner(cuerpo, el('tr', {}, el('td', { colspan: 8, class: 'mensaje error', text: e.message }))); }
+    }
+
+    // En el celular la tabla se ve como tarjetas: cada dato lleva su título (el de la columna)
+    function etiquetarTabla(cuerpo) {
+      const titulos = [...cuerpo.closest('table').querySelectorAll('thead th')].map(th => th.textContent.trim());
+      for (const tr of cuerpo.rows) [...tr.cells].forEach((td, i) => { if (titulos[i]) td.dataset.titulo = titulos[i]; });
     }
 
     // ---------- Quien entrega y quien recibe: ubicación en vivo ----------
