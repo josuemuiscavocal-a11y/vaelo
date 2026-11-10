@@ -677,3 +677,22 @@ test('flete con ayudantes: Q50 cada uno, hasta 5, suma al total y el piloto gana
   await admin('PUT', '/api/admin/ajustes', { precio_ayudante: 50 });
   db.prepare("UPDATE envios SET estado = 'cancelado' WHERE id = ?").run(r.j.id);
 });
+
+test('zona preferencial mal elegida: al compartir quien recibe su ubicación real fuera de las zonas, el precio se corrige y se avisa', async () => {
+  const z = db.prepare("SELECT id FROM zonas_fijas WHERE nombre = 'Zona 1'").get().id;
+  const forma = [[-90.53, 14.63], [-90.50, 14.63], [-90.50, 14.65], [-90.53, 14.65]];
+  await admin('PUT', `/api/admin/zonas/${z}`, { poligono: forma });
+  // El cliente dice que entrega en Zona 1 (preferencial) sin ubicación del destino: se cotiza Q35
+  const e = await ana('POST', '/api/envios', { vehiculo_id: 1, peso: 1, origen_zona: 'Zona 1', destino_zona: 'Zona 1', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng,
+    metodo_pago: 'efectivo', destino_nombre: 'Marta', destino_telefono: '55554444', foto_paquete: FOTO });
+  assert.equal(e.status, 201, JSON.stringify(e.j));
+  assert.equal(fila(e.j.id).precio, 35);
+  // Marta comparte su ubicación real, lejos (fuera de la forma de Zona 1)
+  const tok = db.prepare('SELECT receptor_token FROM envios WHERE id = ?').get(e.j.id).receptor_token;
+  assert.equal((await cliente()('POST', `/api/recibe/${tok}/confirmar`, { nombre: 'Marta López', lat: 14.55, lng: -90.70 })).status, 200);
+  const f = fila(e.j.id);
+  assert.equal(f.precio, 45); assert.equal(f.tipo_tarifa, 'km');
+  const ev = db.prepare('SELECT nota FROM eventos WHERE envio_id = ? ORDER BY id DESC LIMIT 1').get(e.j.id).nota;
+  db.prepare("UPDATE envios SET estado = 'cancelado' WHERE id = ?").run(e.j.id);
+  await admin('PUT', `/api/admin/zonas/${z}`, { poligono: null });
+});
