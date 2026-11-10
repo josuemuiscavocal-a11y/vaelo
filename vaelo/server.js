@@ -3118,12 +3118,23 @@ ruta('GET', '/api/envios/:id/reclamos', ({ req, params }) => {
   if (!e) falla(404, 'No encontramos ese envío.');
   return { reclamos: reclamosDe(e.id).map(({ monto_piloto, piloto, piloto_id, descontado_pago_id, ...r }) => r), dias: Number(getAjustes().dias_reclamo) || 3 };
 });
-ruta('GET', '/api/admin/reclamos', ({ req }) => {
+// Quejas de clientes y empresas (apartado propio del panel): filtros por estado y búsqueda
+const SQL_QUEJAS = `SELECT r.*, e.guia, e.valor_declarado, e.pedido_id, e.estado AS envio_estado, e.destino_nombre, e.precio AS envio_precio, c.nombre AS cliente, c.telefono AS cliente_telefono,
+    c.empresa_nombre, c.tipo_cuenta, p.nombre AS piloto FROM reclamos r JOIN envios e ON e.id = r.envio_id
+    JOIN usuarios c ON c.id = r.usuario_id LEFT JOIN usuarios p ON p.id = r.piloto_id`;
+const FILTROS_QUEJA = { abiertos: "r.estado = 'abierto'", devolver: "r.estado = 'aprobado' AND r.monto_cliente > 0 AND r.devuelto_en IS NULL",
+  resueltos: "r.estado != 'abierto'", todos: '1 = 1' };
+ruta('GET', '/api/admin/reclamos', ({ req, query }) => {
   requiereStaff(req);
-  return { reclamos: db.prepare(`SELECT r.*, e.guia, e.valor_declarado, c.nombre AS cliente, c.empresa_nombre, p.nombre AS piloto FROM reclamos r JOIN envios e ON e.id = r.envio_id
-    JOIN usuarios c ON c.id = r.usuario_id LEFT JOIN usuarios p ON p.id = r.piloto_id
-    ORDER BY CASE WHEN r.estado = 'abierto' THEN 0 WHEN r.estado = 'aprobado' AND r.devuelto_en IS NULL AND r.monto_cliente > 0 THEN 1 ELSE 2 END, r.id DESC LIMIT 100`).all()
-    .map((r) => ({ ...r, tipo_texto: TIPOS_RECLAMO[r.tipo], tiene_foto: !!r.foto, foto: undefined })) };
+  const filtro = FILTROS_QUEJA[query.get('estado')] || "(r.estado = 'abierto' OR (r.estado = 'aprobado' AND r.devuelto_en IS NULL AND r.monto_cliente > 0)) OR r.creado >= datetime('now','-30 days')";
+  const q = texto(query.get('q'), 60);
+  const extra = q ? ' AND (e.guia LIKE ? OR c.nombre LIKE ? OR c.empresa_nombre LIKE ? OR p.nombre LIKE ? OR r.descripcion LIKE ?)' : '';
+  const reclamos = db.prepare(`${SQL_QUEJAS} WHERE (${filtro})${extra}
+    ORDER BY CASE WHEN r.estado = 'abierto' THEN 0 WHEN r.estado = 'aprobado' AND r.devuelto_en IS NULL AND r.monto_cliente > 0 THEN 1 ELSE 2 END, r.id DESC LIMIT 200`)
+    .all(...(q ? Array(5).fill(`%${q}%`) : []))
+    .map((r) => ({ ...r, tipo_texto: TIPOS_RECLAMO[r.tipo], tiene_foto: !!r.foto, foto: undefined, es_empresa: r.tipo_cuenta === 'empresa' }));
+  const cuenta = (w) => db.prepare(`SELECT COUNT(*) AS n FROM reclamos r WHERE ${w}`).get().n;
+  return { reclamos, conteo: { abiertos: cuenta(FILTROS_QUEJA.abiertos), devolver: cuenta(FILTROS_QUEJA.devolver), resueltos: cuenta(FILTROS_QUEJA.resueltos), todos: cuenta('1 = 1') } };
 });
 ruta('GET', '/api/admin/reclamos/:id/foto', ({ req, res, params }) => {
   requiereStaff(req);
@@ -4894,15 +4905,16 @@ ruta('GET', '/api/admin/nuevos', ({ req, query }) => {
   const rechazados = db.prepare(`SELECT e.id, e.guia, e.creado, e.precio, e.origen_zona, e.destino_zona, u.nombre AS cliente_nombre
     FROM envios e JOIN usuarios u ON u.id = e.usuario_id WHERE e.rechazado_en > ? AND e.mensajero_id IS NULL AND e.estado = 'pendiente'`).all(desdeT);
   const atascados = enviosAtascados();
+  const quejas = db.prepare("SELECT COUNT(*) AS n FROM reclamos WHERE estado = 'abierto'").get().n;
   // A la administración le llega el aviso de acciones nuevas de los empleados (se ven en Historial)
   const h = Number(query.get('h'));
   const historial = esAdmin(quien) && Number.isInteger(h) && h >= 0
     ? db.prepare("SELECT COUNT(*) AS n, MAX(id) AS ultimo FROM historial WHERE id > ? AND rol = 'operador'").get(h) : null;
-  if (!Number.isInteger(desde) || desde < 0 || query.get('desde') === null) return { ultimo, nuevos: [], rechazados, ahora, alertas: alertasAbiertas(), atascados, historial };
+  if (!Number.isInteger(desde) || desde < 0 || query.get('desde') === null) return { ultimo, nuevos: [], rechazados, ahora, alertas: alertasAbiertas(), atascados, historial, quejas };
   const nuevos = db.prepare(`SELECT e.id, e.guia, e.creado, e.precio, e.origen_zona, e.destino_zona, v.nombre AS vehiculo, u.nombre AS cliente_nombre
     FROM envios e JOIN vehiculos v ON v.id = e.vehiculo_id JOIN usuarios u ON u.id = e.usuario_id
     WHERE e.id > ? AND e.estado != 'cancelado' ORDER BY e.id DESC LIMIT 50`).all(desde);
-  return { ultimo, nuevos, rechazados, ahora, alertas: alertasAbiertas(), atascados, historial };
+  return { ultimo, nuevos, rechazados, ahora, alertas: alertasAbiertas(), atascados, historial, quejas };
 });
 
 ruta('GET', '/api/admin/envios', ({ req, query }) => {

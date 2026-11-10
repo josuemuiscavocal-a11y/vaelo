@@ -1448,3 +1448,14 @@ dialog.dlg-ruta .dialogo { padding: 1rem; }
 }
 fieldset { min-width: 0; } .recientes { max-width: 100%; min-width: 0; }
 .fecha-hora { display: grid; grid-template-columns: 1fr 7.5rem; gap: .35rem; } .duracion-rapida { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; margin: .2rem 0 .7rem; }
+/* Panel: quejas de clientes y empresas */
+.quejas-filtros { display: flex; flex-wrap: wrap; gap: .6rem; align-items: center; justify-content: space-between; margin-bottom: .8rem; }
+.quejas-filtros input { max-width: 320px; flex: 1 1 220px; }
+.queja-tarjeta { border: 1px solid var(--linea); border-left: 5px solid #c9cfdc; border-radius: 12px; padding: .8rem 1rem; margin-bottom: .8rem; background: #fff; }
+.queja-tarjeta.abierto { border-left-color: #f2a516; }
+.queja-tarjeta.aprobado { border-left-color: #1f8a4c; }
+.queja-tarjeta.rechazado { border-left-color: #b3261e; }
+.queja-cab { display: flex; justify-content: space-between; gap: .6rem; align-items: flex-start; margin-bottom: .4rem; }
+.enlace-guia { background: none; border: 0; padding: 0; font: inherit; font-weight: 700; color: var(--azul); text-decoration: underline; cursor: pointer; }
+.etiqueta-ok { background: #e3f4ea; color: #1f6b3d; border-radius: 999px; padding: .15rem .55rem; font-size: .78rem; font-weight: 700; }
+.queja-cab > span { white-space: nowrap; flex: none; }

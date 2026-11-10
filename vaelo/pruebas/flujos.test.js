@@ -792,3 +792,73 @@ test('queja con compensación: descuento solo para ese cliente en su próximo en
   assert.equal((await ana('POST', '/api/cotizar', { ...cot, cupon: 'FLASH2H' })).j.descuento, 7);
   db.prepare("UPDATE promociones SET activa = 0 WHERE codigo IN ('FLASHX','FLASH2H')").run();
 });
+
+test('descuentos a fondo: límite de usos total y por cliente, horas, programada, pausada, mínimo, primer envío y cancelados', async () => {
+  const cuenta = async (email) => {
+    db.prepare("INSERT OR IGNORE INTO usuarios (nombre,email,telefono,password_hash,rol,email_verificado,verificacion) VALUES (?,?,?,?,'cliente',1,'verificado')")
+      .run('Cliente ' + email.split('@')[0], email, '5' + String(Math.floor(Math.random() * 1e7)).padStart(7, '0'), await hashPassword('clave-cupon-123'));
+    const c = cliente(); assert.equal((await c('POST', '/api/login', { email, password: 'clave-cupon-123' })).status, 200); return c;
+  };
+  const lucia = await cuenta('cupones@prueba.com');
+  const ahora = new Date(Date.now() - 6 * 3600_000), dia = (d) => d.toISOString().slice(0, 10), hh = (d) => d.toISOString().slice(11, 16), mas = (h) => new Date(ahora.getTime() + h * 3600_000);
+  const crear = async (p) => { const r = await admin('POST', '/api/admin/promociones', { tipo: 'monto', valor: 10, desde: dia(mas(-1)), hasta: dia(mas(48)), ...p }); assert.equal(r.status, 201, JSON.stringify(r.j)); return db.prepare('SELECT id FROM promociones WHERE codigo = ?').get(p.codigo).id; };
+  const cot = (quien, cupon, extra = {}) => quien('POST', '/api/cotizar', { vehiculo_id: 1, peso: 2, origen_zona: 'Zona 1', destino_zona: 'Zona 1', cupon, ...extra });
+  const enviar = (quien, cupon) => quien('POST', '/api/envios', { vehiculo_id: 1, peso: 1, origen_zona: 'Zona 1', destino_zona: 'Zona 1', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng,
+    metodo_pago: 'efectivo', destino_nombre: 'Prueba Cupón', destino_telefono: '55554444', foto_paquete: FOTO, cupon });
+
+  // 1) Límite total: 2 usos; al tercero ya se agotó (y si se cancela uno, se libera)
+  await crear({ nombre: 'Dos usos', codigo: 'DOSUSOS', usos_max: 2 });
+  const e1 = await enviar(ana, 'DOSUSOS'); assert.equal(e1.status, 201, JSON.stringify(e1.j));
+  const f1 = db.prepare('SELECT precio, descuento, promocion_id FROM envios WHERE id = ?').get(e1.j.id);
+  assert.equal(f1.descuento, 10); assert.equal(f1.precio, 25, 'Q35 - Q10');
+  assert.equal((await enviar(lucia, 'DOSUSOS')).status, 201);
+  assert.match((await cot(ana, 'DOSUSOS')).j.error_cupon, /agotó/);
+  assert.equal((await enviar(ana, 'DOSUSOS')).status, 400, 'no deja crear el envío con un cupón agotado');
+  db.prepare("UPDATE envios SET estado = 'cancelado' WHERE id = ?").run(e1.j.id);
+  assert.equal((await cot(ana, 'DOSUSOS')).j.descuento, 10, 'al cancelar un envío, el uso se libera');
+
+  // 2) Una vez por cliente: Ana lo usa, ya no puede; Lucía sí
+  await crear({ nombre: 'Uno por cliente', codigo: 'UNOXCLI', usos_por_cliente: 1 });
+  assert.equal((await enviar(ana, 'UNOXCLI')).status, 201);
+  assert.match((await cot(ana, 'UNOXCLI')).j.error_cupon, /ya lo usaste/);
+  assert.equal((await cot(lucia, 'UNOXCLI')).j.descuento, 10);
+
+  // 3) Por horas: empieza en 2 horas (programada) → todavía no vale
+  await crear({ nombre: 'Más tarde', codigo: 'MASTARDE', desde: dia(mas(2)), desde_hora: hh(mas(2)), hasta: dia(mas(4)), hasta_hora: hh(mas(4)) });
+  assert.match((await cot(ana, 'MASTARDE')).j.error_cupon, /no existe o ya venció/);
+  const lista = (await admin('GET', '/api/admin/promociones')).j.promociones;
+  assert.equal(lista.find((p) => p.codigo === 'MASTARDE').estado, 'programada');
+
+  // 4) Pausada → no vale; al activarla, sí
+  const idPausa = await crear({ nombre: 'Pausable', codigo: 'PAUSA' });
+  await admin('PUT', '/api/admin/promociones/' + idPausa, { activa: false });
+  assert.match((await cot(ana, 'PAUSA')).j.error_cupon, /no existe o ya venció/);
+  await admin('PUT', '/api/admin/promociones/' + idPausa, { activa: true });
+  assert.equal((await cot(ana, 'PAUSA')).j.descuento, 10);
+
+  // 5) Mínimo de Q40: un envío de Q35 no califica; uno de fuera de zona (Q45) sí
+  await crear({ nombre: 'Mínimo 40', codigo: 'MIN40', minimo: 40 });
+  assert.match((await cot(ana, 'MIN40')).j.error_cupon, /desde Q40/);
+  assert.equal((await cot(ana, 'MIN40', { destino_zona: 'Otra zona o municipio' })).j.descuento, 10);
+
+  // 6) Solo primer envío: Ana ya tiene envíos, una cuenta nueva sí
+  await crear({ nombre: 'Bienvenida', codigo: 'BIENVENIDA', solo_primer_envio: true });
+  assert.match((await cot(ana, 'BIENVENIDA')).j.error_cupon, /primer envío/);
+  const nuevo = await cuenta('primerenvio@prueba.com');
+  assert.equal((await cot(nuevo, 'BIENVENIDA')).j.descuento, 10, 'cuenta sin envíos sí lo tiene');
+
+  // 7) Porcentaje y envío gratis
+  await crear({ nombre: 'Veinte por ciento', codigo: 'VEINTE', tipo: 'porcentaje', valor: 20 });
+  assert.equal((await cot(ana, 'VEINTE')).j.descuento, 7, '20% de Q35');
+  await crear({ nombre: 'Gratis', codigo: 'GRATIS1', tipo: 'gratis' });
+  const g = (await cot(ana, 'GRATIS1')).j; assert.equal(g.descuento, 35); assert.equal(g.precio, 0);
+
+  // 8) Cupón vencido por horas (terminó hace 1 hora)
+  await crear({ nombre: 'Ya pasó', codigo: 'YAPASO', desde: dia(mas(-5)), desde_hora: hh(mas(-5)), hasta: dia(mas(-1)), hasta_hora: hh(mas(-1)) });
+  assert.match((await cot(ana, 'YAPASO')).j.error_cupon, /no existe o ya venció/);
+
+  // 9) Reglas al crear: fin antes del inicio, hora mal escrita
+  assert.equal((await admin('POST', '/api/admin/promociones', { nombre: 'Mal', tipo: 'monto', valor: 5, desde: dia(ahora), desde_hora: '18:00', hasta: dia(ahora), hasta_hora: '17:00', codigo: 'MAL1' })).status, 400);
+  assert.equal((await admin('POST', '/api/admin/promociones', { nombre: 'Mal', tipo: 'monto', valor: 5, desde: dia(ahora), desde_hora: '25:00', hasta: dia(mas(24)), codigo: 'MAL2' })).status, 400);
+  db.prepare("UPDATE promociones SET activa = 0 WHERE codigo IN ('DOSUSOS','UNOXCLI','MASTARDE','PAUSA','MIN40','BIENVENIDA','VEINTE','GRATIS1','YAPASO')").run();
+});

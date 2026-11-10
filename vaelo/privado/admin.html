@@ -21,6 +21,7 @@
         <button role="tab" id="tab-mensajeros" aria-selected="false" aria-controls="panel-mensajeros" data-icono="piloto">Pilotos<span class="insignia" id="insignia-mensajeros" hidden></span></button>
         <button role="tab" id="tab-clientes" aria-selected="false" aria-controls="panel-clientes" data-icono="clientes">Clientes<span class="insignia" id="insignia-clientes" hidden></span></button>
         <button role="tab" id="tab-empresas" aria-selected="false" aria-controls="panel-empresas" data-icono="tienda">Empresas<span class="insignia" id="insignia-empresas" hidden></span></button>
+        <button role="tab" id="tab-quejas" aria-selected="false" aria-controls="panel-quejas" data-icono="alerta">Quejas<span class="insignia" id="insignia-quejas" hidden></span></button>
         <button role="tab" id="tab-caja" aria-selected="false" aria-controls="panel-caja" class="solo-admin" data-icono="caja">Caja<span class="insignia" id="insignia-caja" hidden></span></button>
         <button role="tab" id="tab-descuentos" aria-selected="false" aria-controls="panel-descuentos" class="solo-admin" data-icono="etiqueta">Descuentos</button>
         <button role="tab" id="tab-reportes" aria-selected="false" aria-controls="panel-reportes" class="solo-admin" data-icono="grafica">Reportes</button>
@@ -243,6 +244,15 @@
         </div>
       </section>
 
+      <section id="panel-quejas" role="tabpanel" aria-labelledby="tab-quejas" hidden>
+        <div class="bloque">
+          <p class="bloque-nota">Aquí llegan todas las quejas de clientes y empresas: paquete dañado, incompleto, perdido u otro problema. Al resolver decides cuánto se le devuelve, cuánto paga el piloto (se descuenta de su pago) y si le das un descuento para su próximo envío.</p>
+          <div class="quejas-filtros"><div id="quejas-chips" class="filtros"></div><input id="quejas-q" type="search" placeholder="Buscar guía, cliente, empresa o piloto"></div>
+          <div id="msg-quejas" class="mensaje" role="alert"></div>
+          <div id="lista-quejas"></div>
+        </div>
+      </section>
+
       <section id="panel-historial" role="tabpanel" aria-labelledby="tab-historial" hidden>
         <div class="bloque">
           <p class="bloque-nota">Todo lo que hace cada persona en el panel queda guardado aquí: cambios de estado, pagos, cierres, tarifas, cuentas eliminadas y más. Solo tú lo ves; los empleados no.</p>
@@ -375,10 +385,10 @@
     let filtroEstado = 'activos', temporizador = null, mensajeros = [], vehiculos = [], mapaFlota = null, capaFlota = null;
     const sub = (t) => el('small', { style: 'color:var(--suave)', text: t || '' });
 
-    const tabs = ['envios', 'mensajeros', 'clientes', 'empresas', 'caja', 'descuentos', 'reportes', 'historial', 'tarifas'];
+    const tabs = ['envios', 'mensajeros', 'clientes', 'empresas', 'quejas', 'caja', 'descuentos', 'reportes', 'historial', 'tarifas'];
     const TITULOS = { envios: ['Envíos', 'Pedidos y su estado'], mensajeros: ['Pilotos', 'Flota en vivo, documentos y aprobaciones'], clientes: ['Clientes', 'Identidad, empresas y calificaciones'],
       caja: ['Caja', 'Efectivo, pagos a pilotos, reembolsos y cargos'], empresas: ['Empresas', 'Contratos y paquetes en la sede'], descuentos: ['Descuentos', 'Promociones y cupones'], reportes: ['Reportes', 'Cómo va el negocio'],
-      tarifas: ['Tarifas y ajustes', 'Precios, zonas, sede y equipo'], historial: ['Historial', 'Qué hizo cada persona en el panel'] };
+      tarifas: ['Tarifas y ajustes', 'Precios, zonas, sede y equipo'], quejas: ['Quejas', 'Reportes de clientes y empresas'], historial: ['Historial', 'Qué hizo cada persona en el panel'] };
     function abrirTab(nombre) {
       tabs.forEach(t => { $('tab-' + t).setAttribute('aria-selected', String(t === nombre)); $('panel-' + t).hidden = t !== nombre; });
       $('titulo-seccion').textContent = TITULOS[nombre][0]; $('subtitulo-seccion').textContent = TITULOS[nombre][1];
@@ -387,6 +397,7 @@
       if (nombre === 'mensajeros') cargarMensajeros();
       if (nombre === 'clientes') cargarClientes();
       if (nombre === 'historial') cargarHistorial();
+      if (nombre === 'quejas') cargarQuejas();
       if (nombre === 'tarifas') { cargarTarifas(); cargarOperadores(); }
       if (nombre === 'caja') cargarCaja();
       if (nombre === 'empresas') cargarEmpresas();
@@ -1548,7 +1559,7 @@ null))));
     let rolPanel = 'admin';
     // Pestañas que ve cada empleado según sus permisos (la administración ve todo)
     let permisosPanel = null;
-    const AREA_TAB = { envios: 'envios', mensajeros: 'pilotos', clientes: 'clientes', empresas: 'empresas' };
+    const AREA_TAB = { envios: 'envios', mensajeros: 'pilotos', clientes: 'clientes', empresas: 'empresas', quejas: 'envios' };
     function aplicarRol(rol, permisos) {
       rolPanel = rol; permisosPanel = permisos || null;
       document.querySelectorAll('.solo-admin').forEach(x => { x.hidden = rol !== 'admin'; });
@@ -1623,6 +1634,27 @@ null))));
             await api(`/api/admin/alertas/${a.id}/atender`, { body: {} }); revisarNuevos();
           } })))));
     }
+
+    // ---------- Quejas de clientes y empresas ----------
+    let filtroQuejas = 'abiertos', esperaQuejas = null;
+    const TEXTO_FILTRO_QUEJA = { abiertos: 'Por evaluar', devolver: 'Devoluciones pendientes', resueltos: 'Resueltas', todos: 'Todas' };
+    async function cargarQuejas() {
+      let r;
+      const q = new URLSearchParams({ estado: filtroQuejas }); if ($('quejas-q').value.trim()) q.set('q', $('quejas-q').value.trim());
+      try { r = await api('/api/admin/reclamos?' + q); } catch (e) { mostrarMensaje($('msg-quejas'), e.message); return; }
+      poner($('quejas-chips'), Object.entries(TEXTO_FILTRO_QUEJA).map(([k, t]) => el('button', { class: 'chip', type: 'button', 'aria-pressed': String(filtroQuejas === k),
+        text: `${t} (${r.conteo[k]})`, onclick: () => { filtroQuejas = k; cargarQuejas(); } })));
+      if (!r.reclamos.length) { poner($('lista-quejas'), el('p', { class: 'pista', style: 'padding:1rem 0', text: filtroQuejas === 'abiertos' ? 'No hay quejas por evaluar. ¡Todo bien!' : 'No hay quejas con este filtro.' })); return; }
+      poner($('lista-quejas'), ...r.reclamos.map(x => el('article', { class: 'queja-tarjeta ' + x.estado },
+        el('div', { class: 'queja-cab' },
+          el('div', {}, el('span', { class: x.es_empresa ? 'etiqueta-azul' : 'etiqueta-gris', text: x.es_empresa ? 'Empresa' : 'Cliente' }), ' ',
+            el('strong', { text: x.empresa_nombre || x.cliente }), x.cliente_telefono ? [' · ', telLink(x.cliente_telefono)] : null, el('br'),
+            el('button', { class: 'enlace-guia', type: 'button', text: x.guia, onclick: () => abrirEnvio(x.envio_id) }), sub(` · ${fecha(x.creado)}${x.destino_nombre ? ' · para ' + x.destino_nombre : ''} · ${x.piloto ? 'piloto ' + x.piloto : 'sin piloto'}`)),
+          el('span', { class: x.estado === 'abierto' ? 'etiqueta-pendiente' : x.estado === 'aprobado' ? (x.monto_cliente > 0 && !x.devuelto_en ? 'etiqueta-azul' : 'etiqueta-ok') : 'etiqueta-gris',
+            text: x.estado === 'abierto' ? 'Por evaluar' : x.estado === 'aprobado' ? (x.monto_cliente > 0 && !x.devuelto_en ? `Devolver ${dinero(x.monto_cliente)}` : 'Resuelta') : 'Rechazada' })),
+        formReclamo(x, () => { cargarQuejas(); }))));
+    }
+    $('quejas-q').addEventListener('input', () => { clearTimeout(esperaQuejas); esperaQuejas = setTimeout(cargarQuejas, 300); });
 
     // ---------- Caja ----------
     async function cargarCaja() {
@@ -2024,6 +2056,7 @@ null))));
         const r = await api('/api/admin/nuevos?' + q);
         pintarAlertas(r.alertas || []);
         pintarAtascados(r.atascados || []);
+        { const b = $('insignia-quejas'); b.textContent = String(r.quejas || 0); b.hidden = !r.quejas; }
         if (r.historial) { const b = $('insignia-historial'); b.textContent = String(r.historial.n); b.hidden = !r.historial.n || !$('panel-historial').hidden; }
         const rechazados = desdeT ? r.rechazados : [];
         desdeT = r.ahora;
