@@ -103,16 +103,7 @@ const GUIA_DOCS = {
   rtu: { grupo: 'legal', dibujo: 'documento', ayuda: 'Constancia del RTU. Ayuda a verificar más rápido.' },
 };
 const GRUPOS_DOCS = [['sede', 'La sede', 'sede'], ['rep', 'El representante', 'usuario'], ['legal', 'Documentos legales', 'etiqueta']];
-// Dibujos simples que guían qué foto tomar
-const DIBUJOS_DOC = {
-  fachada: '<path d="M8 30h48v26H8z"/><path d="M4 30 12 14h40l8 16"/><path d="M26 56V40h12v16"/><path d="M14 38h7v7h-7zM43 38h7v7h-7z"/><path d="M22 20h20"/>',
-  bodega: '<path d="M6 26 32 12l26 14v30H6z"/><path d="M14 56V34h36v22"/><path d="M18 44h12v12H18zM34 46h10v10H34zM24 36h10v8H24z"/>',
-  persona: '<circle cx="32" cy="24" r="10"/><path d="M14 54c2-10 9-15 18-15s16 5 18 15"/><path d="M8 8h10M8 8v10M56 8H46M56 8v10M8 56h10M8 56V46M56 56H46M56 56V46"/>',
-  dpi: '<rect x="6" y="14" width="52" height="36" rx="5"/><rect x="12" y="22" width="14" height="18" rx="2"/><path d="M32 24h20M32 30h16M32 36h20M12 44h40"/>',
-  'dpi-atras': '<rect x="6" y="14" width="52" height="36" rx="5"/><path d="M12 22h40M12 28h28"/><path d="M14 36v8M17 36v8M21 36v8M23 36v8M27 36v8M31 36v8M33 36v8M37 36v8M41 36v8M44 36v8M48 36v8"/>',
-  documento: '<path d="M16 6h22l12 12v40H16z"/><path d="M38 6v12h12"/><path d="M22 28h22M22 34h22M22 40h16M22 48h10"/><circle cx="42" cy="48" r="4"/>',
-};
-const dibujoDoc = (k) => { const n = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); n.setAttribute('viewBox', '0 0 64 64'); n.setAttribute('aria-hidden', 'true'); n.innerHTML = DIBUJOS_DOC[k] || DIBUJOS_DOC.documento; return n; };
+const dibujoDoc = (k) => dibujoDocumento(k);
 function docsEmpresa(r, s, subir, alCambiar) {
   const claves = Object.keys(r.documentos);
   const requeridos = claves.filter((k) => !r.documentos[k].opcional);

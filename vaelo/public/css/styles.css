@@ -346,7 +346,7 @@ tr.nuevo td { background: #fff7d1; }
 .icono svg { width: 40px; height: 40px; }
 
 /* Documentos (fotos y PDF) */
-.docs { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: .75rem; margin: .75rem 0 .25rem; }
+.docs { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: .8rem; margin: .75rem 0 .25rem; }
 .doc { border: 1.5px dashed var(--linea); border-radius: var(--radio); padding: .7rem; background: #fff; display: grid; gap: .4rem; align-content: start; }
 .doc.listo { border-style: solid; border-color: #bfe3cf; }
 .doc-titulo { font-size: .88rem; font-weight: 700; }
@@ -1236,7 +1236,7 @@ body.app-piloto main { padding-bottom: 9rem; }
 .docs-privado { display: flex; align-items: center; gap: .4rem; margin: 0; font-size: .78rem; color: var(--suave); }
 .docs-privado svg { width: 16px; height: 16px; color: var(--ok); }
 @media (max-width: 560px) {
-  .docs-pro { grid-template-columns: minmax(0, 1fr); gap: .6rem; }
+  .docs-pro, .docs { grid-template-columns: minmax(0, 1fr); gap: .6rem; }
   .doc-pro { grid-template-columns: 92px minmax(0, 1fr); grid-template-areas: 'vista cab' 'vista ayuda' 'botones botones' 'msg msg'; column-gap: .75rem; row-gap: .35rem; }
   .doc-pro:hover { transform: none; }
   .doc-pro-cab { grid-area: cab; } .doc-pro-vista { grid-area: vista; height: 92px; } .doc-pro-ayuda { grid-area: ayuda; min-height: 0; }
@@ -1279,3 +1279,7 @@ body.app-piloto main { padding-bottom: 9rem; }
 .envio-extra-fragil small { color: var(--suave); }
 
 .titulo-envio1 { margin: 0 0 .5rem; } .titulo-envio1 .paquete-num { margin: 0; } .titulo-envio1 .ayuda { display: block; margin-left: 1.8rem; font-size: .78rem; }
+
+.doc-pro.solo-ver { gap: .4rem; } .doc-pro.solo-ver:hover { transform: none; }
+.doc-pro .doc-pro-cab strong { overflow-wrap: anywhere; }
+.doc-pro-botones .boton { white-space: nowrap; padding-left: .5rem; padding-right: .5rem; }

@@ -532,37 +532,93 @@ async function prepararArchivo(archivo, permitePdf) {
 }
 
 // Casilla para ver y subir un documento. opciones: titulo, tiene, ver (url), subir(dataUrl), pdf, ayuda, camara ('user' o 'environment'), soloVer
+// ---------- Tarjeta de documento o foto: guía de qué fotografiar, estado, vista previa, cámara o galería y arrastrar y soltar ----------
+const DIBUJOS_DOC = {
+  fachada: '<path d="M8 30h48v26H8z"/><path d="M4 30 12 14h40l8 16"/><path d="M26 56V40h12v16"/><path d="M14 38h7v7h-7zM43 38h7v7h-7z"/><path d="M22 20h20"/>',
+  bodega: '<path d="M6 26 32 12l26 14v30H6z"/><path d="M14 56V34h36v22"/><path d="M18 44h12v12H18zM34 46h10v10H34zM24 36h10v8H24z"/>',
+  persona: '<circle cx="32" cy="24" r="10"/><path d="M14 54c2-10 9-15 18-15s16 5 18 15"/><path d="M8 8h10M8 8v10M56 8H46M56 8v10M8 56h10M8 56V46M56 56H46M56 56V46"/>',
+  dpi: '<rect x="6" y="14" width="52" height="36" rx="5"/><rect x="12" y="22" width="14" height="18" rx="2"/><path d="M32 24h20M32 30h16M32 36h20M12 44h40"/>',
+  'dpi-atras': '<rect x="6" y="14" width="52" height="36" rx="5"/><path d="M12 22h40M12 28h28"/><path d="M14 36v8M17 36v8M21 36v8M23 36v8M27 36v8M31 36v8M33 36v8M37 36v8M41 36v8M44 36v8M48 36v8"/>',
+  documento: '<path d="M16 6h22l12 12v40H16z"/><path d="M38 6v12h12"/><path d="M22 28h22M22 34h22M22 40h16M22 48h10"/><circle cx="42" cy="48" r="4"/>',
+  sello: '<path d="M16 6h22l12 12v40H16z"/><path d="M38 6v12h12"/><path d="M22 26h20M22 32h14"/><circle cx="36" cy="46" r="7"/><path d="m33 46 2 2 4-4"/>',
+  moto: '<circle cx="15" cy="44" r="9"/><circle cx="49" cy="44" r="9"/><path d="M15 44h14l8-14h8l4 14"/><path d="M29 44 23 30h-8M37 30l-3-8h-6M45 30h5"/>',
+  placa: '<rect x="6" y="18" width="52" height="28" rx="4"/><path d="M12 24h40"/><path d="M14 38V30h4a3 3 0 0 1 0 6h-4M24 30h6M27 30v8M34 38l4-8 4 8M44 30h6l-6 8h6"/>',
+  recibo: '<path d="M16 6h32v52l-5-4-5 4-6-4-6 4-5-4-5 4z"/><path d="M22 18h20M22 26h20M22 34h12"/><path d="M36 44h6"/>',
+};
+// Según el nombre del documento: qué dibujo mostrar y una guía corta de cómo tomarlo
+function guiaDocumento(titulo, pdf) {
+  const t = String(titulo || '').toLowerCase();
+  if (/fachada/.test(t)) return ['fachada', 'De frente y de día: que se vean el rótulo y el número.'];
+  if (/interior|bodega/.test(t)) return ['bodega', 'Donde se guardan los paquetes.'];
+  if (/^(tu )?foto|foto de la persona|foto del representante/.test(t) && !/dpi/.test(t)) return ['persona', 'Una foto de la cara, sin lentes oscuros ni gorra.'];
+  if (/(dpi|licencia).*(reverso|atrás)/.test(t)) return ['dpi-atras', 'La parte de atrás completa, sin reflejos.'];
+  if (/dpi|licencia/.test(t)) return ['dpi', 'Completo, sin reflejos y que se lean los datos.'];
+  if (/tarjeta de circulaci/.test(t)) return ['dpi', 'Que se lean la placa y el nombre del dueño.'];
+  if (/placa/.test(t)) return ['placa', 'De cerca, que se lea bien el número.'];
+  if (/veh[ií]culo|moto/.test(t)) return ['moto', /lado/.test(t) ? 'El vehículo completo, de lado.' : 'El vehículo completo, de frente.'];
+  if (/recibo/.test(t)) return ['recibo', 'Reciente, con la dirección visible.'];
+  if (/antecedentes|patente|rtu|carta/.test(t)) return ['sello', pdf ? 'Foto clara o el PDF que te dieron.' : 'Foto clara y completa.'];
+  return ['documento', pdf ? 'Foto clara o PDF.' : 'Foto clara y completa.'];
+}
+function dibujoDocumento(clave) {
+  const n = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  n.setAttribute('viewBox', '0 0 64 64'); n.setAttribute('aria-hidden', 'true');
+  n.innerHTML = DIBUJOS_DOC[clave] || DIBUJOS_DOC.documento;
+  return n;
+}
 function campoDocumento({ titulo, tiene, ver, subir, pdf, ayuda, camara, soloVer, alCambiar }) {
-  const estado = el('small', { class: 'doc-estado' });
-  const vista = el('div', { class: 'doc-vista' });
-  const pintar = (hay, version) => {
-    if (!hay) { vista.replaceChildren(el('div', { class: 'sin-foto', text: 'Sin archivo' })); return; }
-    const src = ver + (ver.includes('?') ? '&' : '?') + 'v=' + (version || Date.now());
-    const img = el('img', { src, alt: titulo, loading: 'lazy', onclick: () => window.open(src, '_blank') });
-    img.addEventListener('error', () => vista.replaceChildren(el('a', { class: 'doc-pdf', href: src, target: '_blank', rel: 'noopener', text: 'Ver PDF' })), { once: true });
-    vista.replaceChildren(img);
+  const [dibujo, guia] = guiaDocumento(titulo, pdf);
+  const opcional = /^opcional/i.test(ayuda || '');
+  const recomendada = /^recomendad/i.test(ayuda || '');
+  const siAplica = /^solo si/i.test(ayuda || '');
+  const nota = ayuda && !/^(opcional|recomendada)\.?$/i.test(ayuda) ? ayuda.replace(/^(opcional|recomendada)\.\s*/i, '') : guia;
+  const caja = el('div', { class: 'doc-pro' });
+  const estado = el('small', { class: 'doc-pro-msg', role: 'status' });
+  let listo = !!tiene, version = 1;
+  const entradaCam = el('input', { type: 'file', accept: 'image/*', hidden: true, 'aria-label': 'Tomar foto: ' + titulo });
+  if (camara) entradaCam.setAttribute('capture', camara);
+  const entradaArch = el('input', { type: 'file', accept: pdf ? 'image/*,application/pdf' : 'image/*', hidden: true, 'aria-label': 'Elegir archivo: ' + titulo });
+  const subirArchivo = async (f) => {
+    if (!f || soloVer) return;
+    if (f.type === 'application/pdf' && !pdf) { estado.className = 'doc-pro-msg error'; estado.textContent = 'Este debe ser una foto.'; return; }
+    caja.classList.add('subiendo'); estado.className = 'doc-pro-msg'; estado.textContent = 'Subiendo…';
+    try {
+      await subir(await prepararArchivo(f, pdf));
+      listo = true; version = Date.now(); pintar();
+      estado.className = 'doc-pro-msg ok'; estado.textContent = 'Guardado';
+      alCambiar && alCambiar();
+    } catch (e) { estado.className = 'doc-pro-msg error'; estado.textContent = e.message; }
+    caja.classList.remove('subiendo'); entradaCam.value = ''; entradaArch.value = '';
   };
-  pintar(tiene, 1);
-  const caja = el('div', { class: 'doc' + (tiene ? ' listo' : '') }, el('span', { class: 'doc-titulo', text: titulo }), vista);
-  if (ayuda) caja.append(el('small', { class: 'doc-ayuda', text: ayuda }));
+  entradaCam.addEventListener('change', () => subirArchivo(entradaCam.files[0]));
+  entradaArch.addEventListener('change', () => subirArchivo(entradaArch.files[0]));
   if (!soloVer) {
-    const entrada = el('input', { type: 'file', accept: pdf ? 'image/*,application/pdf' : 'image/*', 'aria-label': (tiene ? 'Cambiar ' : 'Subir ') + titulo.toLowerCase() });
-    if (camara) entrada.setAttribute('capture', camara);
-    entrada.addEventListener('change', async () => {
-      const f = entrada.files[0];
-      if (!f) return;
-      entrada.disabled = true; estado.className = 'doc-estado'; estado.textContent = 'Subiendo…';
-      try {
-        await subir(await prepararArchivo(f, pdf));
-        estado.className = 'doc-estado ok'; estado.textContent = 'Guardado';
-        caja.classList.add('listo'); pintar(true);
-        alCambiar && alCambiar();
-      } catch (e) { estado.className = 'doc-estado error'; estado.textContent = e.message; }
-      entrada.disabled = false; entrada.value = '';
-    });
-    caja.append(el('label', { class: 'boton borde chico doc-boton' }, tiene ? 'Cambiar' : 'Subir', entrada));
+    caja.addEventListener('dragover', (ev) => { ev.preventDefault(); caja.classList.add('arrastrando'); });
+    caja.addEventListener('dragleave', () => caja.classList.remove('arrastrando'));
+    caja.addEventListener('drop', (ev) => { ev.preventDefault(); caja.classList.remove('arrastrando'); subirArchivo(ev.dataTransfer.files[0]); });
   }
-  caja.append(estado);
+  function pintar() {
+    caja.className = 'doc-pro' + (listo ? ' listo' : '') + (soloVer ? ' solo-ver' : '');
+    const src = ver + (ver.includes('?') ? '&' : '?') + 'v=' + version;
+    const vista = listo
+      ? el('a', { class: 'doc-pro-vista con-archivo', href: src, target: '_blank', rel: 'noopener', title: 'Ver ' + titulo },
+          el('img', { src, alt: titulo, loading: 'lazy', onerror: (ev) => ev.target.replaceWith(el('span', { class: 'doc-pro-pdf' }, dibujoDocumento('documento'), el('b', { text: 'PDF' }))) }),
+          el('span', { class: 'doc-pro-ver', text: 'Ver' }))
+      : soloVer ? el('div', { class: 'doc-pro-vista' }, dibujoDocumento(dibujo), el('small', { class: 'doc-pro-soltar', text: 'Sin archivo' }))
+      : el('label', { class: 'doc-pro-vista' }, dibujoDocumento(dibujo), el('small', { class: 'doc-pro-soltar', text: 'Toca para subir o arrastra aquí' }), entradaArch);
+    const chip = soloVer ? null : el('span', { class: 'doc-pro-chip ' + (listo ? 'ok' : opcional || recomendada || siAplica ? 'opc' : 'falta'),
+      text: listo ? '✓ Listo' : opcional ? 'Opcional' : recomendada ? 'Recomendada' : siAplica ? 'Si aplica' : 'Falta' });
+    const foto = !pdf;
+    poner(caja,
+      el('div', { class: 'doc-pro-cab' }, el('strong', { text: titulo }), chip),
+      vista,
+      soloVer ? null : el('p', { class: 'doc-pro-ayuda', text: nota }),
+      soloVer ? null : el('div', { class: 'doc-pro-botones' },
+        el('label', { class: 'boton chico ' + (listo ? 'borde' : '') }, listo ? 'Cambiar' : foto ? 'Tomar foto' : 'Subir archivo', listo || !foto ? entradaArch : entradaCam),
+        !listo && foto ? el('label', { class: 'boton borde chico' }, 'Desde galería', entradaArch) : null),
+      estado);
+  }
+  pintar();
   return caja;
 }
 
