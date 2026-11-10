@@ -15,7 +15,7 @@
 <body>
   <header class="barra"><div class="contenedor"><a href="/" class="marca"><img src="/img/logo-blanco.png" alt="Vaelo" width="139" height="40"></a></div></header>
   <main class="area"><div class="contenedor" id="app" style="max-width:720px"><p class="pista">Cargando…</p></div></main>
-  <script src="/js/comun.js?v=20261109c"></script>
+  <script src="/js/comun.js?v=20261110a"></script>
   <script>
     const app = document.getElementById('app');
     const token = location.pathname.split('/').pop();
@@ -26,8 +26,21 @@
       const cab = el('div', { class: 'flete-cabecera' },
         el('div', {}, el('span', { class: 'etiqueta-flete', text: 'Flete en ' + (f.vehiculo || 'pickup').toLowerCase() }), el('h1', { text: f.configurado ? 'Tu flete' : 'Completa los datos de tu flete' }),
           el('p', { class: 'pista', text: `Guía ${f.guia}${f.piloto ? ' · piloto ' + f.piloto : ''}` })),
-        el('div', { class: 'flete-precio' }, el('span', { text: 'Precio acordado' }), el('strong', { text: dinero(f.precio) })));
-      if (!f.configurado) return pintarFormulario(f, cab);
+        el('div', { class: 'flete-precio' }, el('span', { text: f.ayudantes ? 'Total a pagar' : 'Precio acordado' }), el('strong', { text: dinero(f.precio) })));
+      // Equipo que va: el piloto y los ayudantes, con el desglose del cobro
+      const nAy = f.ayudantes || 0;
+      const persona1 = (inicial, nombre, rol) => el('li', {}, el('span', { class: 'equipo-av', text: inicial }), el('div', {}, el('strong', { text: nombre }), el('small', { text: rol })));
+      const equipo = el('section', { class: 'flete-equipo' },
+        el('h3', { text: 'Equipo que va' }),
+        el('ul', { class: 'equipo-lista' },
+          persona1((f.piloto || 'P').charAt(0).toUpperCase(), f.piloto ? 'Piloto ' + f.piloto : 'Piloto', 'Maneja el ' + (f.vehiculo || 'pickup').toLowerCase()),
+          Array.from({ length: nAy }, (_, i) => persona1(String(i + 1), 'Ayudante ' + (i + 1), 'Sube, baja y mueve la carga'))),
+        el('dl', { class: 'flete-desglose' },
+          el('dt', { text: 'Flete' }), el('dd', { text: dinero(f.flete_precio ?? f.precio) }),
+          nAy ? [el('dt', { text: `${nAy} ayudante${nAy === 1 ? '' : 's'} × ${dinero(f.precio_ayudante)}` }), el('dd', { text: dinero(f.ayudantes_monto) })] : null,
+          el('dt', { class: 'total', text: 'Total' }), el('dd', { class: 'total', text: dinero(f.precio) })),
+        nAy ? null : el('p', { class: 'pista', text: `¿Necesitas ayuda para subir o bajar la carga? Pídela por WhatsApp: ${dinero(f.precio_ayudante)} por ayudante.` }));
+      if (!f.configurado) return pintarFormulario(f, el('div', {}, cab, equipo));
       const enlaceTxt = (rol, nombre, url) => rol === 'entrega'
         ? `Hola ${nombre.split(' ')[0]}, Vaelo pasará a recoger un flete (guía ${f.guia}). Abre este enlace y comparte tu ubicación para que el piloto llegue a donde estás: ${location.origin}${url}`
         : `Hola ${nombre.split(' ')[0]}, te llevan un flete con Vaelo (guía ${f.guia}). Abre este enlace y comparte tu ubicación para que el piloto llegue a donde estés: ${location.origin}${url}`;
@@ -37,7 +50,7 @@
         url && !d.confirmado ? el('div', { class: 'navegar' },
           rol === 'entrega' ? el('a', { class: 'boton chico', href: url, text: 'Soy yo: compartir mi ubicación' }) : null,
           el('a', { class: 'boton cinta chico', href: `https://wa.me/${wa(d.telefono)}?text=${encodeURIComponent(enlaceTxt(rol, d.nombre, url))}`, target: '_blank', rel: 'noopener', text: 'Mandarle su enlace por WhatsApp' })) : null);
-      poner(app, cab,
+      poner(app, cab, equipo,
         el('div', { class: 'mensaje aviso', text: f.estado === 'pendiente' ? 'Para que el piloto salga, quien entrega y quien recibe tienen que compartir su ubicación en vivo con su enlace. El piloto llega a donde estén.' : 'El flete va en camino. Puedes seguirlo con la guía.' }),
         persona('Quien entrega la carga', f.origen, f.enlace_entrega, 'entrega'),
         persona('Quien recibe', f.destino, f.enlace_recibe, 'recibe'),
@@ -79,7 +92,7 @@
           cargar();
         } catch (e) { mostrarMensaje(msg, e.message); b.disabled = false; }
       });
-      poner(app, cab, el('p', { class: 'pista', text: 'Llena los datos y después cada persona comparte su ubicación con su enlace, igual que un envío normal. El precio ya está acordado.' }), form);
+      poner(app, cab, el('p', { class: 'pista', text: 'Llena los datos y después cada persona comparte su ubicación con su enlace, igual que un envío normal. El precio y el equipo ya están acordados.' }), form);
     }
     cargar();
   </script>

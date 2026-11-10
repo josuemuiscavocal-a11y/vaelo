@@ -330,6 +330,7 @@
             <div class="campo"><label for="aj-km_max_tarifa_fija">Km máximos con tarifa fija <span class="ayuda">Solo si no hay zonas dibujadas</span></label><input id="aj-km_max_tarifa_fija" type="number" min="1" max="200" step="1"></div>
           </div>
           <div class="fila">
+            <div class="campo"><label for="aj-precio_ayudante">Fletes: precio por ayudante (Q) <span class="ayuda">Para subir, bajar y mover la carga</span></label><input id="aj-precio_ayudante" type="number" min="0" step="1"></div>
             <div class="campo"><label for="aj-cargo_bodega_empresa">Empresas: bodega por paquete por día (Q)</label><input id="aj-cargo_bodega_empresa" type="number" min="0" step="0.5"></div>
             <div class="campo"><label for="aj-min_paquetes_sede">Empresas: mínimo de paquetes a la sede</label><input id="aj-min_paquetes_sede" type="number" min="1" step="1"></div>
           </div>
@@ -560,7 +561,7 @@ null))));
           el('button', { class: 'boton borde chico', type: 'button', text: 'Copiar mensaje', onclick: async (ev) => { try { await navigator.clipboard.writeText(texto); ev.target.textContent = 'Copiado'; } catch { prompt('Copia el mensaje:', texto); } } })));
     }
     async function nuevoFlete() {
-      const [t, m] = await Promise.all([api('/api/admin/tarifas').catch(() => null), api('/api/admin/mensajeros')]);
+      const [t, m, cfg] = await Promise.all([api('/api/admin/tarifas').catch(() => null), api('/api/admin/mensajeros'), api('/api/admin/fletes/config').catch(() => ({ precio_ayudante: 50, max_ayudantes: 5 }))]);
       const vehs = t ? t.vehiculos.filter(v => v.activo) : vehiculos;
       const msg = el('div', { class: 'mensaje', role: 'alert' });
       const selVeh = el('select', { id: 'fl-veh' }, vehs.map(v => el('option', { value: v.id, text: v.nombre + (v.solo_oficina ? ' (flete)' : ''), selected: !!v.solo_oficina })));
@@ -573,11 +574,18 @@ null))));
       const precio = el('input', { id: 'fl-precio', type: 'number', min: 1, step: '0.01', class: 'entrada-grande', placeholder: '0.00' });
       const tel = el('input', { id: 'fl-tel', type: 'tel', maxlength: 30, placeholder: 'Para mandarle el enlace por WhatsApp' });
       const desc = el('input', { id: 'fl-desc', maxlength: 200, placeholder: 'Opcional: lo que acordaron, ej. refrigeradora y 2 cajas' });
+      // Ayudantes (0 a 5): cada uno suma el precio por ayudante que pone la administración
+      let ayud = 0;
+      const totalTxt = el('strong', { class: 'flete-total' });
+      const pintarTotal = () => { const base = Number(precio.value) || 0; totalTxt.textContent = `Total para el cliente: ${dinero(base + ayud * cfg.precio_ayudante)}${ayud ? ` (flete ${dinero(base)} + ${ayud} × ${dinero(cfg.precio_ayudante)})` : ''}`; };
+      const botonesAyud = Array.from({ length: cfg.max_ayudantes + 1 }, (_, n) => el('button', { type: 'button', class: 'ayud-chip' + (n === 0 ? ' si' : ''), text: n === 0 ? 'Ninguno' : String(n), onclick: () => {
+        ayud = n; botonesAyud.forEach((b, i) => b.classList.toggle('si', i === n)); pintarTotal(); } }));
+      precio.addEventListener('input', pintarTotal); pintarTotal();
       const resultado = el('div');
       const boton = el('button', { class: 'boton', type: 'button', text: 'Crear flete y generar enlace', onclick: async () => {
         boton.disabled = true;
         try {
-          const r = await api('/api/admin/fletes', { body: { precio: precio.value, vehiculo_id: selVeh.value, mensajero_id: selPil.value, cliente_telefono: tel.value, descripcion: desc.value } });
+          const r = await api('/api/admin/fletes', { body: { precio: precio.value, ayudantes: ayud, vehiculo_id: selVeh.value, mensajero_id: selPil.value, cliente_telefono: tel.value, descripcion: desc.value } });
           poner(resultado, el('div', { class: 'mensaje exito', text: `Flete ${r.guia} creado. El piloto ya tiene el aviso; sale cuando el cliente complete los datos y compartan las ubicaciones.` }),
             enlaceFlete(r.guia, r.enlace, tel.value),
             el('button', { class: 'boton borde chico', type: 'button', text: 'Ver el flete', onclick: () => abrirEnvio(r.id) }));
@@ -588,7 +596,9 @@ null))));
         el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: () => $('dlg').close() }),
         el('h2', { text: 'Nuevo flete' }),
         el('p', { class: 'pista', text: 'Cuando ya acordaste con el cliente por WhatsApp qué se lleva y cuánto cuesta. Pones el precio y el piloto, y le mandas el enlace: él completa los datos de quien entrega y quien recibe, y cada uno comparte su ubicación como en un envío normal.' }),
-        el('div', { class: 'campo' }, el('label', { for: 'fl-precio', text: 'Precio acordado (Q)' }), precio),
+        el('div', { class: 'campo' }, el('label', { for: 'fl-precio', text: 'Precio acordado del flete (Q)' }), precio),
+        el('div', { class: 'campo' }, el('label', {}, 'Ayudantes para subir, bajar y mover ', el('span', { class: 'ayuda', text: `${dinero(cfg.precio_ayudante)} cada uno` })),
+          el('div', { class: 'ayud-fila' }, botonesAyud), totalTxt),
         el('div', { class: 'fila' }, el('div', { class: 'campo' }, el('label', { for: 'fl-veh', text: 'Vehículo' }), selVeh), el('div', { class: 'campo' }, el('label', { for: 'fl-pil', text: 'Piloto' }), selPil)),
         el('div', { class: 'fila' }, el('div', { class: 'campo' }, el('label', { for: 'fl-tel', text: 'WhatsApp del cliente' }), tel), el('div', { class: 'campo' }, el('label', { for: 'fl-desc', text: 'Qué se lleva' }), desc)),
         msg, boton, resultado);
@@ -913,6 +923,7 @@ null))));
           el('div', { style: 'margin-top:1rem' }, cajaMapa),
           el('div', { class: 'datos' },
             dato('Cliente', e.flete ? `${e.flete_cliente || 'Por completar'} (por WhatsApp) ` : `${e.cliente_nombre} `, telLink(e.flete ? e.flete_telefono : e.cliente_telefono)),
+            e.flete && e.ayudantes ? dato('Ayudantes', `${e.ayudantes} · ${dinero(e.ayudantes_monto)} (flete ${dinero(e.flete_precio ?? e.precio - e.ayudantes_monto)})`) : null,
             e.paquetes > 1 ? dato('Paquetes', `${e.paquetes} para la misma dirección`) : null,
             dato('Precio', `${dinero(e.precio)} · ${e.tipo_tarifa === 'zona' ? 'zona preferencial' : 'fuera de zona'} · ${PAGOS[e.metodo_pago] || e.metodo_pago}${e.fragil ? `. Incluye ${dinero(e.recargo_fragil)} por frágil` : ''}`),
             e.reparto ? dato('Reparto', `Piloto ${dinero(e.reparto.piloto)}${e.reparto.bono ? ` · Bono empresa ${dinero(e.reparto.bono)}` : ''} · Vaelo ${dinero(e.reparto.vaelo)}`) : null,
@@ -1407,7 +1418,7 @@ null))));
 
     // ---------- Zonas dibujadas en el mapa ----------
     const CAMPOS_AJUSTES = ['cargo_devolucion', 'cargo_bodega_dia', 'cargo_reentrega', 'horas_decidir_fallido', 'cargo_cancelacion', 'pct_piloto_cancelacion', 'sede_direccion',
-      'whatsapp_pagos', 'dias_liquidar', 'dias_reclamo', 'cargo_bodega_empresa', 'min_paquetes_sede', 'km_max_tarifa_fija', 'correo_respaldos'];
+      'whatsapp_pagos', 'dias_liquidar', 'dias_reclamo', 'cargo_bodega_empresa', 'min_paquetes_sede', 'km_max_tarifa_fija', 'correo_respaldos', 'precio_ayudante'];
     let mapaZonas = null, capaZonas = [], selectorSede = null;
     const COLORES_ZONA = ['#1c3faa', '#d9480f', '#17824a', '#7b2cbf', '#0e7490', '#b4261c', '#a16207', '#be185d'];
     function pintarMapaZonas(zonas) {
@@ -1465,7 +1476,7 @@ null))));
     });
     guardarAjustes($('form-fallidos'), ['cargo_devolucion', 'cargo_bodega_dia', 'cargo_reentrega', 'horas_decidir_fallido', 'cargo_cancelacion', 'pct_piloto_cancelacion', 'sede_direccion'],
       () => { const p = selectorSede && selectorSede.obtener(); return p ? { sede_lat: p.lat, sede_lng: p.lng } : {}; });
-    guardarAjustes($('form-seguro'), ['whatsapp_pagos', 'dias_liquidar', 'dias_reclamo', 'km_max_tarifa_fija', 'cargo_bodega_empresa', 'min_paquetes_sede']);
+    guardarAjustes($('form-seguro'), ['whatsapp_pagos', 'dias_liquidar', 'dias_reclamo', 'km_max_tarifa_fija', 'cargo_bodega_empresa', 'min_paquetes_sede', 'precio_ayudante']);
     guardarAjustes($('form-respaldos'), ['correo_respaldos']);
 
     $('form-zona').addEventListener('submit', async (ev) => {

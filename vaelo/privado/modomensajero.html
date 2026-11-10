@@ -743,6 +743,7 @@
       if (e.flete_pendiente) return el('article', { class: 'entrega-tarjeta' },
         el('div', { class: 'cab' }, el('strong', { class: 'guia' }, e.guia, el('span', { class: 'etiqueta-flete', style: 'margin-left:.4rem', text: 'Flete' })), el('span', { class: 'estado pendiente', text: 'Esperando datos' })),
         el('p', { text: `Flete de ${dinero(e.precio)} asignado a ti. El cliente está llenando los datos de quién entrega y quién recibe; te avisamos cuando esté listo.` }),
+        e.ayudantes ? el('p', { class: 'flete-ayud-piloto', text: `Van ${e.ayudantes} ayudante${e.ayudantes === 1 ? '' : 's'} contigo para subir y bajar la carga` }) : null,
         e.descripcion ? el('p', { class: 'pista', text: 'Se lleva: ' + e.descripcion }) : null);
       // Entrega fallida: esperando decisión, devolución o sede
       if (['fallido', 'devolviendo', 'a_sede'].includes(e.estado)) return tarjetaFallida(e, fragil, resumen);
@@ -776,6 +777,7 @@
       return el('article', { class: 'entrega-tarjeta' + (!cerrado ? ' activa' : '') },
         el('div', { class: 'cab' }, el('strong', { class: 'guia' }, e.guia, e.flete ? el('span', { class: 'etiqueta-flete', style: 'margin-left:.4rem', text: 'Flete' }) : null), chipEstado(e.estado)),
         e.programado_para && recoger ? el('div', { class: 'mensaje aviso', text: 'Recoger el ' + fechaProgramada(e.programado_para) }) : '',
+        e.ayudantes && !cerrado ? el('p', { class: 'flete-ayud-piloto', text: `Van ${e.ayudantes} ayudante${e.ayudantes === 1 ? '' : 's'} contigo para subir y bajar la carga` }) : null,
         fragil,
         cerrado ? el('p', {}, 'Entregado a ', el('strong', { text: e.recibio || e.destino_nombre })) : [quienEntrega, quienRecibe],
         resumen, cobro,

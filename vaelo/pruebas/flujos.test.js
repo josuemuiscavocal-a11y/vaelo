@@ -659,3 +659,21 @@ test('control del panel: historial, permisos de empleados, estrellas de quien re
     assert.equal((await admin('GET', `/api/admin/empresas/${beto.id}/estado-cuenta?mes=2026-11`)).status, 200);
   }
 });
+
+test('flete con ayudantes: Q50 cada uno, hasta 5, suma al total y el piloto gana solo sobre el flete', async () => {
+  db.prepare('UPDATE usuarios SET vehiculo_id = ? WHERE id = ?').run(db.prepare("SELECT id FROM vehiculos WHERE solo_oficina = 1").get().id, pilotoId);
+  assert.equal((await admin('GET', '/api/admin/fletes/config')).j.precio_ayudante, 50);
+  assert.equal((await admin('POST', '/api/admin/fletes', { vehiculo_id: 2, mensajero_id: pilotoId, precio: 300, ayudantes: 6 })).status, 400);
+  const r = await admin('POST', '/api/admin/fletes', { vehiculo_id: 2, mensajero_id: pilotoId, precio: 300, ayudantes: 2, cliente_telefono: '55557777' });
+  assert.equal(r.status, 201, JSON.stringify(r.j));
+  const e = db.prepare('SELECT precio, ayudantes, ayudantes_monto, flete_precio, ganancia_piloto FROM envios WHERE id = ?').get(r.j.id);
+  assert.deepEqual({ ...e }, { precio: 400, ayudantes: 2, ayudantes_monto: 100, flete_precio: 300, ganancia_piloto: 295 });
+  const f = (await cliente()('GET', '/api/flete/' + r.j.enlace.split('/').pop())).j;
+  assert.equal(f.precio, 400); assert.equal(f.ayudantes, 2); assert.equal(f.flete_precio, 300); assert.equal(f.precio_ayudante, 50);
+  // Solo administración cambia el precio por ayudante
+  assert.equal((await admin('PUT', '/api/admin/ajustes', { precio_ayudante: 60 })).status, 200);
+  assert.equal((await admin('GET', '/api/admin/fletes/config')).j.precio_ayudante, 60);
+  assert.equal((await cliente()('PUT', '/api/admin/ajustes', { precio_ayudante: 1 })).status >= 400, true);
+  await admin('PUT', '/api/admin/ajustes', { precio_ayudante: 50 });
+  db.prepare("UPDATE envios SET estado = 'cancelado' WHERE id = ?").run(r.j.id);
+});

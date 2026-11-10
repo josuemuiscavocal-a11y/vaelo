@@ -1339,3 +1339,21 @@ body.app-piloto main { padding-bottom: 9rem; }
 .recogidas-hoy li { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
 .recogida-fija { display: flex; align-items: center; gap: .4rem; margin: .4rem 0 0; font-weight: 600; color: #11226B; }
 .recogida-fija svg { width: 18px; height: 18px; }
+
+/* Fletes: ayudantes */
+.ayud-fila { display: flex; flex-wrap: wrap; gap: .4rem; margin: .2rem 0 .5rem; }
+.ayud-chip { border: 1.5px solid var(--borde, #d5dbe8); background: #fff; border-radius: 999px; padding: .4rem .85rem; font: inherit; font-weight: 600; cursor: pointer; min-width: 2.6rem; }
+.ayud-chip.si { background: var(--azul-hondo); border-color: var(--azul-hondo); color: #fff; }
+.flete-total { display: block; font-size: .95rem; }
+.flete-ayud-piloto { background: #fff6e0; border-left: 4px solid #f2a516; padding: .45rem .7rem; border-radius: 6px; font-weight: 600; margin: .4rem 0; }
+.flete-equipo { background: #fff; border: 1px solid var(--borde, #e2e6ef); border-radius: var(--radio); padding: .9rem 1rem; margin: .8rem 0; }
+.flete-equipo h3 { margin: 0 0 .6rem; font-size: 1rem; }
+.equipo-lista { list-style: none; margin: 0 0 .8rem; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 190px), 1fr)); gap: .5rem; }
+.equipo-lista li { display: flex; align-items: center; gap: .6rem; background: #f4f6fb; border-radius: 10px; padding: .45rem .6rem; min-width: 0; }
+.equipo-lista li div { display: flex; flex-direction: column; min-width: 0; }
+.equipo-lista small { color: #5b6478; font-size: .78rem; line-height: 1.25; }
+.equipo-av { flex: none; width: 2.1rem; height: 2.1rem; border-radius: 50%; background: var(--azul-hondo); color: #fff; display: grid; place-items: center; font-weight: 700; }
+.equipo-lista li + li .equipo-av { background: #f2a516; color: #1d1d1d; }
+.flete-desglose { display: grid; grid-template-columns: 1fr auto; gap: .25rem 1rem; margin: 0; border-top: 1px dashed var(--borde, #d5dbe8); padding-top: .6rem; }
+.flete-desglose dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.flete-desglose .total { font-weight: 800; font-size: 1.1rem; border-top: 1px solid var(--borde, #d5dbe8); padding-top: .35rem; }

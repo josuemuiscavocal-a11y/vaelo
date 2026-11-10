@@ -285,6 +285,7 @@ const insAj = db.prepare('INSERT OR IGNORE INTO ajustes (clave, valor) VALUES (?
 insAj.run('whatsapp', '');
 insAj.run('horario', 'Lunes a sábado, 8:00 a. m. a 6:00 p. m.');
 insAj.run('recargo_fragil', '10');            // Q extra por paquete frágil
+insAj.run('precio_ayudante', '50');            // Q por cada ayudante en un flete (solo lo cambia administración)
 insAj.run('bono_empresa', '0');               // Q que gana cada empresa por envío entregado (0 = apagado)
 insAj.run('vigencia_antecedentes', '6');      // meses que valen los antecedentes penales y policiacos
 insAj.run('auto_asignar', '0');               // asignar solo al piloto más cercano
@@ -552,6 +553,8 @@ agregarColumnas('usuarios', [['permisos', 'TEXT']]);
 // Quien recibe también califica al piloto (de 1 a 5 estrellas)
 agregarColumnas('envios', [['calif_receptor', 'INTEGER'], ['calif_receptor_comentario', 'TEXT']]);
 // Empresas: recogida fija (días de la semana 0-6 separados por coma y hora) y datos para facturar
+// Fletes: ayudantes que van con el piloto para subir, bajar y mover la carga (0 a 5)
+agregarColumnas('envios', [['ayudantes', 'INTEGER NOT NULL DEFAULT 0'], ['ayudantes_monto', 'REAL NOT NULL DEFAULT 0'], ['flete_precio', 'REAL']]);
 agregarColumnas('usuarios', [['recogida_dias', 'TEXT'], ['recogida_hora', 'TEXT'], ['fact_nit', 'TEXT'], ['fact_nombre', 'TEXT'], ['fact_direccion', 'TEXT']]);
 db.exec(`
   CREATE TABLE IF NOT EXISTS bonos_empresa (

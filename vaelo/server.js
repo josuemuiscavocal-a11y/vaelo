@@ -1129,6 +1129,7 @@ ruta('GET', '/api/piloto/envios', ({ req }) => {
     out.tiene_foto_paquete = !!e.foto_paquete;
     if (extra.paquetes_extra) { out.paquetes_extra = extra.paquetes_extra; out.peso_paquete1 = extra.peso_paquete1; }
     out.flete_pendiente = !!e.flete && !e.flete_configurado_en;
+    if (e.flete && e.ayudantes) out.ayudantes = e.ayudantes;
     if (e.pedido_id) {
       const ped = db.prepare('SELECT id, cliente_nombre FROM pedidos_empresa WHERE id = ?').get(e.pedido_id);
       out.empresa = nombreEmpresa(e.usuario_id);
@@ -2884,10 +2885,18 @@ function usuarioWhatsapp() {
 }
 // La oficina pone el precio acordado, el vehículo y el piloto. Se genera un enlace (/flete/<clave>) para que el cliente
 // complete los datos de quien entrega y quien recibe; después se comparten las ubicaciones en vivo como en un envío normal.
+const MAX_AYUDANTES = 5;
+const precioAyudante = () => Math.max(0, Number(getAjustes().precio_ayudante) || 0);
+ruta('GET', '/api/admin/fletes/config', ({ req }) => { requiereStaff(req); return { precio_ayudante: precioAyudante(), max_ayudantes: MAX_AYUDANTES }; });
 ruta('POST', '/api/admin/fletes', ({ req, body }) => {
   const quien = requiereStaff(req);
-  const precio = numero(body.precio);
-  if (!(precio > 0 && precio <= 100000)) falla(400, 'Escribe el precio que acordaron con el cliente.');
+  const precioFlete = numero(body.precio);
+  if (!(precioFlete > 0 && precioFlete <= 100000)) falla(400, 'Escribe el precio que acordaron con el cliente.');
+  // Ayudantes: el precio por persona lo pone la administración; el total se suma a lo que paga el cliente
+  const ayudantes = Math.round(numero(body.ayudantes || 0));
+  if (!(ayudantes >= 0 && ayudantes <= MAX_AYUDANTES)) falla(400, `Puedes mandar de 0 a ${MAX_AYUDANTES} ayudantes.`);
+  const montoAyud = redondear(ayudantes * precioAyudante());
+  const precio = redondear(precioFlete + montoAyud);
   const v = db.prepare('SELECT * FROM vehiculos WHERE id = ?').get(numero(body.vehiculo_id));
   if (!v) falla(400, 'Elige el vehículo.');
   const m = pilotoPorId(numero(body.mensajero_id));
@@ -2897,13 +2906,14 @@ ruta('POST', '/api/admin/fletes', ({ req, body }) => {
   const guia = nuevaGuia(), token = nuevoTokenReceptor();
   const r = db.prepare(`INSERT INTO envios (guia, usuario_id, vehiculo_id, peso, descripcion, origen_direccion, origen_zona, origen_telefono,
       destino_nombre, destino_telefono, destino_direccion, destino_zona, tipo_tarifa, precio, precio_base, metodo_pago, notas,
-      estado, mensajero_id, asignacion, asignado_en, flete, flete_token, flete_telefono, origen_quien, ganancia_piloto)
-    VALUES (?, ?, ?, 0, ?, '', ?, ?, '', '', '', ?, 'zona', ?, ?, 'efectivo', ?, 'pendiente', ?, 'aceptado', datetime('now'), 1, ?, ?, 'tercero', ?)`).run(
-    guia, cliente.id, v.id, texto(body.descripcion, 200), OTRA_ZONA, tel, OTRA_ZONA, redondear(precio), redondear(precio), texto(body.notas, 300), m.id, token, tel || null, gananciaPiloto(precio));
+      estado, mensajero_id, asignacion, asignado_en, flete, flete_token, flete_telefono, origen_quien, ganancia_piloto, ayudantes, ayudantes_monto, flete_precio)
+    VALUES (?, ?, ?, 0, ?, '', ?, ?, '', '', '', ?, 'zona', ?, ?, 'efectivo', ?, 'pendiente', ?, 'aceptado', datetime('now'), 1, ?, ?, 'tercero', ?, ?, ?, ?)`).run(
+    guia, cliente.id, v.id, texto(body.descripcion, 200), OTRA_ZONA, tel, OTRA_ZONA, precio, precio, texto(body.notas, 300), m.id, token, tel || null,
+    gananciaPiloto(precioFlete), ayudantes, montoAyud, redondear(precioFlete));   // el piloto gana sobre el flete; lo de los ayudantes es para pagarles a ellos
   const id = Number(r.lastInsertRowid);
   db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(id, 'pendiente',
-    `Flete en ${v.nombre.toLowerCase()} acordado por WhatsApp: Q${precio.toFixed(2)}, con ${m.nombre.split(' ')[0]} (${quien.nombre.split(' ')[0]}). Esperando que el cliente complete los datos`);
-  avisar(m.id, { titulo: 'Flete asignado', cuerpo: `${guia}: Q${precio.toFixed(2)}. Te avisamos cuando el cliente complete los datos.`, url: RUTA_PILOTO, etiqueta: 'piloto-' + id });
+    `Flete en ${v.nombre.toLowerCase()} acordado por WhatsApp: Q${precio.toFixed(2)}${ayudantes ? ` (flete Q${precioFlete.toFixed(2)} + ${ayudantes} ayudante${ayudantes === 1 ? '' : 's'} Q${montoAyud.toFixed(2)})` : ''}, con ${m.nombre.split(' ')[0]} (${quien.nombre.split(' ')[0]}). Esperando que el cliente complete los datos`);
+  avisar(m.id, { titulo: 'Flete asignado', cuerpo: `${guia}: cobra Q${precio.toFixed(2)}${ayudantes ? `. Van ${ayudantes} ayudante${ayudantes === 1 ? '' : 's'} contigo` : ''}. Te avisamos cuando el cliente complete los datos.`, url: RUTA_PILOTO, etiqueta: 'piloto-' + id });
   return { _status: 201, ok: true, id, guia, enlace: '/flete/' + token };
 });
 function fletePorToken(token) {
@@ -2916,6 +2926,7 @@ ruta('GET', '/api/flete/:token', ({ params }) => {
   const e = fletePorToken(params.token);
   const aj = getAjustes();
   return { guia: e.guia, precio: e.precio, vehiculo: e.vehiculo, estado: e.estado, configurado: !!e.flete_configurado_en, piloto: (e.mensajero_nombre || '').split(' ')[0],
+    flete_precio: e.flete_precio ?? e.precio, ayudantes: e.ayudantes || 0, ayudantes_monto: e.ayudantes_monto || 0, precio_ayudante: e.ayudantes ? redondear(e.ayudantes_monto / e.ayudantes) : precioAyudante(),
     descripcion: e.descripcion, metodo_pago: e.metodo_pago, pago_estado: e.pago_estado, whatsapp_pagos: aj.whatsapp_pagos || '50237731793', datos_transferencia: aj.datos_transferencia || '',
     origen: e.flete_configurado_en ? { nombre: e.origen_nombre, telefono: e.origen_telefono, direccion: e.origen_direccion, zona: e.origen_zona, confirmado: !!e.origen_confirmado_en } : null,
     destino: e.flete_configurado_en ? { nombre: e.destino_nombre, telefono: e.destino_telefono, direccion: e.destino_direccion, zona: e.destino_zona, confirmado: !!e.receptor_confirmado_en } : null,
@@ -4776,6 +4787,11 @@ ruta('PUT', '/api/admin/ajustes', ({ req, body }) => {
     up.run('recargo_fragil', String(redondear(n)));
   }
   if (body.exigir_receptor !== undefined) up.run('exigir_receptor', body.exigir_receptor === true || body.exigir_receptor === '1' ? '1' : '0');
+  if (body.precio_ayudante !== undefined) {
+    const pa = numero(body.precio_ayudante);
+    if (!(pa >= 0 && pa <= 5000)) falla(400, 'Revisa el precio por ayudante.');
+    up.run('precio_ayudante', String(redondear(pa)));
+  }
   if (body.bono_empresa !== undefined) {
     const b = numero(body.bono_empresa);
     if (!(b >= 0 && b <= TOPE_BONO)) falla(400, `El bono general para empresas va de Q0 a Q${TOPE_BONO}.`);
