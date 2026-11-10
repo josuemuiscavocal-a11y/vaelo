@@ -251,6 +251,19 @@ test('hasta 3 paquetes en un envío: mismo precio, peso sumado y foto de cada un
   db.prepare("UPDATE envios SET estado = 'cancelado' WHERE id IN (?, ?)").run(r.j.id, solo.j.id);
 });
 
+test('cuenta personal: "paga quien recibe" y quien recibe ve cuánto paga', async () => {
+  const comun = { vehiculo_id: 1, metodo_pago: 'recibe', origen_zona: 'Zona 1', origen_telefono: '55551111', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng, origen_quien: 'cliente' };
+  const uno = { peso: 1, foto_paquete: FOTO, destino_nombre: 'Luis', destino_telefono: '55554444', destino_zona: 'Zona 16' };
+  const r = await ana('POST', '/api/envios/caja', { ...comun, envios: [uno, { ...uno, destino_nombre: 'Marta' }, { ...uno, destino_nombre: 'Rosa' }, { ...uno, destino_nombre: 'Juan' }] });
+  assert.equal(r.status, 201, JSON.stringify(r.j));
+  assert.equal(r.j.envios.length, 4);
+  const e = fila(r.j.envios[0].id);
+  assert.equal(e.metodo_pago, 'recibe');
+  const v = await cliente()('GET', '/api/recibe/' + e.receptor_token);
+  assert.equal(v.j.cobro, e.precio); assert.equal(v.j.paga_envio, true);
+  db.prepare("UPDATE envios SET estado = 'cancelado' WHERE grupo = ?").run(e.grupo);
+});
+
 test('oficina: asignar al piloto en línea más cercano con un toque', async () => {
   const r = await ana('POST', '/api/envios', { vehiculo_id: 1, peso: 1, origen_zona: 'Zona 1', destino_zona: 'Zona 16', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng,
     destino_nombre: 'Luis', destino_telefono: '55554444', metodo_pago: 'efectivo', foto_paquete: FOTO });

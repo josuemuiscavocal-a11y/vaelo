@@ -64,7 +64,7 @@ Página web y app (instalable en el celular) de Vaelo, mensajería en moto y pic
 
 - De cada envío **Vaelo cobra Q5** y el resto es para el piloto (Tarifas y ajustes > Asignación y pago de pilotos).
 - **Foto del paquete obligatoria** al pedir: la ven el piloto, la oficina y el cliente.
-- **Solo efectivo:** el envío se paga en efectivo al piloto (o paga quien recibe, en cuentas de empresa). Ya no hay transferencias ni pago a fin de mes; los pendientes viejos pasaron solos a efectivo.
+- **Solo efectivo:** el envío se paga en efectivo al piloto (o "paga quien recibe", para cualquier cuenta: el piloto le cobra el envío al entregar y quien recibe ve el monto en su enlace). Ya no hay transferencias ni pago a fin de mes; los pendientes viejos pasaron solos a efectivo.
 - **Sin valor del contenido:** si pasa algo con un envío, la administración lo revisa con la foto del paquete, la foto de entrega y el recorrido.
 - **Efectivo de los pilotos:** si un piloto no entrega el efectivo en la sede en 3 días (editable), no puede conectarse hasta liquidar.
 - **Reclamos:** el cliente reporta desde el envío (3 días después de la entrega, editable). En Caja > Reclamos se decide cuánto se le devuelve al cliente y cuánto paga el piloto; eso se descuenta solo de su próximo pago.

@@ -132,7 +132,8 @@
       return el('div', { class: 'datos' },
         r.referencias ? el('div', {}, el('span', { text: 'Referencias' }), r.referencias) : null,
         el('div', {}, el('span', { text: 'Paquete' }), `${r.vehiculo}${r.descripcion ? '. ' + r.descripcion : ''}${r.fragil ? '. Frágil' : ''}`),
-        r.cobro > 0 ? el('div', {}, el('span', { text: 'Pagas al recibir' }), el('strong', { text: dinero(r.cobro) })) : null,
+        r.cobro > 0 ? el('div', {}, el('span', { text: 'Pagas al recibir' }), el('strong', { text: dinero(r.cobro) }),
+          r.paga_envio ? el('small', { style: 'display:block;color:var(--suave)', text: r.cobro > r.precio_envio ? `Incluye el envío (${dinero(r.precio_envio)}). En efectivo al piloto.` : 'Es el costo del envío. En efectivo al piloto.' }) : null) : null,
         r.programado_para && r.estado === 'pendiente' ? el('div', {}, el('span', { text: 'Recogida programada' }), fechaProgramada(r.programado_para)) : null);
     }
 

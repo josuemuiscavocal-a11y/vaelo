@@ -1659,7 +1659,6 @@ function validarPedido(u, body) {
   if (d.destino_telefono.replace(/\D/g, '').length < 8) falla(400, 'Escribe el teléfono de quien recibe (8 dígitos).');
   if (!METODOS_PAGO.includes(d.metodo_pago)) falla(400, 'Elige cómo vas a pagar el envío.');
   const cuenta = db.prepare('SELECT credito_permitido, tipo_cuenta FROM usuarios WHERE id = ?').get(u.id) || {};
-  if (d.metodo_pago === 'recibe' && cuenta.tipo_cuenta !== 'empresa') falla(400, '"Paga quien recibe" es para cuentas de empresa.');
   // Varios paquetes a la misma dirección (empresas): mismo precio
   d.paquetes = cuenta.tipo_cuenta === 'empresa' ? Math.min(30, Math.max(1, Math.round(numero(body.paquetes)) || 1)) : 1;
   if (Array.isArray(body.extras) && body.extras.length) d.paquetes = Math.max(d.paquetes, 1 + Math.min(body.extras.length, MAX_PAQUETES_ENVIO - 1));
@@ -1927,7 +1926,9 @@ ruta('GET', '/api/recibe/:token', ({ params }) => {
     remitente: e.flete ? (e.flete_cliente || 'Vaelo').split(/\s+/)[0] : e.tipo_cuenta === 'empresa' && e.empresa_nombre ? e.empresa_nombre : (e.remitente || '').split(/\s+/)[0],
     destinatario: e.destino_nombre, destino_zona: e.destino_zona, referencias: entrega ? e.origen_direccion : e.destino_direccion,
     nombre_sugerido: entrega ? e.origen_nombre : e.destino_nombre, origen_zona: e.origen_zona,
-    cobro: entrega ? 0 : Number(e.cobro_destinatario) || 0, programado_para: e.programado_para,
+    // Lo que paga quien recibe al tener el paquete: el envío si "paga quien recibe" y lo que pidió cobrar quien envía
+    cobro: entrega ? 0 : redondear((Number(e.cobro_destinatario) || 0) + (e.metodo_pago === 'recibe' ? (Number(e.precio) || 0) : 0)),
+    paga_envio: !entrega && e.metodo_pago === 'recibe', precio_envio: !entrega && e.metodo_pago === 'recibe' ? Number(e.precio) || 0 : 0, programado_para: e.programado_para,
     confirmado, omitido: !!e.receptor_omitido, exigido: exigeReceptor(),
     // El código solo lo ve quien recibe y cuando ya confirmó: lo da al piloto al tener el paquete en la mano
     codigo_entrega: !entrega && activo && (confirmado || e.receptor_omitido) ? e.codigo_entrega : null,

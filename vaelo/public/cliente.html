@@ -117,7 +117,7 @@
             <div class="campo">
               <div class="opciones" role="radiogroup" aria-label="Cómo pagas el envío">
                 <label class="opcion"><input type="radio" name="metodo_pago" value="efectivo" checked><span>Efectivo<small>Al mensajero</small></span></label>
-                <label class="opcion" id="opcion-recibe" hidden><input type="radio" name="metodo_pago" value="recibe"><span>Paga quien recibe<small>El piloto cobra el envío al entregar</small></span></label>
+                <label class="opcion" id="opcion-recibe"><input type="radio" name="metodo_pago" value="recibe"><span>Paga quien recibe<small>El piloto le cobra el envío al entregar</small></span></label>
               </div>
             </div>
             <div class="campo"><label for="cupon">Cupón de descuento <span class="ayuda">Opcional</span></label>
@@ -381,6 +381,7 @@
     }
     // Enlace privado para quien recibe: confirma con su foto, comparte su ubicación y ve su código de entrega
     const mensajeReceptor = (e) => `Hola ${e.destino_nombre.split(' ')[0]}, te envío un paquete con Vaelo (guía ${e.guia}). ` +
+      (e.metodo_pago === 'recibe' && e.precio ? `El envío lo pagas tú al recibir: ${dinero(e.precio)} en efectivo al piloto. ` : '') +
       `Abre este enlace y comparte tu ubicación para que el piloto te lo lleve a donde estés: ${location.origin}${e.receptor.enlace}`;
     function whatsappReceptor(e) {
       let tel = String(e.destino_telefono || '').replace(/\D/g, '');
@@ -609,7 +610,7 @@
       const q = new URLSearchParams(location.search);
       if (q.get('correo') === 'confirmado') avisos.push(el('div', { class: 'mensaje exito', text: 'Listo, tu correo quedó confirmado.' }));
       if (yoCliente.rol === 'cliente') {
-        $('opcion-recibe').hidden = yoCliente.tipo_cuenta !== 'empresa';
+
         $('campo-paquetes').hidden = yoCliente.tipo_cuenta !== 'empresa';
         $('tab-empresa').hidden = yoCliente.tipo_cuenta !== 'empresa';
         if (yoCliente.tipo_cuenta === 'empresa' && yoCliente.descuento_empresa > 0) avisos.push(el('div', { class: 'mensaje exito', text: `Tu empresa tiene ${yoCliente.descuento_empresa}% de descuento en sus envíos.` }));
@@ -709,7 +710,8 @@
     function pintarTotal() {
       const n = extras.length + 1;
       $('boton-enviar').textContent = extras.length ? `Enviar ${n} envíos` : 'Enviar paquete';
-      $('resumen-titulo').textContent = extras.length ? `Total de ${n} envíos` : 'Precio del envío';
+      const pagaRecibe = document.querySelector('input[name="metodo_pago"]:checked')?.value === 'recibe';
+      $('resumen-titulo').textContent = (extras.length ? `Total de ${n} envíos` : 'Precio del envío') + (pagaRecibe ? (extras.length ? ' (cada quien paga el suyo al recibir)' : ' (lo paga quien recibe)') : '');
       if (!extras.length) return;
       const faltan = extras.some(x => !x.precio) || precioUno == null;
       const suma = (precioUno || 0) + extras.reduce((t, x) => t + (x.precio || 0), 0);
@@ -782,6 +784,7 @@
       ult.scrollIntoView({ behavior: 'smooth', block: 'center' }); ult.querySelector('input[type=number]').focus({ preventScroll: true });
     });
     // Si cambian el vehículo o el punto de recogida, se recalcula el precio de cada envío extra
+    document.querySelectorAll('input[name="metodo_pago"]').forEach(r => r.addEventListener('change', pintarTotal));
     ['vehiculos', 'origen_zona'].forEach(k => $(k).addEventListener('change', () => { extras.forEach(x => { x.precio = null; }); if (extras.length) pintarExtras(); }));
     function leerExtras() {
       return extras.map((x, i) => {
@@ -816,13 +819,13 @@
     }
     const pintarCaja = pintarTotal;
     // Después de enviar la caja: el enlace de cada quien recibe, listo para mandarlo por WhatsApp
-    function enlacesCaja(envios, total) {
+    function enlacesCaja(envios, total, metodo) {
       poner($('dlg-cuerpo'), 
         el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: cerrarDialogo }),
         el('h2', { text: `¡Listo! Pediste ${envios.length} envíos` }),
         el('p', { class: 'pista', text: `Total ${dinero(total)}. Ahora manda a cada persona su enlace: ahí comparte su ubicación y confirma sus datos para que el piloto le lleve el paquete.` }),
         el('ul', { class: 'caja-enlaces' }, envios.map(x => {
-          const e = { ...x, receptor: { enlace: x.enlace_receptor } };
+          const e = { ...x, metodo_pago: metodo, receptor: { enlace: x.enlace_receptor } };
           return el('li', {}, el('span', {}, el('strong', { text: x.destino_nombre }), el('small', { text: `${x.guia} · código de entrega ${x.codigo_entrega}` })),
             el('a', { class: 'boton cinta chico', href: whatsappReceptor(e), target: '_blank', rel: 'noopener', text: 'Mandar enlace' }));
         })),
@@ -858,7 +861,7 @@
           if (quien === 'tercero') f.origen_telefono.value = '';
           mostrarMensaje($('msg-envio'), '');
           cargarEnvios();
-          enlacesCaja(r.envios, r.total);
+          enlacesCaja(r.envios, r.total, f.metodo_pago.value);
         } else {
           const actual = leerEnvioActual();
           const fotoPaquete = await prepararArchivo(actual.archivo, false);
@@ -967,7 +970,7 @@
       detectarZonaInicial();
       // Barra fija abajo (celular): precio y botón de enviar siempre a la mano mientras llenas el formulario
       const barra = $('barra-enviar');
-      const copiar = () => { $('barra-precio').textContent = $('precio').textContent; $('barra-boton').textContent = $('boton-enviar').textContent; $('barra-boton').disabled = $('boton-enviar').disabled; };
+      const copiar = () => { $('barra-detalle').textContent = $('resumen-titulo').textContent; $('barra-precio').textContent = $('precio').textContent; $('barra-boton').textContent = $('boton-enviar').textContent; $('barra-boton').disabled = $('boton-enviar').disabled; };
       new MutationObserver(copiar).observe($('precio'), { childList: true, characterData: true, subtree: true });
       new MutationObserver(copiar).observe($('boton-enviar'), { childList: true, attributes: true, subtree: true });
       copiar();
