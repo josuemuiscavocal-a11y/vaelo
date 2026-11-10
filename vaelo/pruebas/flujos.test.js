@@ -721,3 +721,19 @@ test('rutas de empresa: orden sin cruces y respetando mañana → cualquier hora
   const r = { manana: 0, cualquiera: 1, tarde: 2 };
   assert.ok(orden.every((p, i) => i === 0 || r[orden[i - 1].horario] <= r[p.horario]), 'mañana primero y tarde al final');
 });
+
+test('hora estimada: solo después de recoger, con ventana de margen, y la ve quien recibe', async () => {
+  const lote = db.prepare("SELECT envio_id FROM pedidos_empresa WHERE envio_id IS NOT NULL ORDER BY id DESC LIMIT 1").get();
+  assert.ok(lote, 'hay un pedido de empresa con envío');
+  const e = db.prepare('SELECT * FROM envios WHERE id = ?').get(lote.envio_id);
+  db.prepare("UPDATE envios SET estado = 'recogido', llega_desde = NULL, llega_hasta = NULL WHERE id = ?").run(e.id);
+  const { estimarLlegadas } = require('../server');
+  await estimarLlegadas({ ...e, grupo: null }, { lat: 14.6420, lng: -90.5150 });
+  const f = db.prepare('SELECT llega_desde, llega_hasta FROM envios WHERE id = ?').get(e.id);
+  assert.ok(f.llega_desde && f.llega_hasta);
+  const minutos = (Date.parse(f.llega_hasta.replace(' ', 'T') + 'Z') - Date.parse(f.llega_desde.replace(' ', 'T') + 'Z')) / 60000;
+  assert.ok(minutos >= 30 && minutos <= 60, `margen de ${minutos} min`);
+  const tok = db.prepare('SELECT token FROM pedidos_empresa WHERE envio_id = ?').get(e.id).token;
+  const vista = (await cliente()('GET', '/api/pedido/' + tok)).j;
+  assert.ok(vista.envio.llega && vista.envio.llega.desde, JSON.stringify(vista.envio));
+});

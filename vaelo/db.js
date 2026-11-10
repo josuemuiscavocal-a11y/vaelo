@@ -553,6 +553,8 @@ agregarColumnas('usuarios', [['permisos', 'TEXT']]);
 // Quien recibe también califica al piloto (de 1 a 5 estrellas)
 agregarColumnas('envios', [['calif_receptor', 'INTEGER'], ['calif_receptor_comentario', 'TEXT']]);
 // Empresas: recogida fija (días de la semana 0-6 separados por coma y hora) y datos para facturar
+// Hora estimada de llegada (rutas de empresa): se calcula al recoger y se ajusta con cada entrega
+agregarColumnas('envios', [['llega_desde', 'TEXT'], ['llega_hasta', 'TEXT']]);
 // Fletes: ayudantes que van con el piloto para subir, bajar y mover la carga (0 a 5)
 agregarColumnas('envios', [['ayudantes', 'INTEGER NOT NULL DEFAULT 0'], ['ayudantes_monto', 'REAL NOT NULL DEFAULT 0'], ['flete_precio', 'REAL']]);
 agregarColumnas('usuarios', [['recogida_dias', 'TEXT'], ['recogida_hora', 'TEXT'], ['fact_nit', 'TEXT'], ['fact_nombre', 'TEXT'], ['fact_direccion', 'TEXT']]);

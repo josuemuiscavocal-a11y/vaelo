@@ -2611,7 +2611,7 @@ function avisarEnvio(envioId, tipo, extra = {}) {
   try {
     const e = db.prepare(`${SQL_ENVIO} WHERE e.id = ?`).get(envioId);
     if (!e) return;
-    if (e.pedido_id && ['aceptado', 'llegando', 'recogido', 'entregado', 'fallido', 'devolviendo', 'a_sede', 'en_sede', 'devuelto', 'precio'].includes(tipo)) return avisarPedido(e, tipo);
+    if (e.pedido_id && ['aceptado', 'llegando', 'recogido', 'entregado', 'fallido', 'devolviendo', 'a_sede', 'en_sede', 'devuelto', 'precio', 'hora', 'atraso'].includes(tipo)) return avisarPedido(e, tipo);
     const url = `/mi-cuenta?envio=${e.id}`, guia = e.guia, piloto = (e.mensajero_nombre || 'El piloto').split(' ')[0];
     const cli = (titulo, cuerpo, conCorreo, parrafos, urgente) => {
       avisar(e.usuario_id, { titulo, cuerpo, url, etiqueta: 'envio-' + e.id, urgente });
@@ -3415,7 +3415,8 @@ function pedidoSalida(p, conDinero = false) {
     if (e) {
       out.envio = { id: e.id, guia: e.guia, estado: e.estado, piloto: e.asignacion === 'aceptado' && e.piloto ? e.piloto.split(' ')[0] : null, parada: e.parada,
         paradas: e.grupo ? db.prepare('SELECT COUNT(*) AS n FROM envios WHERE grupo = ?').get(e.grupo).n : 1, recibio: e.recibio, entregado_en: e.entregado_en,
-        fallo: e.fallo_en ? (MOTIVOS_FALLO[e.fallo_motivo] || 'No se pudo entregar') : null, dias_sede: e.sede_llegada ? diasEnSede(e) : null };
+        fallo: e.fallo_en ? (MOTIVOS_FALLO[e.fallo_motivo] || 'No se pudo entregar') : null, dias_sede: e.sede_llegada ? diasEnSede(e) : null,
+        llega: ['recogido', 'en_camino'].includes(e.estado) && e.llega_desde ? `${horaGT(e.llega_desde)} – ${horaGT(e.llega_hasta)}` : null };
       if (conDinero && e.sede_llegada) out.envio.cargo_sede = redondear(diasEnSede(e) * ajNum('cargo_bodega_empresa', 10));
     }
   }
@@ -3535,12 +3536,13 @@ function ordenarParadas(origen, pedidos, matriz = null) {
   return orden.map((i) => pedidos[i - 1]);
 }
 // Tiempos y distancias reales por calle entre todos los puntos (máx. 25 con Mapbox); null si no se puede
-async function matrizCalles(puntos) {
+async function matrizCalles(puntos, trafico = false) {
   const coords = puntos.map((x) => `${Number(x.lng).toFixed(5)},${Number(x.lat).toFixed(5)}`).join(';');
   const token = getAjustes().mapbox_token || process.env.MAPBOX_TOKEN || '';
   if (token && puntos.length <= 25) {
     try {
-      const r = await fetch(`https://api.mapbox.com/directions-matrix/v1/mapbox/driving/${coords}?annotations=duration,distance&access_token=${encodeURIComponent(token)}`, { signal: AbortSignal.timeout(8000) });
+      const perfil = trafico && puntos.length <= 10 ? 'driving-traffic' : 'driving';   // con tráfico en vivo: máx. 10 puntos
+      const r = await fetch(`https://api.mapbox.com/directions-matrix/v1/mapbox/${perfil}/${coords}?annotations=duration,distance&access_token=${encodeURIComponent(token)}`, { signal: AbortSignal.timeout(8000) });
       const j = await r.json();
       if (j.code === 'Ok' && j.durations) return { tiempos: j.durations, metros: j.distances };
     } catch { /* se intenta con OSRM */ }
@@ -4034,7 +4036,7 @@ ruta('GET', '/api/pedido/:token', ({ params }) => {
         antes: e.grupo && e.parada ? db.prepare(`SELECT COUNT(*) AS n FROM envios WHERE grupo = ? AND parada < ? AND estado IN ('pendiente','recogido','en_camino')`).get(e.grupo, e.parada).n : 0,
         codigo_entrega: enCurso ? e.codigo_entrega : null, precio: e.metodo_pago === 'recibe' || e.metodo_pago === 'transferencia' ? e.precio : 0, metodo_pago: e.metodo_pago,
         piloto: e.asignacion === 'aceptado' && e.mensajero_nombre ? { nombre: e.mensajero_nombre.split(' ')[0], ...(() => { const m = pilotoPorId(e.mensajero_id); return m ? { vehiculo: m.vehiculo, color: m.veh_color, placa: m.veh_placa } : {}; })() } : null,
-        proximo: !!e.aviso_proximo && enCurso, recibio: e.recibio, entregado_en: e.entregado_en, fallo: e.fallo_en ? (MOTIVOS_FALLO[e.fallo_motivo] || '') : null };
+        proximo: !!e.aviso_proximo && enCurso, llega: enCurso && e.llega_desde ? { desde: horaGT(e.llega_desde), hasta: horaGT(e.llega_hasta) } : null, recibio: e.recibio, entregado_en: e.entregado_en, fallo: e.fallo_en ? (MOTIVOS_FALLO[e.fallo_motivo] || '') : null };
     }
   }
   return out;
@@ -4100,10 +4102,16 @@ function avisarPedido(e, tipo) {
         correoA(e.usuario_id, `${piloto} aceptó tu ruta de ${total} pedido(s)`, 'Tus pedidos van en camino', [`${piloto} aceptó la ruta con ${total} pedido(s). Puedes seguir cada entrega en tu panel.`], { texto: 'Ver mis pedidos', url: urlEmp });
       }
       break;
+    case 'recogido':   // pedido suelto: empieza el conteo al recogerlo (las rutas lo hacen al recoger todo)
+      if (!e.grupo) estimarSinEsperar(e, coordenada(e.mensajero_lat, e.mensajero_lng) || coordenada(e.origen_lat, e.origen_lng));
+      break;
+    case 'hora': avisarCliente(p.id, { titulo: `Tu pedido de ${emp} ya va en camino`, cuerpo: `${piloto} lo recogió. Llega ${ventanaTexto(e)} (puede variar por el tráfico).`, url, etiqueta: 'pedido-' + p.id }); break;
+    case 'atraso': avisarCliente(p.id, { titulo: 'Tu pedido viene un poco tarde', cuerpo: `Por el tráfico, ahora llega ${ventanaTexto(e)}. Disculpa la espera.`, url, etiqueta: 'pedido-' + p.id }); break;
     case 'llegando': avisarCliente(p.id, { titulo: 'Tu pedido está llegando', cuerpo: `${piloto} está llegando con tu pedido de ${emp}. Ten a mano tu código.`, url, etiqueta: 'pedido-' + p.id, urgente: true }); break;
     case 'entregado':
       avisarCliente(p.id, { titulo: 'Pedido entregado', cuerpo: `Tu pedido de ${emp} fue entregado${e.recibio ? ' a ' + e.recibio : ''}. ¡Gracias!`, url, etiqueta: 'pedido-' + p.id });
       avisarSiguienteParada(e); rutaTerminada(e);
+      if (e.grupo) estimarSinEsperar(e, coordenada(e.destino_lat, e.destino_lng));   // se ajusta la hora de las que faltan
       break;
     case 'fallido': {
       const motivo = MOTIVOS_FALLO[e.fallo_motivo] || 'motivo no indicado';
@@ -4113,6 +4121,7 @@ function avisarPedido(e, tipo) {
         'El paquete queda guardado en la sede de Vaelo. Manda a alguien a recogerlo con el código del pedido; la bodega se cobra por día y se coordina por WhatsApp.'], { texto: 'Ver mis pedidos', url: urlEmp });
       avisarStaff({ titulo: 'Pedido de empresa no entregado', cuerpo: `${e.guia}: ${motivo}`, url: RUTA_ADMIN, etiqueta: 'fallido-' + e.id });
       avisarSiguienteParada(e);
+      if (e.grupo) estimarSinEsperar(e, coordenada(e.destino_lat, e.destino_lng));
       break;
     }
     case 'a_sede': rutaTerminada(e); break;
@@ -4450,6 +4459,37 @@ ruta('POST', '/api/admin/lotes-empresa/:id/confirmar', ({ req, params, body }) =
   return { ok: true, envios: creados.length, rutas: rutas.length };
 });
 
+// ---------- Hora estimada de llegada ----------
+// No se promete nada antes de que el piloto tenga el paquete: al recogerlo empieza el conteo (tiempo por calle, con tráfico
+// si se puede, más 7 min por cada entrega antes). Se da una ventana con margen por tráfico o bloqueos: 30 min y hasta 1 h.
+const MIN_POR_PARADA = 7;
+const horaGT = (utc) => new Date(utc.replace(' ', 'T') + 'Z').toLocaleTimeString('es-GT', { timeZone: 'America/Guatemala', hour: 'numeric', minute: '2-digit' });
+const ventanaTexto = (e) => (e.llega_desde ? `entre ${horaGT(e.llega_desde)} y ${horaGT(e.llega_hasta)}` : '');
+const sqlFecha = (ms) => new Date(ms).toISOString().slice(0, 19).replace('T', ' ');
+async function estimarLlegadas(envio, desde) {
+  const lista = envio.grupo
+    ? db.prepare("SELECT * FROM envios WHERE grupo = ? AND mensajero_id = ? AND estado IN ('recogido','en_camino') ORDER BY COALESCE(parada, 999), id").all(envio.grupo, envio.mensajero_id)
+    : db.prepare("SELECT * FROM envios WHERE id = ? AND estado IN ('recogido','en_camino')").all(envio.id);
+  const paradas = lista.filter((e) => e.destino_lat != null);
+  if (!paradas.length || !desde) return;
+  const pickup = vehiculoPickup()?.id === envio.vehiculo_id;
+  const pts = [desde, ...paradas.map((e) => ({ lat: e.destino_lat, lng: e.destino_lng }))];
+  const m = await matrizCalles(pts, true).catch(() => null);
+  const ahora = Date.now();
+  let seg = 0;
+  paradas.forEach((e, k) => {
+    const tramo = m && m.tiempos[k] && m.tiempos[k][k + 1] != null ? m.tiempos[k][k + 1] : (distanciaRecta(pts[k], pts[k + 1]) * 1.4 / (pickup ? 18 : 22)) * 3600;
+    seg += tramo + (k > 0 ? MIN_POR_PARADA * 60 : 0);
+    const inicio = Math.floor((ahora + seg * 1000) / 300_000) * 300_000;   // redondeado a 5 minutos
+    const margen = Math.min(60, 30 + 5 * k) * 60_000;
+    const nueva = { desde: sqlFecha(inicio), hasta: sqlFecha(inicio + margen) };
+    const atraso = e.llega_hasta && nueva.desde > e.llega_hasta;   // ya no llega dentro de lo que se le dijo
+    db.prepare('UPDATE envios SET llega_desde = ?, llega_hasta = ? WHERE id = ?').run(nueva.desde, nueva.hasta, e.id);
+    if (!e.llega_desde || atraso) avisarEnvio(e.id, atraso ? 'atraso' : 'hora');
+  });
+}
+const estimarSinEsperar = (envio, desde) => { estimarLlegadas(envio, desde).catch(() => {}); };
+
 // ---------- Piloto: recoger toda la ruta (marcando o escaneando cada paquete) ----------
 ruta('POST', '/api/piloto/ruta/:grupo/recoger', ({ req, params, body }) => {
   const p = requierePilotoTrabajando(req);
@@ -4467,7 +4507,10 @@ ruta('POST', '/api/piloto/ruta/:grupo/recoger', ({ req, params, body }) => {
   registrarUbicacion(p, c, numero(body.precision), true);
   for (const e of marcar) cambiarEstado(e.id, 'recogido', 'Paquete recogido', c.lat, c.lng);
   // Al tener todo, a la primera parada le llega "eres la próxima entrega"
-  if (marcar.length === lista.length) avisarSiguienteParada({ ...marcar[0], destino_lat: null, destino_lng: null });
+  if (marcar.length === lista.length) {
+    avisarSiguienteParada({ ...marcar[0], destino_lat: null, destino_lng: null });
+    estimarSinEsperar(marcar[0], c);   // empieza el conteo de la hora de llegada
+  }
   return { ok: true, recogidos: marcar.length, faltan: lista.length - marcar.length };
 });
 
@@ -5165,4 +5208,4 @@ const servidor = http.createServer(async (req, res) => {
 if (require.main === module) {
   servidor.listen(PORT, HOST, () => console.log(`Vaelo funcionando en http://${HOST}:${PORT}`));
 }
-module.exports = { servidor, hashPassword, asignacionAutomatica, decisionesVencidas, push, enviosAtascados, ordenarParadas };
+module.exports = { servidor, hashPassword, asignacionAutomatica, decisionesVencidas, push, enviosAtascados, ordenarParadas, estimarLlegadas };

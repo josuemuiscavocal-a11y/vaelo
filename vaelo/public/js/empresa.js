@@ -429,7 +429,7 @@ function filaPedido(p, r, c, recargar) {
       p.estado === 'no_puede' ? el('small', { class: 'error-texto', text: `No puede ese día${p.no_puede_nota ? ': ' + p.no_puede_nota : ''}. Muévelo a otra carpeta desde «⋯».` }) : null,
       e ? el('small', { class: 'pedido-envio' }, el('b', { text: ESTADO_ENVIO_EMP[e.estado] || e.estado }),
         e.piloto ? ` · ${e.piloto}` : '', e.paradas > 1 ? ` · entrega ${e.parada} de ${e.paradas}` : '', e.recibio ? ` · recibió ${e.recibio}` : '',
-        e.fallo ? ` · ${e.fallo}` : '', e.dias_sede ? ` · ${e.dias_sede} día(s) en la sede: pasa a recogerlo con el código` : '') : null),
+        e.llega ? ` · llega aprox. ${e.llega}` : '', e.fallo ? ` · ${e.fallo}` : '', e.dias_sede ? ` · ${e.dias_sede} día(s) en la sede: pasa a recogerlo con el código` : '') : null),
     el('div', { class: 'pedido-acciones' }, principal, menu));
 }
 // Mover un envío a otra carpeta (otro día)

@@ -718,10 +718,21 @@
       }
       // 3) Entregas en orden: la siguiente abierta completa y el resto como lista
       const actual = abiertos[0], siguiente = abiertos[1];
+      // Efectivo de la ruta: lo que cobra en cada entrega (y lo que la empresa le pagó al recoger, si aplica)
+      const efectivoDe = (x) => (['recibe', 'efectivo'].includes(x.metodo_pago) ? x.precio + (x.cargos_extra || 0) : 0) + (Number(x.cobro_destinatario) || 0);
+      const porCobrar = lista.filter(x => x.estado !== 'cancelado').reduce((t, x) => t + efectivoDe(x), 0) + (Number(e0.cobro_en_recogida) || 0);
+      const cobrado = lista.filter(x => x.estado === 'entregado').reduce((t, x) => t + efectivoDe(x), 0) + (lista.some(x => x.estado !== 'pendiente') ? Number(e0.cobro_en_recogida) || 0 : 0);
+      const hechas = lista.filter(x => x.estado === 'entregado').length;
+      const ganado = lista.filter(x => x.estado === 'entregado').reduce((t, x) => t + (x.ganancia_piloto || 0), 0);
+      const cajaEfectivo = porCobrar > 0 || !abiertos.length ? el('div', { class: 'ruta-efectivo' + (abiertos.length ? '' : ' fin') },
+        el('div', {}, el('span', { text: abiertos.length ? 'Efectivo cobrado' : 'Efectivo que entregas' }), el('strong', { text: dinero(cobrado) }), abiertos.length && porCobrar ? el('small', { text: `de ${dinero(porCobrar)} en toda la ruta` }) : null),
+        el('div', {}, el('span', { text: 'Ganas en esta ruta' }), el('strong', { text: dinero(ganado) }), el('small', { text: `${hechas} de ${lista.length} entregadas` }))) : null;
       return el('div', { class: 'ruta-en-curso' },
         el('article', { class: 'entrega-tarjeta ruta' }, cab(el('span', { class: 'estado en_camino', text: abiertos.length ? `${lista.length - abiertos.length} de ${lista.length} hechas` : 'Ruta terminada' })),
           actual ? el('div', { class: 'ruta-progreso' }, el('div', { class: 'barra-progreso' }, el('span', { style: `width:${Math.round(((lista.length - abiertos.length) / lista.length) * 100)}%` })),
             el('p', {}, el('strong', { text: `Ahora: parada ${actual.parada} · ${actual.destino_nombre}` }), siguiente ? el('small', { text: `Después: parada ${siguiente.parada} · ${siguiente.destino_nombre} (${siguiente.destino_zona})` }) : el('small', { text: 'Es la última entrega' }))) : null,
+          cajaEfectivo,
+          !abiertos.length ? el('p', { class: 'pista', text: cobrado > 0 ? 'Ruta terminada. Entrega este efectivo en la oficina o como te indiquen; también queda en tu pestaña Ganancias.' : 'Ruta terminada. ¡Buen trabajo!' }) : null,
           abiertos.length ? botonVerRuta(abiertos[0], `Lo que falta de la ruta de ${e0.empresa}`) : null,
           el('details', { class: 'ruta-plegada' }, el('summary', { text: `Ver las ${lista.length} paradas` }), paradasResumen())),
         actual ? tarjeta(actual) : null,

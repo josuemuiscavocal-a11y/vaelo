@@ -813,6 +813,8 @@ null))));
               modo !== 'un_paquete' && q.pedidos.length > 2 ? el('button', { class: 'boton borde chico', type: 'button', text: 'Ordenar por la ruta más rápida', onclick: async (ev) => { ev.target.disabled = true; ev.target.textContent = 'Ordenando…'; await ordenar(q); pintarRutas(); } }) : null,
               q.excede_cupo || (q.puntos > r.cupo && modo !== 'pickup') ? el('span', { class: 'etiqueta-pendiente', text: 'No cabe en una moto' }) : null,
               q.excede_horas || q.minutos > r.horas * 60 ? el('span', { class: 'etiqueta-pendiente', text: modo === 'pickup' ? `Ruta larga: más de ${r.horas} h` : `Más de ${r.horas} h` }) : null),
+            el('details', { class: 'paradas-plegables', open: q._abierta ?? (rutas.length <= 2 || matchMedia('(min-width: 900px)').matches), ontoggle: (ev) => { q._abierta = ev.target.open; } },
+              el('summary', { text: `Paradas (${q.pedidos.length})` }),
             el('ol', { class: 'paradas' }, q.pedidos.map((id, i) => {
               const p = porId.get(id);
               return el('li', {}, el('div', {}, el('strong', { text: p.recibe_nombre || p.cliente_nombre }), el('small', { text: `${p.codigo} · ${p.zona} · ${p.horario_texto} · ${p.tamano_texto}` })),
@@ -821,7 +823,7 @@ null))));
                   el('button', { class: 'boton-icono', type: 'button', 'aria-label': 'Bajar', text: '↓', disabled: i === q.pedidos.length - 1, onclick: () => mover(i, 1) }),
                   rutas.length > 1 ? el('select', { 'aria-label': 'Pasar a otra ruta', onchange: (ev) => { if (ev.target.value !== '') pasarA(i, Number(ev.target.value)); } },
                     el('option', { value: '', text: 'Pasar a…' }), ...rutas.map((_, k) => k === ri ? null : el('option', { value: k, text: `Ruta ${k + 1}` }))) : null));
-            })),
+            }))),
             modo === 'un_paquete' ? null : el('div', { class: 'campo', style: 'margin:.5rem 0 0' }, el('label', { text: 'Piloto' }), piloto));
         }));
         pintarMapa();

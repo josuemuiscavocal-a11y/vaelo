@@ -182,6 +182,8 @@
       else situacion = el('div', { class: 'mensaje aviso', text: `${e.piloto.nombre} va en camino. ${e.antes === 1 ? 'Hay 1 entrega' : `Hay ${e.antes} entregas`} antes de la tuya.` });
       poner(app, cabecera(),
         el('div', { class: 'bloque' }, barraPasos(e.estado), situacion,
+          e.llega && e.estado !== 'pendiente' ? el('div', { class: 'llegada-estimada' }, el('span', { text: 'Llega aproximadamente' }), el('strong', { text: `entre ${e.llega.desde} y ${e.llega.hasta}` }),
+            el('small', { text: 'Puede variar por el tráfico o algún bloqueo. Te avisamos si cambia.' })) : null,
           e.piloto ? el('p', { class: 'pista', style: 'margin:0' }, el('strong', { text: e.piloto.nombre }), [e.piloto.vehiculo, e.piloto.color, e.piloto.placa].filter(Boolean).length ? ' · ' + [e.piloto.vehiculo, e.piloto.color, e.piloto.placa].filter(Boolean).join(' · ') : '') : null),
         e.codigo_entrega ? el('div', { class: 'codigo-entrega' }, el('div', {}, el('span', { text: 'Tu código de entrega' }), el('strong', { text: e.codigo_entrega })),
           el('p', { text: 'Dáselo al piloto cuando te entregue. No lo compartas antes.' })) : null,

@@ -1401,4 +1401,15 @@ dialog.dlg-ruta .dialogo { padding: 1rem; }
 .barra-progreso { height: 8px; background: #e6e9f2; border-radius: 999px; overflow: hidden; }
 .barra-progreso span { display: block; height: 100%; background: #f2a516; border-radius: 999px; }
 .ruta-plegada summary { cursor: pointer; font-weight: 700; color: var(--azul-hondo); padding: .35rem 0; }
-.rutas-resumen { grid-column: 1 / -1; margin: 0 0 .25rem; background: #eef2fd; border-radius: 10px; padding: .5rem .8rem; font-size: .92rem; }
+.rutas-resumen { grid-column: 1 / -1; margin: 0 0 .25rem; padding-right: 3rem !important; background: #eef2fd; border-radius: 10px; padding: .5rem .8rem; font-size: .92rem; }
+.llegada-estimada { display: flex; flex-direction: column; gap: .1rem; background: #eef2fd; border-left: 4px solid var(--azul-hondo); border-radius: 8px; padding: .6rem .8rem; margin: .6rem 0; }
+.llegada-estimada span { font-size: .8rem; color: #5b6478; }
+.llegada-estimada strong { font-size: 1.25rem; color: var(--azul-hondo); }
+.llegada-estimada small { color: #5b6478; }
+.ruta-efectivo { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; margin: .6rem 0; }
+.ruta-efectivo div { background: #f4f6fb; border-radius: 10px; padding: .5rem .75rem; display: flex; flex-direction: column; }
+.ruta-efectivo span { font-size: .75rem; color: #5b6478; }
+.ruta-efectivo strong { font-size: 1.3rem; font-stretch: 80%; }
+.ruta-efectivo small { color: #5b6478; font-size: .78rem; }
+.ruta-efectivo.fin div:first-child { background: #fff6e0; border: 1.5px solid #f2a516; }
+.paradas-plegables > summary { cursor: pointer; font-weight: 700; color: var(--azul-hondo); padding: .4rem 0; }
