@@ -584,7 +584,23 @@
             telLink(telefono), zona ? ` · ${zona}` : '', referencias ? el('div', { class: 'pista', text: referencias }) : null, extra || null)),
         accion ? el('div', { class: 'navegar navegar-' + (punto === 'origen' ? 'recoger' : 'entregar') },
           el('button', { class: 'boton chico ' + (punto === 'origen' ? 'navegar-a' : 'navegar-b'), type: 'button', text: `${accion} con Waze`, onclick: () => irA(e.id, punto, 'waze') }),
-          el('button', { class: 'boton borde chico', type: 'button', text: `${accion} con Google Maps`, onclick: () => irA(e.id, punto, 'google') })) : null);
+          el('button', { class: 'boton borde chico', type: 'button', text: `${accion} con Google Maps`, onclick: () => irA(e.id, punto, 'google') })) : null,
+        accion ? contactoPersona(e, nombre, telefono, punto) : null);   // ya recogido: no estorba con botones de quien entregó
+    }
+    // Llamar o escribir por WhatsApp: va debajo de los botones para llegar, separado para no confundir
+    function contactoPersona(e, nombre, telefono, punto) {
+      const num = String(telefono || '').replace(/[^\d+]/g, '');
+      if (num.replace(/\D/g, '').length < 8) return null;
+      const primer = (nombre || '').split(' ')[0];
+      const texto = punto === 'origen'
+        ? `Buen día ${primer}, le saluda ${(yo.nombre || '').split(' ')[0]}, piloto de Vaelo. Voy en camino a recoger el paquete con guía ${e.guia}.`
+        : `Buen día ${primer}, le saluda ${(yo.nombre || '').split(' ')[0]}, piloto de Vaelo. Voy en camino a entregarle su paquete con guía ${e.guia}.`;
+      const conWhats = !(e.pedido_id && punto === 'destino');   // los pedidos de empresa ya traen su botón de aviso
+      return el('div', { class: 'contacto-piloto' },
+        el('span', { class: 'contacto-titulo' }, icono('telefono'), `Contactar a ${primer || 'la persona'}`),
+        el('div', { class: 'contacto-botones' + (conWhats ? '' : ' uno') },
+          el('a', { class: 'contacto-boton llamar', href: 'tel:' + num }, icono('telefono'), 'Llamar'),
+          conWhats ? el('a', { class: 'contacto-boton whats', href: `https://wa.me/${waTel(telefono)}?text=${encodeURIComponent(texto)}`, target: '_blank', rel: 'noopener' }, icono('mensaje'), 'WhatsApp') : null));
     }
 
     // ---------- Rutas de empresas: se aceptan completas, se recogen escaneando y se entregan en orden ----------

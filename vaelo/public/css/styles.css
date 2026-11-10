@@ -1357,3 +1357,15 @@ body.app-piloto main { padding-bottom: 9rem; }
 .flete-desglose { display: grid; grid-template-columns: 1fr auto; gap: .25rem 1rem; margin: 0; border-top: 1px dashed var(--borde, #d5dbe8); padding-top: .6rem; }
 .flete-desglose dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
 .flete-desglose .total { font-weight: 800; font-size: 1.1rem; border-top: 1px solid var(--borde, #d5dbe8); padding-top: .35rem; }
+
+/* Modo mensajero: contactar a quien entrega o recibe (debajo de los botones de navegación) */
+.contacto-piloto { margin-top: .7rem; padding-top: .6rem; border-top: 1px dashed #d5dbe8; }
+.contacto-titulo { display: flex; align-items: center; gap: .35rem; font-size: .78rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #5b6478; margin-bottom: .45rem; }
+.contacto-titulo svg { width: 14px; height: 14px; }
+.contacto-botones { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
+.contacto-botones.uno { grid-template-columns: 1fr; }
+.contacto-boton { display: flex; align-items: center; justify-content: center; gap: .45rem; min-height: 44px; border-radius: 10px; font-weight: 700; text-decoration: none; font-size: .95rem; border: 1.5px solid; }
+.contacto-boton svg { width: 18px; height: 18px; flex: none; }
+.contacto-boton.llamar { background: #fff; color: var(--azul-hondo); border-color: var(--azul-hondo); }
+.contacto-boton.whats { background: #fff; color: #128c4a; border-color: #25a35a; }
+.contacto-boton:active { transform: scale(.98); }
