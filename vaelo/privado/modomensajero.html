@@ -360,7 +360,14 @@
         el('h3', { style: 'margin:1rem 0 .4rem;font-size:1rem', text: '¿Cuándo quieres que te paguen?' }), frecuencia,
         el('p', { class: 'pista', style: 'margin-top:.5rem', text: c.frecuencia === 'diaria' ? 'Pasas a la sede al final del día: se cuenta lo que ganaste menos el efectivo que traes.'
           : `Juntas tu pago ${c.frecuencia === 'semanal' ? 'por semana' : 'por quincena'}. Si el efectivo que traes es más que lo que ganaste, igual debes entregarlo antes de ${g.dias_liquidar} días.` }));
-      poner(caja, cuenta,
+      const st = g.estrellas;
+      const tusEstrellas = el('div', { class: 'bloque tus-estrellas' },
+        el('h3', { style: 'margin:0 0 .3rem;font-size:1.05rem', text: 'Tus estrellas' }),
+        st && st.total ? el('div', { class: 'estrellas-promedio' }, el('strong', { text: st.promedio.toFixed(1) }), el('span', { text: '★'.repeat(Math.round(st.promedio)) + '☆'.repeat(5 - Math.round(st.promedio)) }), el('small', { class: 'pista', text: `${st.total} calificaciones` }))
+          : el('p', { class: 'pista', text: 'Todavía no te califican. Quien envía y quien recibe pueden darte de 1 a 5 estrellas.' }),
+        el('p', { class: 'pista', style: 'margin:.3rem 0 0', text: 'Con más estrellas apareces primero cuando la oficina reparte los envíos. Sé puntual, amable y avisa por WhatsApp antes de llegar.' }),
+        st && st.ultimas.length ? el('ul', { class: 'estrellas-comentarios', style: 'margin-top:.6rem' }, st.ultimas.filter(x => x.comentario).slice(0, 4).map(x => el('li', {}, el('strong', { text: '★'.repeat(x.estrellas) }), ` ${x.de}: «${x.comentario}»`))) : null);
+      poner(caja, cuenta, tusEstrellas,
         el('div', { class: 'ganancias-cabecera' }, el('span', { text: 'Lo que has ganado' }),
           el('div', { class: 'ganancias-fila' },
             el('div', {}, el('span', { text: 'Hoy' }), el('strong', { text: dinero(g.hoy) })),

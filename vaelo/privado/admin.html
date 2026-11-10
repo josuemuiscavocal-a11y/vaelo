@@ -24,6 +24,7 @@
         <button role="tab" id="tab-caja" aria-selected="false" aria-controls="panel-caja" class="solo-admin" data-icono="caja">Caja<span class="insignia" id="insignia-caja" hidden></span></button>
         <button role="tab" id="tab-descuentos" aria-selected="false" aria-controls="panel-descuentos" class="solo-admin" data-icono="etiqueta">Descuentos</button>
         <button role="tab" id="tab-reportes" aria-selected="false" aria-controls="panel-reportes" class="solo-admin" data-icono="grafica">Reportes</button>
+        <button role="tab" id="tab-historial" aria-selected="false" aria-controls="panel-historial" class="solo-admin" data-icono="reloj">Historial<span class="insignia" id="insignia-historial" hidden></span></button>
         <button role="tab" id="tab-tarifas" aria-selected="false" aria-controls="panel-tarifas" class="solo-admin" data-icono="ajustes">Tarifas y ajustes</button>
       </nav>
       <div class="lateral-pie">
@@ -50,6 +51,7 @@
       </header>
       <main class="panel-cuerpo">
       <div id="alertas"></div>
+      <div id="atascados"></div>
       <div id="aviso-nuevos" class="aviso-nuevos" role="status" aria-live="polite" hidden>
         <div class="aviso-texto"><strong id="aviso-titulo"></strong><span id="aviso-detalle"></span></div>
         <div class="aviso-acciones">
@@ -237,6 +239,18 @@
         </div>
       </section>
 
+      <section id="panel-historial" role="tabpanel" aria-labelledby="tab-historial" hidden>
+        <div class="bloque">
+          <p class="bloque-nota">Todo lo que hace cada persona en el panel queda guardado aquí: cambios de estado, pagos, cierres, tarifas, cuentas eliminadas y más. Solo tú lo ves; los empleados no.</p>
+          <div class="fila historial-filtros">
+            <div class="campo"><label for="hist-q">Buscar</label><input id="hist-q" type="search" placeholder="Guía, nombre, «eliminó», «pagado»…"></div>
+            <div class="campo"><label for="hist-persona">Persona</label><select id="hist-persona"><option value="">Todas</option></select></div>
+            <div class="campo"><label for="hist-dia">Día</label><input id="hist-dia" type="date"></div>
+          </div>
+          <div id="lista-historial"></div>
+        </div>
+      </section>
+
       <section id="panel-tarifas" role="tabpanel" aria-labelledby="tab-tarifas" hidden>
         <div id="msg-tarifas" class="mensaje" role="alert"></div>
         <div class="bloque">
@@ -332,7 +346,7 @@
         </form>
         <div class="bloque">
           <h2>Equipo de oficina</h2>
-          <p class="bloque-nota">Empleados que entran por esta misma página con su correo. Pueden ver y asignar envíos, ver pilotos y revisar clientes. No ven la caja, reportes, descuentos ni tarifas.</p>
+          <p class="bloque-nota">Empleados que entran por esta misma página con su correo. Marca qué áreas puede ver cada uno (Envíos, Pilotos, Clientes, Empresas). Nunca ven la caja, reportes, descuentos, tarifas ni el historial. Todo lo que hacen queda en Historial.</p>
           <div id="lista-operadores"></div>
           <form id="form-operador" class="fila" style="align-items:end;margin-top:.75rem" novalidate>
             <div class="campo"><label for="op-nombre">Nombre</label><input id="op-nombre" maxlength="100"></div>
@@ -356,10 +370,10 @@
     let filtroEstado = 'activos', temporizador = null, mensajeros = [], vehiculos = [], mapaFlota = null, capaFlota = null;
     const sub = (t) => el('small', { style: 'color:var(--suave)', text: t || '' });
 
-    const tabs = ['envios', 'mensajeros', 'clientes', 'empresas', 'caja', 'descuentos', 'reportes', 'tarifas'];
+    const tabs = ['envios', 'mensajeros', 'clientes', 'empresas', 'caja', 'descuentos', 'reportes', 'historial', 'tarifas'];
     const TITULOS = { envios: ['Envíos', 'Pedidos y su estado'], mensajeros: ['Pilotos', 'Flota en vivo, documentos y aprobaciones'], clientes: ['Clientes', 'Identidad, empresas y calificaciones'],
       caja: ['Caja', 'Efectivo, pagos a pilotos, reembolsos y cargos'], empresas: ['Empresas', 'Contratos y paquetes en la sede'], descuentos: ['Descuentos', 'Promociones y cupones'], reportes: ['Reportes', 'Cómo va el negocio'],
-      tarifas: ['Tarifas y ajustes', 'Precios, zonas, sede y equipo'] };
+      tarifas: ['Tarifas y ajustes', 'Precios, zonas, sede y equipo'], historial: ['Historial', 'Qué hizo cada persona en el panel'] };
     function abrirTab(nombre) {
       tabs.forEach(t => { $('tab-' + t).setAttribute('aria-selected', String(t === nombre)); $('panel-' + t).hidden = t !== nombre; });
       $('titulo-seccion').textContent = TITULOS[nombre][0]; $('subtitulo-seccion').textContent = TITULOS[nombre][1];
@@ -367,6 +381,7 @@
       cerrarMenu();
       if (nombre === 'mensajeros') cargarMensajeros();
       if (nombre === 'clientes') cargarClientes();
+      if (nombre === 'historial') cargarHistorial();
       if (nombre === 'tarifas') { cargarTarifas(); cargarOperadores(); }
       if (nombre === 'caja') cargarCaja();
       if (nombre === 'empresas') cargarEmpresas();
@@ -392,7 +407,7 @@
         r.ingresosMes != null ? c('Ingresos del mes', dinero(r.ingresosMes), null) : '');
       const insignia = (id, n) => { const b = $(id); b.textContent = n > 99 ? '99+' : String(n); b.hidden = !n; };
       insignia('insignia-envios', r.sinAsignar + atencion);
-      if (r.rol !== rolPanel) aplicarRol(r.rol);
+      if (r.rol !== rolPanel || String(r.permisos) !== String(permisosPanel)) aplicarRol(r.rol, r.permisos);
     }
 
     function pintarChips() {
@@ -643,7 +658,9 @@ null))));
         const r = await api('/api/admin/empresas-activas');
         pendientes += r.lotes_nuevos;
         const n = (v, t, clase) => v ? el('span', { class: clase, text: `${v} ${t}` }) : null;
-        poner($('empresas-activas'), r.empresas.length ? el('div', { class: 'empresas-lista' }, r.empresas.map((x) => el('button', { type: 'button', class: 'empresa-tarjeta' + (x.lotes_nuevos ? ' prioridad' : ''), onclick: () => abrirEmpresa(x.id) },
+        const recog = r.recogidas_hoy && r.recogidas_hoy.length ? el('div', { class: 'recogidas-hoy' }, el('strong', { text: 'Recogidas fijas de hoy' }),
+          el('ul', {}, r.recogidas_hoy.map(x => el('li', {}, el('b', { text: x.hora }), ` ${x.empresa}`, x.listos ? el('span', { class: 'etiqueta-completa', text: `${x.listos} pedidos listos` }) : el('span', { class: 'etiqueta-gris', text: 'sin pedidos confirmados aún' }), ' ', telLink(x.telefono))))) : null;
+        poner($('empresas-activas'), recog, r.empresas.length ? el('div', { class: 'empresas-lista' }, r.empresas.map((x) => el('button', { type: 'button', class: 'empresa-tarjeta' + (x.lotes_nuevos ? ' prioridad' : ''), onclick: () => abrirEmpresa(x.id) },
           el('div', {}, el('strong', { text: x.empresa_nombre || x.nombre }), el('small', { text: `${x.nombre} · ${x.telefono || ''}` })),
           el('div', { class: 'empresa-cuentas' },
             n(x.lotes_nuevos, x.lotes_nuevos === 1 ? 'envío por repartir' : 'envíos por repartir', 'etiqueta-pendiente'),
@@ -898,7 +915,7 @@ null))));
             dato('Cliente', e.flete ? `${e.flete_cliente || 'Por completar'} (por WhatsApp) ` : `${e.cliente_nombre} `, telLink(e.flete ? e.flete_telefono : e.cliente_telefono)),
             e.paquetes > 1 ? dato('Paquetes', `${e.paquetes} para la misma dirección`) : null,
             dato('Precio', `${dinero(e.precio)} · ${e.tipo_tarifa === 'zona' ? 'zona preferencial' : 'fuera de zona'} · ${PAGOS[e.metodo_pago] || e.metodo_pago}${e.fragil ? `. Incluye ${dinero(e.recargo_fragil)} por frágil` : ''}`),
-            e.reparto ? dato('Reparto', `Piloto ${dinero(e.reparto.piloto)} · Vaelo ${dinero(e.reparto.vaelo)}`) : null,
+            e.reparto ? dato('Reparto', `Piloto ${dinero(e.reparto.piloto)}${e.reparto.bono ? ` · Bono empresa ${dinero(e.reparto.bono)}` : ''} · Vaelo ${dinero(e.reparto.vaelo)}`) : null,
             dato('Recoger', [e.origen_quien === 'tercero' ? (e.origen && e.origen.nombre) : 'El cliente', e.origen_zona, e.origen_direccion].filter(Boolean).join('. ')),
             dato('Entregar a', [e.destino_nombre, e.destino_zona, e.destino_direccion].filter(Boolean).join('. ')),
             dato('Vehículo y paquete', `${e.vehiculo}, ${e.peso} lb${e.descripcion ? '. ' + e.descripcion : ''}`),
@@ -1021,7 +1038,7 @@ null))));
           el('td', {}, p.vehiculo || '—', el('br'), sub(p.veh_placa || '')),
           el('td', {}, docs),
           el('td', {}, `${p.activos} activos`, el('br'), sub(`${p.entregados} entregados`)),
-          el('td', { text: p.calificacion ? `${p.calificacion} de 5 (${p.calificaciones})` : '—' }),
+          el('td', {}, p.calificacion ? el('span', { class: p.calificacion < 4 && p.calificaciones >= 3 ? 'etiqueta-pendiente' : 'etiqueta-gris', text: `${p.calificacion} ★ (${p.calificaciones})` }) : '—'),
           el('td', {}, ficha ? el('button', { class: 'boton chico', type: 'button', text: 'Ficha', onclick: (ev) => { ev.stopPropagation(); abrirFicha(p.id); } }) : ''));
       }));
       if (!mapaFlota) mapaFlota = crearMapa($('mapa-flota'));
@@ -1075,6 +1092,17 @@ null))));
       let a = h.getFullYear() - n.getFullYear();
       if (h < new Date(h.getFullYear(), n.getMonth(), n.getDate())) a--;
       return a;
+    }
+    // Historial de estrellas del piloto (de quien envía y de quien recibe)
+    function bloqueEstrellas(st) {
+      if (!st || !st.total) return el('p', { class: 'pista', text: 'Todavía no tiene calificaciones. Mientras tanto se ordena como si tuviera 4 estrellas.' });
+      const max = Math.max(...st.dist.map(d => d.n), 1);
+      return el('div', { class: 'estrellas-piloto-admin' },
+        el('div', { class: 'estrellas-promedio' }, el('strong', { text: st.promedio.toFixed(1) }), el('span', { text: '★'.repeat(Math.round(st.promedio)) + '☆'.repeat(5 - Math.round(st.promedio)) }), sub(`${st.total} calificaciones`)),
+        st.bajo ? el('div', { class: 'mensaje error', style: 'display:block', text: 'Está por debajo de 4 estrellas: aparece más abajo al asignar. Habla con él.' }) : null,
+        el('div', { class: 'estrellas-dist' }, st.dist.map(d => el('div', {}, el('span', { text: `${d.estrellas} ★` }), el('i', {}, el('b', { style: `width:${Math.round(d.n / max * 100)}%` })), el('small', { text: String(d.n) })))),
+        st.ultimas.length ? el('ul', { class: 'estrellas-comentarios' }, st.ultimas.map(x => el('li', {},
+          el('strong', { text: '★'.repeat(x.estrellas) }), ` ${x.de} · ${x.guia} · ${fecha(x.cuando, false)}`, x.comentario ? el('div', { class: 'pista', text: `«${x.comentario}»` }) : null))) : null);
     }
     async function abrirFicha(id) {
       const r = await api('/api/admin/mensajeros/' + id);
@@ -1182,6 +1210,7 @@ null))));
             try { await api('/api/admin/mensajeros/' + p.id, { method: 'PUT', body: { password: clave } }); mostrarMensaje(msg, 'Contraseña cambiada.', 'exito'); }
             catch (e) { mostrarMensaje(msg, e.message); }
           } })),
+        seccion('Estrellas', bloqueEstrellas(r.estrellas)),
         r.envios.length ? seccion('Últimos envíos', el('ul', { style: 'padding-left:1.1rem' }, r.envios.map(x =>
           el('li', {}, `${x.guia} · ${ESTADOS[x.estado] || x.estado} · ${fecha(x.creado)}`, x.calificacion ? ` · ${x.calificacion} de 5${x.calificacion_comentario ? ': ' + x.calificacion_comentario : ''}` : '')))) : '');
       if (!$('dlg').open) $('dlg').showModal();
@@ -1240,13 +1269,31 @@ null))));
       tipo.value = c.tipo_cuenta || 'personal';
       const nombre = el('input', { id: 'emp-nombre', maxlength: 100, value: c.empresa_nombre || '', placeholder: 'Nombre de la empresa' });
       const desc = el('input', { id: 'emp-desc', type: 'number', min: 0, max: 90, step: 1, value: c.descuento_empresa || 0 });
+      const diasSel = new Set(String(c.recogida_dias || '').split(',').filter(Boolean));
+      const dias = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'].map((t, i) => el('label', { class: 'dia-chip' }, el('input', { type: 'checkbox', value: String(i), checked: diasSel.has(String(i)) }), el('span', { text: t })));
+      const hora = el('input', { type: 'time', value: c.recogida_hora || '09:00', 'aria-label': 'Hora de la recogida fija' });
+      const nit = el('input', { maxlength: 15, value: c.fact_nit || '', placeholder: 'Ej. 1234567-8 o CF' });
+      const fnombre = el('input', { maxlength: 150, value: c.fact_nombre || '', placeholder: 'Como sale en el RTU' });
+      const fdir = el('input', { maxlength: 200, value: c.fact_direccion || '', placeholder: 'Ciudad' });
+      const mes = el('input', { type: 'month', value: new Date(Date.now() - 6 * 3600_000).toISOString().slice(0, 7), 'aria-label': 'Mes del estado de cuenta' });
       return el('div', { class: 'bloque', style: 'background:var(--gris);border:0;margin:1rem 0' }, el('h3', { text: 'Cuenta de empresa' }),
         el('p', { class: 'pista', text: 'Las empresas mandan sus envíos en carpetas, pueden tener precio especial y «paga quien recibe».' }), msg,
         el('div', { class: 'fila' }, el('div', { class: 'campo' }, el('label', { for: 'emp-tipo', text: 'Tipo de cuenta' }), tipo),
           el('div', { class: 'campo' }, el('label', { for: 'emp-nombre', text: 'Empresa' }), nombre), el('div', { class: 'campo' }, el('label', { for: 'emp-desc', text: 'Descuento (%)' }), desc)),
+        c.tipo_cuenta === 'empresa' ? [
+          el('h4', { style: 'margin:.8rem 0 .3rem', text: 'Recogida fija' }),
+          el('p', { class: 'pista', style: 'margin:0 0 .4rem', text: 'Los días que pasamos por sus paquetes. Te sale cada día en Empresas → Empresas activas, y la empresa lo ve en su panel.' }),
+          el('div', { style: 'display:flex;gap:.4rem;flex-wrap:wrap;align-items:center' }, ...dias, hora),
+          el('h4', { style: 'margin:.8rem 0 .3rem', text: 'Datos para facturar' }),
+          el('div', { class: 'fila' }, el('div', { class: 'campo' }, el('label', { text: 'NIT' }), nit), el('div', { class: 'campo' }, el('label', { text: 'Nombre para la factura' }), fnombre),
+            el('div', { class: 'campo' }, el('label', { text: 'Dirección fiscal' }), fdir)),
+          el('div', { style: 'display:flex;gap:.5rem;align-items:end;flex-wrap:wrap;margin-bottom:.75rem' }, el('div', { class: 'campo', style: 'margin:0' }, el('label', { text: 'Estado de cuenta del mes' }), mes),
+            el('button', { class: 'boton borde chico', type: 'button', text: 'Descargar Excel', onclick: () => { window.location.href = `/api/admin/empresas/${c.id}/estado-cuenta?mes=${mes.value}`; } }))] : null,
         el('button', { class: 'boton chico', type: 'button', text: 'Guardar cuenta', onclick: async () => {
           try {
-            await api(`/api/admin/clientes/${c.id}/empresa`, { method: 'PUT', body: { tipo_cuenta: tipo.value, empresa_nombre: nombre.value, descuento_empresa: desc.value } });
+            await api(`/api/admin/clientes/${c.id}/empresa`, { method: 'PUT', body: { tipo_cuenta: tipo.value, empresa_nombre: nombre.value, descuento_empresa: desc.value,
+              recogida_dias: dias.map(d => d.querySelector('input')).filter(x => x.checked).map(x => x.value).join(','), recogida_hora: hora.value,
+              fact_nit: nit.value, fact_nombre: fnombre.value, fact_direccion: fdir.value } });
             mostrarMensaje(msg, 'Cuenta actualizada.', 'exito'); cargarClientes();
           } catch (e) { mostrarMensaje(msg, e.message); }
         } }));
@@ -1467,13 +1514,66 @@ null))));
 
     // ---------- Rol: los empleados de oficina no ven caja, descuentos, reportes ni tarifas ----------
     let rolPanel = 'admin';
-    function aplicarRol(rol) {
-      rolPanel = rol;
+    // Pestañas que ve cada empleado según sus permisos (la administración ve todo)
+    let permisosPanel = null;
+    const AREA_TAB = { envios: 'envios', mensajeros: 'pilotos', clientes: 'clientes', empresas: 'empresas' };
+    function aplicarRol(rol, permisos) {
+      rolPanel = rol; permisosPanel = permisos || null;
       document.querySelectorAll('.solo-admin').forEach(x => { x.hidden = rol !== 'admin'; });
+      if (rol !== 'admin' && permisos) {
+        let actualOculta = false;
+        for (const [tab, area] of Object.entries(AREA_TAB)) {
+          const no = !permisos.includes(area);
+          $('tab-' + tab).hidden = no;
+          if (no && $('tab-' + tab).getAttribute('aria-selected') === 'true') actualOculta = true;
+        }
+        if (actualOculta) { const primera = Object.keys(AREA_TAB).find(t => !$('tab-' + t).hidden); if (primera) abrirTab(primera); }
+      }
     }
 
     // ---------- Emergencias de pilotos ----------
     let alertasVistas = new Set();
+    // ---------- Historial de acciones (solo administración) ----------
+    const historialVisto = () => { try { return Number(localStorage.getItem('vaelo_historial_visto')) || 0; } catch { return 0; } };
+    let historialTimer = null;
+    async function cargarHistorial() {
+      const q = new URLSearchParams();
+      if ($('hist-q').value.trim()) q.set('q', $('hist-q').value.trim());
+      if ($('hist-persona').value) q.set('persona', $('hist-persona').value);
+      if ($('hist-dia').value) q.set('dia', $('hist-dia').value);
+      let r; try { r = await api('/api/admin/historial?' + q); } catch (e) { poner($('lista-historial'), el('p', { class: 'pista', text: e.message })); return; }
+      const visto = historialVisto();
+      try { localStorage.setItem('vaelo_historial_visto', String(r.ultimo)); } catch { /* sin almacenamiento */ }
+      $('insignia-historial').hidden = true;
+      const sel = $('hist-persona'), actual = sel.value;
+      poner(sel, el('option', { value: '', text: 'Todas' }), ...r.personas.map(p => el('option', { value: p.id, text: `${p.nombre}${p.rol === 'operador' ? ' (empleado)' : ''}` })));
+      sel.value = actual;
+      poner($('lista-historial'), r.acciones.length ? el('ul', { class: 'historial-lista' }, r.acciones.map(a => el('li', { class: (a.id > visto && a.rol === 'operador' ? 'nueva ' : '') + (/ELIMINÓ|Bloqueó|Anuló|Borró/.test(a.accion) ? 'fuerte' : '') },
+        el('span', { class: 'historial-hora', text: fecha(a.creado) }),
+        el('span', { class: 'historial-quien' }, el('strong', { text: a.nombre || '—' }), a.rol === 'operador' ? el('small', { text: 'empleado' }) : el('small', { text: 'administración' })),
+        el('span', { class: 'historial-que' }, a.accion, a.detalle ? el('small', { text: a.detalle }) : null))))
+        : el('p', { class: 'pista', text: 'Todavía no hay acciones con esos filtros.' }));
+    }
+    ['hist-q', 'hist-persona', 'hist-dia'].forEach(id => $(id).addEventListener('input', () => { clearTimeout(historialTimer); historialTimer = setTimeout(cargarHistorial, 300); }));
+
+    // Envíos que necesitan atención: se muestran plegados para no tapar el trabajo; se abren con un toque
+    let atascadosAbierto = false;
+    function pintarAtascados(lista) {
+      const caja = $('atascados');
+      // Un envío puede tener varios motivos: se muestra una sola vez con todos sus motivos
+      const porId = new Map();
+      for (const x of lista) { const y = porId.get(x.id); if (y) { y.motivos.push(x); y.minutos = Math.max(y.minutos, x.minutos); } else porId.set(x.id, { ...x, motivos: [x] }); }
+      lista = [...porId.values()].sort((a, b) => b.minutos - a.minutos);
+      if (!lista.length) { poner(caja); return; }
+      const fmt = (m) => m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`;
+      const d = el('details', { class: 'atascados', open: atascadosAbierto }, el('summary', {}, el('strong', { text: `${lista.length} envío${lista.length === 1 ? '' : 's'} necesita${lista.length === 1 ? '' : 'n'} atención` }), el('span', { text: ' · toca para ver' })),
+        el('ul', {}, lista.map((x) => el('li', {},
+          ...x.motivos.map(m => el('span', { class: 'atascado-motivo ' + m.motivo, text: m.motivo_texto })),
+          el('span', { class: 'atascado-datos' }, el('strong', { text: x.guia }), ` · ${x.cliente_nombre}${x.piloto ? ' · ' + x.piloto : ''} · hace ${fmt(x.minutos)}`),
+          el('button', { class: 'boton borde chico', type: 'button', text: 'Abrir', onclick: () => abrirEnvio(x.id) })))));
+      d.addEventListener('toggle', () => { atascadosAbierto = d.open; });
+      poner(caja, d);
+    }
     function pintarAlertas(alertas) {
       const caja = $('alertas');
       const nuevas = alertas.filter(a => !alertasVistas.has(a.id));
@@ -1607,7 +1707,7 @@ null))));
           } })),
         j.pendiente_cerrar ? el('div', { class: 'mensaje aviso', text: `El día lleva ${j.horas} horas abierto. Ciérralo para que el Excel salga por día.` }) : null,
         el('div', { class: 'franja-cifras' }, c('Envíos nuevos', x.creados), c('Entregados', x.entregados), c('No entregados', x.no_entregados), c('Ingresos', dinero(x.ingresos)),
-          c('Para Vaelo', dinero(x.vaelo)), c('Pagado a pilotos', dinero(x.pagado_pilotos)), c('Efectivo recibido', dinero(x.efectivo_recibido))));
+          x.bonos_empresas ? c('Bono a empresas', dinero(x.bonos_empresas)) : null, c('Para Vaelo', dinero(x.vaelo)), c('Pagado a pilotos', dinero(x.pagado_pilotos)), c('Efectivo recibido', dinero(x.efectivo_recibido))));
     }
     async function cargarCierres() {
       try {
@@ -1749,7 +1849,7 @@ null))));
       const r = await api('/api/admin/reportes?' + q), g = r.general;
       const c = (t, v) => el('div', { class: 'cifra' }, el('span', { text: t }), el('strong', { text: v }));
       poner($('rep-cifras'), c('Envíos', String(g.envios)), c('Entregados', String(g.entregados)), c('No entregados', String(g.fallidos)), c('Cancelados', String(g.cancelados)),
-        c('Ingresos', dinero(g.ingresos)), c('Descuentos dados', dinero(g.descuentos)), c('Pago a pilotos', dinero(g.pagos_pilotos)),
+        c('Ingresos', dinero(g.ingresos)), c('Descuentos dados', dinero(g.descuentos)), c('Pago a pilotos', dinero(g.pagos_pilotos)), g.bonos_empresas ? c('Bono a empresas', dinero(g.bonos_empresas)) : null, c('Para Vaelo', dinero(g.para_vaelo)),
         c('Ticket promedio', dinero(g.ticket)), c('Tiempo de entrega', g.minutos != null ? `${g.minutos} min` : '—'), c('Clientes', String(g.clientes)));
       const diaCorto = (d) => new Date(d + 'T12:00:00').toLocaleDateString('es-GT', { weekday: 'short', day: 'numeric', month: 'short' });
       poner($('rep-dias'), tablaSimple(['Día', 'Envíos', 'Ingresos'], r.porDia.map(d => [diaCorto(d.dia), String(d.envios), dinero(d.ingresos)])));
@@ -1774,10 +1874,18 @@ null))));
         mostrarMensaje($('msg-tarifas'), 'Ajustes de operación guardados.', 'exito');
       } catch (e) { mostrarMensaje($('msg-tarifas'), e.message); }
     });
+    let areasPanel = {};
     async function cargarOperadores() {
-      const { operadores } = await api('/api/admin/operadores');
+      const { operadores, areas } = await api('/api/admin/operadores');
+      areasPanel = areas;
       poner($('lista-operadores'), ...(operadores.length ? operadores.map(o => el('div', { class: 'caja-fila' },
         el('div', {}, el('strong', { text: o.nombre }), el('br'), sub(o.email)), el('span', { class: o.activo ? 'etiqueta-completa' : 'etiqueta-gris', text: o.activo ? 'Activo' : 'Desactivado' }),
+        el('div', { class: 'permisos-empleado' }, sub('Puede ver:'), ...Object.entries(areasPanel).map(([k, t]) => el('label', { class: 'casilla', style: 'margin:0' },
+          el('input', { type: 'checkbox', style: 'width:auto', checked: o.permisos.includes(k), onchange: async (ev) => {
+            const marcadas = [...ev.target.closest('.permisos-empleado').querySelectorAll('input')].map((x, i) => x.checked ? Object.keys(areasPanel)[i] : null).filter(Boolean);
+            try { await api('/api/admin/operadores/' + o.id, { method: 'PUT', body: { permisos: marcadas } }); mostrarMensaje($('msg-tarifas'), `Permisos de ${o.nombre} guardados.`, 'exito'); }
+            catch (e) { ev.target.checked = !ev.target.checked; mostrarMensaje($('msg-tarifas'), e.message); }
+          } }), el('span', { text: t })))),
         el('div', { style: 'display:flex;gap:.4rem' },
           el('button', { class: 'boton borde chico', type: 'button', text: 'Nueva contraseña', onclick: async () => {
             const p = prompt(`Nueva contraseña para ${o.nombre} (mínimo 10 caracteres):`); if (!p) return;
@@ -1870,8 +1978,11 @@ null))));
         const q = new URLSearchParams();
         if (conocido != null) q.set('desde', conocido);
         if (desdeT) q.set('desde_t', desdeT);
+        if (rolPanel === 'admin') q.set('h', historialVisto());
         const r = await api('/api/admin/nuevos?' + q);
         pintarAlertas(r.alertas || []);
+        pintarAtascados(r.atascados || []);
+        if (r.historial) { const b = $('insignia-historial'); b.textContent = String(r.historial.n); b.hidden = !r.historial.n || !$('panel-historial').hidden; }
         const rechazados = desdeT ? r.rechazados : [];
         desdeT = r.ahora;
         if (rechazados.length) {

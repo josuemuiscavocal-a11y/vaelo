@@ -208,7 +208,8 @@ async function panelEmpresa(caja) {
   const abrir = () => (vista === 'pedidos' ? panelPedidos(cuerpo, yo) : vista === 'ganancias' ? panelGanancias(cuerpo) : panelAnalitica(cuerpo));
   poner(caja, 
     el('div', { class: 'empresa-cabecera' }, el('div', {}, el('span', { class: 'etiqueta-completa', text: 'Contrato firmado' }), el('h2', { text: yo.empresa_nombre || yo.nombre }),
-      el('p', { class: 'pista', text: 'Vaelo te presta sus pilotos: cada cliente paga su envío al recibir. Tu empresa solo paga si eliges pickup pagado por ti o si un paquete se queda en la sede.' })),
+      el('p', { class: 'pista', text: 'Vaelo te presta sus pilotos: cada cliente paga su envío al recibir. Tu empresa solo paga si eliges pickup pagado por ti o si un paquete se queda en la sede.' }),
+      yo.recogida_dias ? el('p', { class: 'recogida-fija' }, icono('reloj'), ` Pasamos por tus paquetes: ${yo.recogida_dias.split(',').map(d => ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'][d]).join(', ')} a las ${yo.recogida_hora}.`) : null),
       el('a', { class: 'boton borde chico', href: '/politicas-empresas', target: '_blank', text: 'Políticas para empresas' })),
     conBono && bono.por_envio > 0 ? el('button', { type: 'button', class: 'bono-franja', onclick: () => { vista = 'ganancias'; pintarPest(); abrir(); } },
       el('span', { class: 'bono-franja-q', text: dinero(bono.por_envio) }),

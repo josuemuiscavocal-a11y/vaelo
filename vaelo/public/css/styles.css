@@ -1299,3 +1299,43 @@ body.app-piloto main { padding-bottom: 9rem; }
 .bono-lista { list-style: none; margin: .5rem 0 0; padding: 0; }
 .bono-lista li { display: flex; justify-content: space-between; gap: 1rem; padding: .55rem 0; border-bottom: 1px solid var(--linea); font-size: .92rem; }
 .bono-lista li:last-child { border-bottom: 0; }
+
+/* ---------- Envíos atascados (panel) ---------- */
+.atascados { margin: 0 0 1rem; border: 1.5px solid #f3c56b; background: #fff8e6; border-radius: 14px; padding: .7rem 1rem; }
+.atascados summary { cursor: pointer; color: #7a4b00; }
+.atascados ul { list-style: none; margin: .6rem 0 0; padding: 0; display: grid; gap: .45rem; }
+.atascados li { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; background: #fff; border-radius: 10px; padding: .5rem .7rem; }
+.atascado-motivo { font-size: .75rem; font-weight: 700; padding: .15rem .55rem; border-radius: 99px; background: #fde2d6; color: #8a2c0d; white-space: nowrap; }
+.atascado-motivo.sin_ubicacion { background: #e7ecfb; color: #1c3faa; }
+.atascado-datos { flex: 1; min-width: 200px; font-size: .9rem; }
+
+/* ---------- Historial de acciones (panel) ---------- */
+.historial-filtros { margin-bottom: .5rem; }
+.historial-lista { list-style: none; margin: 0; padding: 0; }
+.historial-lista li { display: grid; grid-template-columns: 150px 170px minmax(0, 1fr); gap: .8rem; padding: .65rem .5rem; border-bottom: 1px solid var(--linea); font-size: .92rem; align-items: start; }
+.historial-lista li.nueva { background: #fff8e6; }
+.historial-lista li.fuerte .historial-que { color: #a3200f; font-weight: 600; }
+.historial-hora { color: var(--suave); font-size: .85rem; }
+.historial-quien small, .historial-que small { display: block; color: var(--suave); font-size: .8rem; font-weight: 400; }
+@media (max-width: 720px) { .historial-lista li { grid-template-columns: 1fr; gap: .2rem; } }
+.permisos-empleado { display: flex; gap: .3rem .8rem; flex-wrap: wrap; align-items: center; font-size: .88rem; }
+.estrellas.grandes button { font-size: 2.2rem; } .calificar-piloto { display: grid; gap: .6rem; margin-top: 1rem; }
+/* Estrellas del piloto (ficha en el panel y modo mensajero) */
+.estrellas-piloto-admin { display: grid; gap: .7rem; }
+.estrellas-promedio { display: flex; align-items: baseline; gap: .6rem; flex-wrap: wrap; }
+.estrellas-promedio strong { font-size: 2rem; } .estrellas-promedio span { color: #e8a400; font-size: 1.2rem; letter-spacing: .1em; }
+.estrellas-dist { display: grid; gap: .25rem; max-width: 340px; }
+.estrellas-dist div { display: grid; grid-template-columns: 38px 1fr 28px; gap: .5rem; align-items: center; font-size: .85rem; }
+.estrellas-dist i { display: block; height: 8px; border-radius: 99px; background: var(--gris); overflow: hidden; }
+.estrellas-dist b { display: block; height: 100%; background: #e8a400; }
+.estrellas-comentarios { list-style: none; margin: 0; padding: 0; display: grid; gap: .4rem; font-size: .9rem; }
+.estrellas-comentarios strong { color: #e8a400; }
+.tus-estrellas { margin: 1rem 0; }
+/* Recogidas fijas */
+.dia-chip { display: inline-flex; align-items: center; gap: .25rem; padding: .3rem .6rem; border: 1px solid var(--linea); border-radius: 99px; font-size: .85rem; cursor: pointer; background: #fff; }
+.dia-chip input { width: auto; margin: 0; }
+.recogidas-hoy { margin: 0 0 1rem; padding: .8rem 1rem; border-radius: 14px; background: #eef2fa; }
+.recogidas-hoy ul { list-style: none; margin: .4rem 0 0; padding: 0; display: grid; gap: .35rem; }
+.recogidas-hoy li { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+.recogida-fija { display: flex; align-items: center; gap: .4rem; margin: .4rem 0 0; font-weight: 600; color: #11226B; }
+.recogida-fija svg { width: 18px; height: 18px; }

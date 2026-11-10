@@ -227,7 +227,26 @@
       if (r.estado === 'cancelado') return [el('h1', { text: 'Envío cancelado' }), el('p', { text: `${r.remitente} canceló este envío (guía ${r.guia}). Ya no se comparte tu ubicación.` })];
       return [...encabezado(r),
         el('div', { class: 'mensaje exito' }, r.recibio ? `Lo recibió ${r.recibio}` : 'Tu paquete fue entregado', r.entregado_en ? ` el ${fecha(r.entregado_en)}.` : '.', ' Ya no se comparte tu ubicación.'),
+        r.puede_calificar ? bloqueCalificar(r) : r.calificacion ? el('p', { class: 'pista ok', text: `Calificaste la entrega con ${r.calificacion} de 5. ¡Gracias!` }) : null,
         el('p', {}, 'Gracias por recibir con Vaelo. ¿Necesitas enviar algo? ', el('a', { href: '/', text: 'Pide tu envío aquí' }), '.')];
+    }
+
+    // Calificar al piloto (una vez entregado): ayuda a que los mejores pilotos reciban más envíos
+    function bloqueCalificar(r) {
+      let estrellas = 0;
+      const msg = el('div', { class: 'mensaje', role: 'alert' });
+      const comentario = el('textarea', { rows: 2, maxlength: 300, placeholder: 'Opcional: ¿algo que debamos saber?' });
+      const botones = [1, 2, 3, 4, 5].map(n => el('button', { type: 'button', 'aria-label': `${n} de 5`, text: '★', onclick: () => { estrellas = n; botones.forEach((b, i) => b.classList.toggle('si', i < n)); } }));
+      const caja = el('div', { class: 'bloque calificar-piloto' },
+        el('h2', { style: 'font-size:1.15rem;margin:0', text: `¿Cómo te atendió ${r.piloto_nombre || 'el piloto'}?` }),
+        el('div', { class: 'estrellas grandes' }, botones), comentario, msg,
+        el('button', { class: 'boton', type: 'button', text: 'Enviar calificación', onclick: async (ev) => {
+          if (!estrellas) { mostrarMensaje(msg, 'Toca de 1 a 5 estrellas.'); return; }
+          ev.target.disabled = true;
+          try { await api(API + '/calificar', { body: { estrellas, comentario: comentario.value } }); poner(caja, el('p', { class: 'pista ok', text: '¡Gracias por tu calificación!' })); }
+          catch (e) { mostrarMensaje(msg, e.message); ev.target.disabled = false; }
+        } }));
+      return caja;
     }
 
     async function cargar() {

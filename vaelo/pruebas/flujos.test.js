@@ -274,7 +274,7 @@ test('oficina: asignar al piloto en línea más cercano con un toque', async () 
   assert.equal(fila(r.j.id).mensajero_id, pilotoId);
   assert.equal((await admin('POST', `/api/admin/envios/${r.j.id}/asignar-cercano`, {})).status, 400, 'ya tiene piloto');
   const det = (await admin('GET', `/api/admin/envios/${r.j.id}`)).j.envio;
-  assert.deepEqual(det.reparto, { piloto: 30, vaelo: 5 }, 'Vaelo se queda con Q5');
+  assert.deepEqual(det.reparto, { piloto: 30, bono: 0, vaelo: 5 }, 'Vaelo se queda con Q5');
   await ana('POST', `/api/envios/${r.j.id}/cancelar`, { aceptar_cargo: true });
 });
 
@@ -613,4 +613,49 @@ test('bono para empresas: suma al entregar, la empresa solo ve lo suyo y adminis
   assert.equal(l.status, 200); assert.equal(l.j.pendiente, 0); assert.equal(l.j.recibido, 3);
   assert.equal((await admin('POST', `/api/admin/bonos/${uid}/liquidar`, {})).status, 400, 'nada pendiente');
   await admin('PUT', '/api/admin/ajustes', { bono_empresa: 0 });
+});
+
+test('control del panel: historial, permisos de empleados, estrellas de quien recibe, atascados y estado de cuenta', async () => {
+  // Empleado con permiso solo para Envíos
+  assert.equal((await admin('POST', '/api/admin/operadores', { nombre: 'Oficina Uno', email: 'oficina1@prueba.com', password: 'clave-larga-123' })).status, 201);
+  const opId = db.prepare("SELECT id FROM usuarios WHERE email = 'oficina1@prueba.com'").get().id;
+  assert.equal((await admin('PUT', `/api/admin/operadores/${opId}`, { permisos: [] })).status, 400, 'al menos un área');
+  assert.equal((await admin('PUT', `/api/admin/operadores/${opId}`, { permisos: ['envios'] })).status, 200);
+  const op = cliente();
+  assert.equal((await op('POST', '/api/acceso-familia', { email: 'oficina1@prueba.com', password: 'clave-larga-123' })).status, 200);
+  assert.equal((await op('GET', '/api/admin/envios')).status, 200);
+  assert.equal((await op('GET', '/api/admin/clientes')).status, 403, 'sin permiso de Clientes');
+  assert.equal((await op('GET', '/api/admin/historial')).status, 403, 'el historial es solo de administración');
+  assert.deepEqual((await op('GET', '/api/admin/resumen')).j.permisos, ['envios']);
+  // Una acción del empleado queda en el historial y le avisa a la administración
+  const e = await ana('POST', '/api/envios', { vehiculo_id: 1, peso: 1, origen_zona: 'Zona 1', destino_zona: 'Zona 16', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng,
+    metodo_pago: 'efectivo', destino_nombre: 'Luis', destino_telefono: '55554444', foto_paquete: FOTO });
+  db.prepare('UPDATE envios SET mensajero_id = ? WHERE id = ?').run(pilotoId, e.j.id);
+  const antes = (await admin('GET', '/api/admin/historial')).j.ultimo;
+  assert.equal((await op('POST', `/api/admin/envios/${e.j.id}/estado`, { estado: 'entregado', nota: 'llamó el cliente' })).status, 200);
+  const h = (await admin('GET', '/api/admin/historial?q=Oficina')).j.acciones[0];
+  assert.match(h.accion, /Cambió a mano el estado a «Entregado»/); assert.match(h.detalle, /Envío VA-/); assert.equal(h.rol, 'operador');
+  assert.equal((await admin('GET', `/api/admin/nuevos?desde=0&h=${antes}`)).j.historial.n, 1);
+  // Quien recibe califica al piloto y cuenta en su promedio
+  const tok = db.prepare('SELECT receptor_token FROM envios WHERE id = ?').get(e.j.id).receptor_token;
+  const vista = await cliente()('GET', '/api/recibe/' + tok);
+  assert.equal(vista.j.puede_calificar, true);
+  assert.equal((await cliente()('POST', `/api/recibe/${tok}/calificar`, { estrellas: 2, comentario: 'Llegó tarde' })).status, 200);
+  assert.equal((await cliente()('POST', `/api/recibe/${tok}/calificar`, { estrellas: 5 })).status, 400, 'una sola vez');
+  const ficha = (await admin('GET', `/api/admin/mensajeros/${pilotoId}`)).j;
+  assert.ok(ficha.estrellas.total >= 1); assert.ok(ficha.estrellas.ultimas.some((x) => x.de === 'Quien recibió' && x.comentario === 'Llegó tarde'));
+  // Atascados: un envío sin piloto de hace 20 minutos aparece
+  const v = await ana('POST', '/api/envios', { vehiculo_id: 1, peso: 1, origen_zona: 'Zona 1', destino_zona: 'Zona 16', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng,
+    metodo_pago: 'efectivo', destino_nombre: 'Rosa', destino_telefono: '55554444', foto_paquete: FOTO });
+  db.prepare("UPDATE envios SET creado = datetime('now', '-20 minutes'), mensajero_id = NULL WHERE id = ?").run(v.j.id);
+  assert.ok((await admin('GET', '/api/admin/nuevos')).j.atascados.some((x) => x.id === v.j.id && x.motivo === 'sin_piloto'));
+  db.prepare("UPDATE envios SET estado = 'cancelado' WHERE id = ?").run(v.j.id);
+  // Estado de cuenta en Excel de una empresa con recogida fija y NIT
+  const beto = db.prepare("SELECT id FROM usuarios WHERE tipo_cuenta = 'empresa' LIMIT 1").get();
+  if (beto) {
+    assert.equal((await admin('PUT', `/api/admin/clientes/${beto.id}/empresa`, { tipo_cuenta: 'empresa', empresa_nombre: 'Tienda', recogida_dias: '1,4', recogida_hora: '09:30', fact_nit: '1234567-8', fact_nombre: 'Tienda S.A.' })).status, 200);
+    const f = await fetch(`${BASE}/api/admin/empresas/${beto.id}/estado-cuenta?mes=2026-11`, { headers: { cookie: '' } });
+    assert.equal(f.status, 401);
+    assert.equal((await admin('GET', `/api/admin/empresas/${beto.id}/estado-cuenta?mes=2026-11`)).status, 200);
+  }
 });

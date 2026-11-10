@@ -236,3 +236,12 @@ systemctl restart vaelo         # reiniciar
 ### Bono por envío para empresas
 
 En el panel, **Empresas → Bono por envío**, activas el bono solo a las empresas que quieras (las demás no ven nada) y pones cuántos quetzales gana por cada envío **entregado** (sale de los Q5 de Vaelo; máximo Q5). Hay un monto general y cada empresa puede tener el suyo. Por cada empresa eliges si se le **paga** o se le **descuenta**, según lo que acuerden, y con «Ya fue pagado» / «Ya se descontó» cierras lo pendiente. La empresa ve en su panel la pestaña **Tus ganancias** con solo lo suyo: por recibir, este mes, ya recibido y total. Nunca ve lo que gana Vaelo ni el piloto.
+
+### Control del panel
+
+- **Envíos que necesitan atención**: arriba del panel sale un aviso plegado con los envíos sin piloto por más de 15 min, los que el piloto aceptó y no recoge en 30 min, los que llevan más de 1 hora en camino y los que tienen 30 min sin que quien recibe comparta su ubicación.
+- **Historial** (solo administración): cada acción del personal en el panel (estados a mano, pagos, cierres, tarifas, cuentas eliminadas, permisos…) con quién, qué y cuándo. Te sale un número en la pestaña cuando un empleado hace algo nuevo. Los empleados no lo ven.
+- **Permisos por empleado**: en Tarifas y ajustes → Equipo de oficina marcas qué áreas ve cada uno (Envíos, Pilotos, Clientes, Empresas). Se aplica también en el servidor.
+- **Estrellas de pilotos**: califican quien envía y quien recibe (en su enlace, al recibir). La ficha del piloto muestra su promedio, cuántas de cada estrella y los comentarios; el piloto ve sus estrellas en Ganancias. Al asignar, los pilotos en línea con más estrellas salen primero (los nuevos cuentan como 4) y los que bajan de 4 se marcan en rojo.
+- **Bono de empresas en los reportes**: «Para Vaelo» ya resta el bono pagado a empresas en reportes, caja, cierre del día y en el detalle de cada envío.
+- **Recogida fija y facturación de empresas**: en la ficha de la empresa (Clientes → Abrir) pones los días y la hora en que pasan por sus paquetes, su NIT y datos fiscales, y descargas su estado de cuenta del mes en Excel para hacerle la factura. Las recogidas del día salen arriba en Empresas → Empresas activas.

@@ -547,6 +547,12 @@ agregarColumnas('pedidos_empresa', [['carpeta_id', 'INTEGER'], ['no_puede_nota',
 // Bono para empresas: una parte de lo que gana Vaelo por cada envío entregado. La administración decide el monto
 // (general o por empresa) y si se le paga o se le descuenta, según lo que acuerden.
 agregarColumnas('usuarios', [['bono_envio', 'REAL'], ['bono_modo', "TEXT NOT NULL DEFAULT 'pago'"], ['bono_activo', 'INTEGER NOT NULL DEFAULT 0']]);
+// Permisos de cada empleado de oficina: áreas del panel separadas por coma (vacío = todas)
+agregarColumnas('usuarios', [['permisos', 'TEXT']]);
+// Quien recibe también califica al piloto (de 1 a 5 estrellas)
+agregarColumnas('envios', [['calif_receptor', 'INTEGER'], ['calif_receptor_comentario', 'TEXT']]);
+// Empresas: recogida fija (días de la semana 0-6 separados por coma y hora) y datos para facturar
+agregarColumnas('usuarios', [['recogida_dias', 'TEXT'], ['recogida_hora', 'TEXT'], ['fact_nit', 'TEXT'], ['fact_nombre', 'TEXT'], ['fact_direccion', 'TEXT']]);
 db.exec(`
   CREATE TABLE IF NOT EXISTS bonos_empresa (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -557,6 +563,13 @@ db.exec(`
     liquidacion_id INTEGER
   );
   CREATE INDEX IF NOT EXISTS idx_bonos_empresa ON bonos_empresa(usuario_id, liquidacion_id);
+  CREATE TABLE IF NOT EXISTS historial (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_id INTEGER, nombre TEXT, rol TEXT,
+    accion TEXT NOT NULL, detalle TEXT, ruta TEXT,
+    creado TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_historial_creado ON historial(creado);
   CREATE TABLE IF NOT EXISTS liquidaciones_bono (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     usuario_id INTEGER NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
