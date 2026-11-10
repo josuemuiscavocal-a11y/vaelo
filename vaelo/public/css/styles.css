@@ -1401,3 +1401,4 @@ dialog.dlg-ruta .dialogo { padding: 1rem; }
 .barra-progreso { height: 8px; background: #e6e9f2; border-radius: 999px; overflow: hidden; }
 .barra-progreso span { display: block; height: 100%; background: #f2a516; border-radius: 999px; }
 .ruta-plegada summary { cursor: pointer; font-weight: 700; color: var(--azul-hondo); padding: .35rem 0; }
+.rutas-resumen { grid-column: 1 / -1; margin: 0 0 .25rem; background: #eef2fd; border-radius: 10px; padding: .5rem .8rem; font-size: .92rem; }

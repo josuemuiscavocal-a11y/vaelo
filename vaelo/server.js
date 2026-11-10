@@ -3599,7 +3599,35 @@ function dividirEnRutas(origen, pedidos, k) {
     if (faltanGrupos > 0 && (acum >= (total * (grupos.length + 1)) / k || quedan === faltanGrupos)) { grupos.push(actual); actual = []; }
   });
   if (actual.length) grupos.push(actual);
-  return grupos.map((g) => ordenarParadas(origen, g));
+  return balancearRutas(origen, grupos.map((g) => ordenarParadas(origen, g)));
+}
+// Reparte mejor el trabajo: pasa paradas de la ruta más pesada a otra mientras baje el tiempo de la más larga
+// (y el cupo de las motos que se pasan). Así ninguna moto termina con 4 h y otra con 1 h.
+function balancearRutas(origen, rutas) {
+  if (rutas.length < 2) return rutas;
+  const cupo = ajNum('cupo_moto', 30);
+  const peso = (r) => { if (!r.length) return 0; const m = medirRuta(origen, r); return m.minutos + 6 * Math.max(0, m.puntos - cupo); };
+  let pesos = rutas.map(peso);
+  const nota = () => Math.max(...pesos) * 1000 + pesos.reduce((t, x) => t + x, 0);
+  let actual = nota();
+  for (let vuelta = 0; vuelta < 80; vuelta++) {
+    let mejor = null;
+    const i = pesos.indexOf(Math.max(...pesos));   // la ruta más pesada
+    for (let a = 0; a < rutas[i].length; a++) {
+      if (rutas[i].length <= 1) break;
+      for (let j = 0; j < rutas.length; j++) {
+        if (j === i) continue;
+        const desde = ordenarParadas(origen, rutas[i].filter((_, k) => k !== a));
+        const hacia = ordenarParadas(origen, [...rutas[j], rutas[i][a]]);
+        const p2 = [...pesos]; p2[i] = peso(desde); p2[j] = peso(hacia);
+        const n = Math.max(...p2) * 1000 + p2.reduce((t, x) => t + x, 0);
+        if (n < actual - 1e-6 && (!mejor || n < mejor.n)) mejor = { n, i, j, desde, hacia, p2 };
+      }
+    }
+    if (!mejor) break;
+    rutas[mejor.i] = mejor.desde; rutas[mejor.j] = mejor.hacia; pesos = mejor.p2; actual = mejor.n;
+  }
+  return rutas.filter((r) => r.length);
 }
 function recomendar(origen, pedidos) {
   const cupo = ajNum('cupo_moto', 30), horas = ajNum('horas_ruta_moto', 4);
@@ -4284,7 +4312,7 @@ ruta('POST', '/api/admin/lotes-empresa/:id/calcular', async ({ req, params, body
   const cupo = ajNum('cupo_moto', 30), horas = ajNum('horas_ruta_moto', 4);
   const medidas = modo === 'un_paquete' ? rutas.map((r) => ({ orden: r, ...medirRuta(origen, r) }))   // uno por moto: no hay orden que calcular
     : await Promise.all(rutas.map((r) => ordenarYMedir(origen, r, modo === 'pickup')));
-  return { modo, rutas: medidas.map(({ orden, ...m }) => ({ pedidos: orden.map((p) => p.id), ...m, excede_cupo: modo !== 'pickup' && m.puntos > cupo, excede_horas: modo !== 'pickup' && m.minutos > horas * 60 })) };
+  return { modo, rutas: medidas.map(({ orden, ...m }) => ({ pedidos: orden.map((p) => p.id), ...m, excede_cupo: modo !== 'pickup' && m.puntos > cupo, excede_horas: m.minutos > horas * 60 })) };
 });
 // Reordena una ruta por el camino más rápido (después de mover paradas entre rutas)
 ruta('POST', '/api/admin/lotes-empresa/:id/ordenar', async ({ req, params, body }) => {
