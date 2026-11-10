@@ -431,14 +431,16 @@
     }
 
     function posicionFresca() {
-      return new Promise((resolve, reject) => {
-        if (!navigator.geolocation) return reject(new Error('Este teléfono no permite usar la ubicación.'));
-        // Si el GPS dio una ubicación hace menos de 30 segundos, se usa de una vez
-        if (ultimaPos && !gpsError && Date.now() - ultimaLectura < 30000) return resolve(ultimaPos);
-        navigator.geolocation.getCurrentPosition(
-          (p) => { ultimaPos = { lat: p.coords.latitude, lng: p.coords.longitude, precision: p.coords.accuracy }; ultimaLectura = Date.now(); gpsError = ''; resolve(ultimaPos); },
-          (err) => reject(new Error(err.code === 1 ? 'Diste "no permitir" a la ubicación. Actívala en la configuración del navegador para vaelomensajeria.com.' : 'No pudimos leer tu ubicación. Revisa que el GPS esté encendido y vuelve a intentar.')),
-          { enableHighAccuracy: true, timeout: 20000, maximumAge: 10000 });
+      if (!navigator.geolocation) return Promise.reject(new Error('Este teléfono no permite usar la ubicación.'));
+      // Si el GPS dio una ubicación hace menos de 60 segundos, se usa de una vez
+      if (ultimaPos && !gpsError && Date.now() - ultimaLectura < 60000) return Promise.resolve(ultimaPos);
+      const pedir = (alta, espera) => new Promise((ok, mal) => navigator.geolocation.getCurrentPosition(
+        (p) => { ultimaPos = { lat: p.coords.latitude, lng: p.coords.longitude, precision: p.coords.accuracy }; ultimaLectura = Date.now(); gpsError = ''; ok(ultimaPos); }, mal,
+        { enableHighAccuracy: alta, timeout: espera, maximumAge: 15000 }));
+      // GPS primero; si tarda (bajo techo), la ubicación aproximada del teléfono; si tampoco, la última lectura reciente del GPS
+      return pedir(true, 10000).catch((err) => err.code === 1 ? Promise.reject(err) : pedir(false, 8000)).catch((err) => {
+        if (err.code !== 1 && ultimaPos && Date.now() - ultimaLectura < 180000) return ultimaPos;
+        throw new Error(err.code === 1 ? 'Diste "no permitir" a la ubicación. Actívala en la configuración del navegador para vaelomensajeria.com.' : 'No pudimos leer tu ubicación. Revisa que el GPS esté encendido y vuelve a intentar.');
       });
     }
 
