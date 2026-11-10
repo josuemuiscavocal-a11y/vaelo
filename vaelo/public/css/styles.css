@@ -1271,3 +1271,11 @@ body.app-piloto main { padding-bottom: 9rem; }
 .foto-mini .foto-paquete-vacio::before { width: 34px; height: 34px; background-size: 19px; }
 .fotos-paquetes { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: .6rem; margin: .5rem 0; } .fotos-paquetes .prueba-img { margin: 0 !important; } .fotos-paquetes .prueba-img img { width: 100%; height: 120px; object-fit: cover; }
 .tema-fiesta { margin: .25rem 0 1rem; padding: .75rem .9rem; border-radius: 12px; background: linear-gradient(135deg, #fff5f6, #f2fbf5); border: 1px solid #f1d3d8; }
+.envio-extra-derecha { display: flex; align-items: center; gap: .6rem; }
+.envio-extra-precio { font-size: 1.05rem; color: var(--azul); }
+.envio-extra-sub { margin: .7rem 0 .35rem; padding-top: .6rem; border-top: 1px dashed var(--linea); font-weight: 700; font-size: .9rem; }
+.paquete-extra .fila .campo { margin-bottom: .45rem; }
+.envio-extra-fragil { margin: .2rem 0 0; font-size: .88rem; }
+.envio-extra-fragil small { color: var(--suave); }
+
+.titulo-envio1 { margin: 0 0 .5rem; } .titulo-envio1 .paquete-num { margin: 0; } .titulo-envio1 .ayuda { display: block; margin-left: 1.8rem; font-size: .78rem; }

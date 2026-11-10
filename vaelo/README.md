@@ -139,7 +139,8 @@ Página web y app (instalable en el celular) de Vaelo, mensajería en moto y pic
 - **Olvidé mi contraseña** para clientes y pilotos (`/recuperar`, necesita Resend). La administración cambia la suya con `actualizar.sh --clave-admin`.
 - **Mis ganancias** del piloto: por cobrar, hoy, semana, mes, efectivo que debe entregar y pagos anteriores.
 - **Calificación del cliente:** el piloto califica al cliente al terminar; la oficina ve el promedio.
-- **Caja de envíos** (cualquier cliente): en «Enviar paquete», **«+ Agregar otro destinatario»** guarda ese envío en la caja y deja el formulario listo para el siguiente. «Enviar la caja» los manda juntos desde el mismo lugar (hasta 10) y se ofrecen al mismo piloto. Al final sale el enlace de cada quien recibe para mandarlo por WhatsApp: ahí comparte su ubicación y sus datos.
+- **Varios envíos desde el mismo lugar** (cualquier cliente): en «El paquete», **«+ Agregar otro envío»** abre una tarjeta con el paquete (peso, contenido, foto) y quién lo recibe (nombre, teléfono, zona). Hasta 3 envíos extra, 4 en total. Cada envío se cobra aparte según su zona (Q35 o Q45) y el total aparece abajo. Salen juntos con el mismo piloto y al final sale el enlace de cada quien recibe para mandarlo por WhatsApp.
+- **Tema de Navidad**: se activa y desactiva en el panel, Tarifas y ajustes.
 - **Términos** (`/terminos`) y **privacidad** (`/privacidad`). Al registrarse se aceptan. Conviene que un abogado los revise.
 
 ## Seguridad y servidor
