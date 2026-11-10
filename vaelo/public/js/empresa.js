@@ -67,7 +67,7 @@ function solicitudEmpresa(caja, r) {
     const res = await api('/api/empresa/solicitud', { method: 'PUT', body });
     Object.assign(s, res.solicitud); pintarProgreso(res.solicitud);
   };
-  const doc = (campo) => campoDocumento({ titulo: r.documentos[campo].nombre, tiene: s.docs[campo], ver: `/api/empresa/solicitud/documento/${campo}`,
+  const doc = (campo) => campoDocumento({   // (se usa en el resumen) titulo: r.documentos[campo].nombre, tiene: s.docs[campo], ver: `/api/empresa/solicitud/documento/${campo}`,
     pdf: r.documentos[campo].pdf, ayuda: r.documentos[campo].opcional ? 'Opcional' : null, camara: campo.startsWith('foto_sede') ? 'environment' : null,
     subir: async (archivo) => { await guardar().catch(() => {}); await api('/api/empresa/solicitud/documento', { body: { campo, archivo } }); },
     alCambiar: async () => { const x = await api('/api/empresa/solicitud'); Object.assign(s, x.solicitud); pintarProgreso(x.solicitud); } });
@@ -82,14 +82,108 @@ function solicitudEmpresa(caja, r) {
   const form = el('form', { novalidate: true, onsubmit: (ev) => ev.preventDefault(), onchange: () => guardar().catch((e) => mostrarMensaje(msg, e.message)) },
     seccion('1', 'La empresa', 'Los datos se guardan solos mientras escribes.', el('div', { class: 'fila' }, CAMPOS_SOLICITUD.empresa.map(entrada))),
     seccion('2', 'Representante', 'La persona que firmará el contrato.', el('div', { class: 'fila' }, CAMPOS_SOLICITUD.representante.map(entrada))),
-    seccion('3', 'Fotos y documentos', 'Fotos claras de la sede y documentos legibles. Fotos o PDF de máximo 700 KB.',
-      el('div', { class: 'docs' }, Object.keys(r.documentos).map(doc))),
+    seccion('3', 'Fotos y documentos', 'Con esto verificamos tu empresa antes de la cita. Puedes tomarlas con el celular.',
+      docsEmpresa(r, s, async (campo, archivo) => { await guardar().catch(() => {}); await api('/api/empresa/solicitud/documento', { body: { campo, archivo } }); },
+        async () => { const x = await api('/api/empresa/solicitud'); Object.assign(s, x.solicitud); pintarProgreso(x.solicitud); })),
     seccion('4', 'Enviar', null, progreso,
       el('label', { class: 'casilla', for: 'emp-politica' }, acepto, el('span', {}, 'Leí y acepto las ', el('a', { href: '/politicas-empresas', target: '_blank', text: 'políticas y condiciones para empresas' }),
         '. Entiendo que Vaelo presta su servicio de pilotos y que mi empresa no gana comisiones de Vaelo.')),
       msg, enviar));
   poner(caja, intro, estadoNodo || '', form);
   pintarProgreso(s);
+}
+// ---------- Fotos y documentos de la solicitud: por grupos, con guía de qué fotografiar ----------
+const GUIA_DOCS = {
+  foto_sede_frente: { grupo: 'sede', dibujo: 'fachada', ayuda: 'De frente y de día: que se vean el rótulo y el número de la casa o local.' },
+  foto_sede_interior: { grupo: 'sede', dibujo: 'bodega', ayuda: 'Donde guardan los paquetes que va a recoger el piloto.' },
+  foto_rep: { grupo: 'rep', dibujo: 'persona', ayuda: 'Una foto de la cara, sin lentes oscuros ni gorra.' },
+  dpi_rep_frente: { grupo: 'rep', dibujo: 'dpi', ayuda: 'Completo, sin reflejos y que se lean los datos.' },
+  dpi_rep_reverso: { grupo: 'rep', dibujo: 'dpi-atras', ayuda: 'La parte de atrás, con el código de barras.' },
+  patente: { grupo: 'legal', dibujo: 'documento', ayuda: 'Foto o PDF de la patente de comercio vigente.' },
+  rtu: { grupo: 'legal', dibujo: 'documento', ayuda: 'Constancia del RTU. Ayuda a verificar más rápido.' },
+};
+const GRUPOS_DOCS = [['sede', 'La sede', 'sede'], ['rep', 'El representante', 'usuario'], ['legal', 'Documentos legales', 'etiqueta']];
+// Dibujos simples que guían qué foto tomar
+const DIBUJOS_DOC = {
+  fachada: '<path d="M8 30h48v26H8z"/><path d="M4 30 12 14h40l8 16"/><path d="M26 56V40h12v16"/><path d="M14 38h7v7h-7zM43 38h7v7h-7z"/><path d="M22 20h20"/>',
+  bodega: '<path d="M6 26 32 12l26 14v30H6z"/><path d="M14 56V34h36v22"/><path d="M18 44h12v12H18zM34 46h10v10H34zM24 36h10v8H24z"/>',
+  persona: '<circle cx="32" cy="24" r="10"/><path d="M14 54c2-10 9-15 18-15s16 5 18 15"/><path d="M8 8h10M8 8v10M56 8H46M56 8v10M8 56h10M8 56V46M56 56H46M56 56V46"/>',
+  dpi: '<rect x="6" y="14" width="52" height="36" rx="5"/><rect x="12" y="22" width="14" height="18" rx="2"/><path d="M32 24h20M32 30h16M32 36h20M12 44h40"/>',
+  'dpi-atras': '<rect x="6" y="14" width="52" height="36" rx="5"/><path d="M12 22h40M12 28h28"/><path d="M14 36v8M17 36v8M21 36v8M23 36v8M27 36v8M31 36v8M33 36v8M37 36v8M41 36v8M44 36v8M48 36v8"/>',
+  documento: '<path d="M16 6h22l12 12v40H16z"/><path d="M38 6v12h12"/><path d="M22 28h22M22 34h22M22 40h16M22 48h10"/><circle cx="42" cy="48" r="4"/>',
+};
+const dibujoDoc = (k) => { const n = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); n.setAttribute('viewBox', '0 0 64 64'); n.setAttribute('aria-hidden', 'true'); n.innerHTML = DIBUJOS_DOC[k] || DIBUJOS_DOC.documento; return n; };
+function docsEmpresa(r, s, subir, alCambiar) {
+  const claves = Object.keys(r.documentos);
+  const requeridos = claves.filter((k) => !r.documentos[k].opcional);
+  const resumen = el('div', { class: 'docs-resumen' });
+  const grupos = {};
+  const pintarResumen = () => {
+    const listos = requeridos.filter((k) => s.docs[k]).length;
+    const pct = Math.round((listos / requeridos.length) * 100);
+    poner(resumen,
+      el('div', { class: 'docs-anillo', style: `--pct:${pct}`, role: 'img', 'aria-label': `${listos} de ${requeridos.length} listos` }, el('strong', { text: `${listos}/${requeridos.length}` })),
+      el('div', {}, el('strong', { text: listos === requeridos.length ? '¡Documentos completos!' : `Te faltan ${requeridos.length - listos} de ${requeridos.length}` }),
+        el('ul', { class: 'docs-consejos' }, el('li', { text: 'Buena luz y sin reflejos' }), el('li', { text: 'Fotos o PDF de hasta 700 KB' }), el('li', { text: 'Solo los ve la administración de Vaelo' }))));
+    for (const [g] of GRUPOS_DOCS) {
+      const ks = claves.filter((k) => (GUIA_DOCS[k]?.grupo || 'legal') === g);
+      if (grupos[g]) grupos[g].textContent = `${ks.filter((k) => s.docs[k]).length} de ${ks.length}`;
+    }
+  };
+  const tarjeta = (k) => {
+    const d = r.documentos[k], guia = GUIA_DOCS[k] || {};
+    const caja = el('div', { class: 'doc-pro' });
+    const estado = el('small', { class: 'doc-pro-msg', role: 'status' });
+    const entradaCam = el('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true });
+    const entradaArch = el('input', { type: 'file', accept: d.pdf ? 'image/*,application/pdf' : 'image/*', hidden: true });
+    const subirArchivo = async (f) => {
+      if (!f) return;
+      if (f.type === 'application/pdf' && !d.pdf) { estado.className = 'doc-pro-msg error'; estado.textContent = 'Este debe ser una foto.'; return; }
+      caja.classList.add('subiendo'); estado.className = 'doc-pro-msg'; estado.textContent = 'Subiendo…';
+      try {
+        await subir(k, await prepararArchivo(f, d.pdf));
+        s.docs[k] = true; s._v = Date.now(); pintar(); pintarResumen(); alCambiar && alCambiar();
+        estado.className = 'doc-pro-msg ok'; estado.textContent = 'Guardado';
+      } catch (e) { estado.className = 'doc-pro-msg error'; estado.textContent = e.message; }
+      caja.classList.remove('subiendo'); entradaCam.value = ''; entradaArch.value = '';
+    };
+    entradaCam.addEventListener('change', () => subirArchivo(entradaCam.files[0]));
+    entradaArch.addEventListener('change', () => subirArchivo(entradaArch.files[0]));
+    // Arrastrar y soltar en la computadora
+    caja.addEventListener('dragover', (ev) => { ev.preventDefault(); caja.classList.add('arrastrando'); });
+    caja.addEventListener('dragleave', () => caja.classList.remove('arrastrando'));
+    caja.addEventListener('drop', (ev) => { ev.preventDefault(); caja.classList.remove('arrastrando'); subirArchivo(ev.dataTransfer.files[0]); });
+    const pintar = () => {
+      const listo = !!s.docs[k];
+      caja.className = 'doc-pro' + (listo ? ' listo' : '') + (d.opcional ? ' opcional' : '');
+      const src = `/api/empresa/solicitud/documento/${k}?v=${s._v || 1}`;
+      const vista = listo
+        ? el('a', { class: 'doc-pro-vista con-archivo', href: src, target: '_blank', rel: 'noopener', title: 'Ver archivo' },
+            el('img', { src, alt: d.nombre, loading: 'lazy', onerror: (ev) => ev.target.replaceWith(el('span', { class: 'doc-pro-pdf' }, dibujoDoc('documento'), el('b', { text: 'PDF' }))) }),
+            el('span', { class: 'doc-pro-ver', text: 'Ver' }))
+        : el('label', { class: 'doc-pro-vista' }, dibujoDoc(guia.dibujo), el('small', { class: 'doc-pro-soltar', text: 'Toca para subir o arrastra aquí' }), entradaArch);
+      poner(caja,
+        el('div', { class: 'doc-pro-cab' }, el('strong', { text: d.nombre }),
+          el('span', { class: 'doc-pro-chip ' + (listo ? 'ok' : d.opcional ? 'opc' : 'falta'), text: listo ? '✓ Listo' : d.opcional ? 'Opcional' : 'Falta' })),
+        vista,
+        el('p', { class: 'doc-pro-ayuda', text: guia.ayuda || '' }),
+        el('div', { class: 'doc-pro-botones' },
+          el('label', { class: 'boton chico ' + (listo ? 'borde' : '') }, listo ? 'Cambiar' : (d.pdf ? 'Subir archivo' : 'Tomar foto'), d.pdf ? entradaArch : entradaCam),
+          !listo && !d.pdf ? el('label', { class: 'boton borde chico' }, 'Desde galería', entradaArch) : null),
+        estado);
+    };
+    pintar();
+    return caja;
+  };
+  const nodos = GRUPOS_DOCS.map(([g, titulo, ic]) => {
+    const ks = claves.filter((k) => (GUIA_DOCS[k]?.grupo || 'legal') === g);
+    if (!ks.length) return null;
+    grupos[g] = el('span', { class: 'docs-grupo-cuenta' });
+    return el('div', { class: 'docs-grupo' }, el('h3', {}, icono(ic), ' ', titulo, grupos[g]), el('div', { class: 'docs-pro' }, ks.map(tarjeta)));
+  });
+  pintarResumen();
+  return el('div', { class: 'docs-empresa' }, resumen, ...nodos,
+    el('p', { class: 'docs-privado' }, icono('check'), ' Tus documentos se guardan en privado y solo los usa Vaelo para verificar tu empresa y preparar el contrato.'));
 }
 function resumenSolicitud(s, r) {
   return el('section', { class: 'bloque' }, el('h2', { text: s.empresa_nombre || 'Tu solicitud' }),
