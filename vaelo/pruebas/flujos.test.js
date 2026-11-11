@@ -1358,11 +1358,14 @@ test('efectivo en la mano del piloto: alerta por niveles según la hora, recorda
 
   // Plazo de días (para montos pequeños): aviso un día antes y al vencer, una vez cada uno
   ajuste('efectivo_aviso_monto', 1000);
-  cerrado("datetime('now', '-50 hours')");
-  ef = await yo(); assert.ok(ef.horas <= 24 && ef.horas > 0); assert.equal(ef.nivel, null);
-  const medio = new Date(); medio.setUTCHours(18, 0, 0, 0);
+  // Un momento de día (entre 8 a. m. y 9 p. m. de Guatemala) cercano a la hora real, para que la prueba no dependa del reloj
+  const ahoraReal = new Date(), horaGT = (ahoraReal.getUTCHours() + 18) % 24;
+  const medio = horaGT >= 8 && horaGT < 21 ? ahoraReal : new Date(Math.floor((ahoraReal.getTime() - 18 * 3600_000) / 86400_000) * 86400_000 + 18 * 3600_000);
+  const hace = (h) => `'${new Date(medio.getTime() - h * 3600_000).toISOString().slice(0, 19).replace('T', ' ')}'`;
+  cerrado(hace(50));
+  ef = require('../server').efectivoEnMano(pilotoId, medio); assert.ok(ef.horas <= 24 && ef.horas > 0, 'horas: ' + ef.horas); assert.equal(ef.nivel, null);
   assert.equal(recordarEfectivo(medio), 1); assert.equal(recordarEfectivo(medio), 0);
-  cerrado("datetime('now', '-80 hours')");
+  cerrado(hace(80));
   db.prepare("UPDATE usuarios SET efectivo_aviso = (SELECT piloto_cerro_en FROM envios WHERE id = ?) || '|manana' WHERE id = ?").run(id, pilotoId);
   assert.equal((await yo()).vencido, true);
   assert.equal(recordarEfectivo(medio), 1); assert.equal(recordarEfectivo(medio), 0);
