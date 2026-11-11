@@ -11,7 +11,7 @@ ADMIN_EMAIL="administracionvaelo@vaelomensajeria.com"
 
 # Borrar datos de prueba (pide confirmación y guarda una copia antes)
 if [ "${1:-}" = "--borrar-pruebas" ]; then
-  echo "Esto borra TODOS los envíos, clientes y pilotos (no borra tu cuenta de administración ni las tarifas)."
+  echo "Esto borra TODOS los envíos, pedidos de tiendas, clientes, tiendas, empresas y pilotos (no borra administración, oficina, tarifas, zonas ni ajustes)."
   echo "Antes se guarda una copia de seguridad."
   read -r -p "Para continuar escribe BORRAR: " OK </dev/tty
   [ "$OK" = "BORRAR" ] || { echo "Cancelado."; exit 0; }
