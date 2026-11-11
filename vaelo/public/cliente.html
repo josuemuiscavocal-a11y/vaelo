@@ -331,7 +331,8 @@
     async function cargarEnvios() {
       const lista = $('lista');
       try {
-        envios = (await api('/api/envios')).envios;
+        const rEnv = await api('/api/envios');
+        envios = rEnv.envios; resumenPedidos = rEnv.pedidos || null;
         pintarRecientes();
         actualizarCompartir();
         $('conteo').textContent = envios.length ? `(${envios.length})` : '';
@@ -613,9 +614,10 @@
 
     // Resumen arriba: envíos en curso, entregados y cargos pendientes
     let totalCargos = 0;
+    let resumenPedidos = null;   // empresas: sus pedidos también cuentan
     function pintarResumenCliente() {
-      const curso = envios.filter(e => ['pendiente', 'recogido', 'en_camino', 'fallido', 'devolviendo', 'a_sede', 'en_sede'].includes(e.estado)).length;
-      const entregados = envios.filter(e => e.estado === 'entregado').length;
+      const curso = envios.filter(e => ['pendiente', 'recogido', 'en_camino', 'fallido', 'devolviendo', 'a_sede', 'en_sede'].includes(e.estado)).length + (resumenPedidos?.curso || 0);
+      const entregados = envios.filter(e => e.estado === 'entregado').length + (resumenPedidos?.entregados || 0);
       const dato = (n, t) => el('div', {}, el('strong', { text: String(n) }), el('span', { text: t }));
       $('cliente-resumen').replaceChildren(dato(curso, 'En curso'), dato(entregados, 'Entregados'), totalCargos > 0 ? dato(dinero(totalCargos), 'Cargos pendientes') : '');
     }
@@ -1015,7 +1017,11 @@
       new IntersectionObserver(([x]) => { formVisible = x.isIntersecting; ver(); }).observe($('form-envio'));
       $('barra-boton').addEventListener('click', () => $('form-envio').requestSubmit());
 
-      if (location.pathname === '/mi-cuenta') abrirTab(usuario.tipo_cuenta === 'empresa' && !new URLSearchParams(location.search).get('envio') ? 'empresa' : 'lista'); else cargarEnvios();
+      if (location.pathname === '/mi-cuenta') {
+        const tabInicial = usuario.tipo_cuenta === 'empresa' && !new URLSearchParams(location.search).get('envio') ? 'empresa' : 'lista';
+        abrirTab(tabInicial);
+        if (tabInicial !== 'lista') cargarEnvios();   // así el resumen de arriba (en curso, entregados) no sale en cero
+      } else cargarEnvios();
       // Desde un aviso del celular: abre ese envío
       const abrir = new URLSearchParams(location.search).get('envio');
       if (abrir) verDetalle(Number(abrir));

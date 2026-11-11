@@ -586,7 +586,7 @@ null))));
     }
     async function nuevoFlete() {
       const [t, m, cfg] = await Promise.all([api('/api/admin/tarifas').catch(() => null), api('/api/admin/mensajeros'), api('/api/admin/fletes/config').catch(() => ({ precio_ayudante: 50, max_ayudantes: 5 }))]);
-      const vehs = t ? t.vehiculos.filter(v => v.activo) : vehiculos;
+      const vehs = t ? t.vehiculos.filter(v => v.activo) : (cfg.vehiculos && cfg.vehiculos.length ? cfg.vehiculos : vehiculos);   // los empleados no ven tarifas
       const msg = el('div', { class: 'mensaje', role: 'alert' });
       const selVeh = el('select', { id: 'fl-veh' }, vehs.map(v => el('option', { value: v.id, text: v.nombre + (v.solo_oficina ? ' (flete)' : ''), selected: !!v.solo_oficina })));
       const selPil = el('select', { id: 'fl-pil' });
@@ -1079,7 +1079,7 @@ null))));
     async function cargarMensajeros() {
       const r = await api('/api/admin/mensajeros');
       mensajeros = r.mensajeros;
-      if (!vehiculos.length) vehiculos = (await api('/api/admin/tarifas')).vehiculos;
+      if (!vehiculos.length) vehiculos = rolPanel === 'admin' ? (await api('/api/admin/tarifas')).vehiculos : (await api('/api/admin/fletes/config')).vehiculos;
       poner($('m-vehiculo'), ...vehiculos.map(v => el('option', { value: v.id, text: v.nombre })));
       const cuerpo = $('tabla-mensajeros');
       const etiquetaEstado = (p) => el('span', { class: { aprobado: 'etiqueta-completa', en_revision: 'etiqueta-azul', suspendido: 'etiqueta-pendiente' }[p.estado_piloto] || 'etiqueta-gris', text: r.estados[p.estado_piloto] || p.estado_piloto });

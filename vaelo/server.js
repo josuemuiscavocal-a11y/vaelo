@@ -567,7 +567,8 @@ ruta('POST', '/api/acceso-familia', ({ req, body }) => {
   const ok = u && u.activo && ((email === ADMIN_EMAIL && u.rol === 'admin') || u.rol === 'operador') && verificarPassword(password, u.password_hash);
   if (!ok) { control.fallo(); falla(401, 'Datos incorrectos.'); }
   control.exito();
-  db.prepare('DELETE FROM sesiones WHERE usuario_id = ?').run(u.id);   // cierra cualquier otra sesión abierta
+  // Se permiten dos dispositivos a la vez (por ejemplo la computadora y el celular): se cierran las sesiones más viejas
+  db.prepare('DELETE FROM sesiones WHERE usuario_id = ? AND token NOT IN (SELECT token FROM sesiones WHERE usuario_id = ? ORDER BY expira DESC LIMIT 1)').run(u.id, u.id);
   return { _headers: { 'Set-Cookie': crearSesion(req, u.id, SESION_ADMIN_HORAS * 3600) }, ok: true };
 });
 
@@ -633,7 +634,10 @@ ruta('GET', '/api/envios', ({ req }) => {
     Object.assign(out, infoExtra(e));
     for (const k of CAMPOS_INTERNOS) delete out[k];
     return out;
-  }), datos_transferencia: getAjustes().datos_transferencia || '' };
+  }), datos_transferencia: getAjustes().datos_transferencia || '',
+  // Empresas: sus pedidos van en carpetas, pero cuentan en el resumen de arriba (en curso y entregados)
+  pedidos: db.prepare('SELECT tipo_cuenta FROM usuarios WHERE id = ?').get(u.id)?.tipo_cuenta === 'empresa' ? db.prepare(`SELECT SUM(estado IN ('pendiente','recogido','en_camino','fallido','devolviendo','a_sede','en_sede')) AS curso,
+    SUM(estado = 'entregado') AS entregados FROM envios WHERE usuario_id = ? AND pedido_id IS NOT NULL`).get(u.id) : null };
 });
 
 ruta('GET', '/api/envios/:id', ({ req, params }) => {
@@ -910,6 +914,15 @@ function deudaVencida(pilotoId) {
   const neto = redondear(r.monto - debe);
   if (neto <= 0) return null;
   return { monto: neto, desde: r.desde, dias };
+}
+// Por qué un piloto no puede trabajar (para que el panel diga exactamente qué falta)
+function porQueNoTrabaja(u, r = revisarPiloto(u)) {
+  if (u.estado_piloto !== 'aprobado') return 'todavía no está aprobado';
+  if (!u.activo) return 'su cuenta está bloqueada';
+  if (r.vencidos.length) return 'tiene vencido: ' + r.vencidos.join(', ');
+  if (!politicaAlDia(u)) return 'no ha aceptado la política de pilotos en su app';
+  if (deudaVencida(u.id)) return 'tiene efectivo sin liquidar fuera de plazo';
+  return '';
 }
 const puedeTrabajar = (u, r = revisarPiloto(u)) => u.rol === 'mensajero' && u.estado_piloto === 'aprobado' && !!u.activo && !r.vencidos.length && politicaAlDia(u) && !deudaVencida(u.id);
 const SQL_PILOTO = `SELECT u.*, v.nombre AS vehiculo,
@@ -3022,7 +3035,8 @@ function usuarioWhatsapp() {
 // complete los datos de quien entrega y quien recibe; después se comparten las ubicaciones en vivo como en un envío normal.
 const MAX_AYUDANTES = 5;
 const precioAyudante = () => Math.max(0, Number(getAjustes().precio_ayudante) || 0);
-ruta('GET', '/api/admin/fletes/config', ({ req }) => { requiereStaff(req); return { precio_ayudante: precioAyudante(), max_ayudantes: MAX_AYUDANTES }; });
+ruta('GET', '/api/admin/fletes/config', ({ req }) => { requiereStaff(req); return { precio_ayudante: precioAyudante(), max_ayudantes: MAX_AYUDANTES,
+  vehiculos: db.prepare('SELECT id, nombre, peso_max, solo_oficina FROM vehiculos WHERE activo = 1 ORDER BY id').all() }; });   // los empleados no ven tarifas, pero sí los vehículos
 ruta('POST', '/api/admin/fletes', ({ req, body }) => {
   const quien = requiereStaff(req);
   const precioFlete = numero(body.precio);
@@ -3522,7 +3536,7 @@ function leerDatosEntrega(body, parcial = false) {
     if (!c) falla(400, 'Marca en el mapa dónde se entrega.');
     d.lat = c.lat; d.lng = c.lng;
   }
-  if (body.direccion !== undefined || !parcial) { d.direccion = texto(body.direccion, 300); if (d.direccion.length < 5) falla(400, 'Escribe la dirección de entrega.'); }
+  if (body.direccion !== undefined || !parcial) { d.direccion = texto(body.direccion, 300); if (d.direccion.length < 5) falla(400, d.direccion ? 'Escribe la dirección más completa (por ejemplo: 5a calle 3-20, casa azul).' : 'Escribe la dirección de entrega.'); }
   if (body.zona !== undefined || !parcial) {
     const z = texto(body.zona, 60);
     if (z !== OTRA_ZONA && !zonasFijas().some((x) => x.nombre === z)) falla(400, 'Elige la zona o municipio.');
@@ -4562,7 +4576,8 @@ ruta('POST', '/api/admin/lotes-empresa/:id/confirmar', ({ req, params, body }) =
   const pilotos = rutas.map((r) => {
     if (r.piloto_id === '' || r.piloto_id == null) return null;
     const m = pilotoPorId(numero(r.piloto_id));
-    if (!m || !puedeTrabajar(m)) falla(400, 'Uno de los pilotos elegidos no puede trabajar ahora (documentos, política o efectivo pendiente).');
+    if (!m) falla(400, 'Uno de los pilotos elegidos ya no existe.');
+    if (!puedeTrabajar(m)) falla(400, `${m.nombre} no puede trabajar ahora: ${porQueNoTrabaja(m)}.`);
     if (m.vehiculo_id !== vehiculo.id) falla(400, `${m.nombre.split(' ')[0]} no tiene ${vehiculo.nombre.toLowerCase()}.`);
     return m;
   });
@@ -4981,7 +4996,7 @@ ruta('GET', '/api/admin/historial', ({ req, query }) => {
 });
 
 // ---------- Envíos atascados: avisos en el panel para que nadie se quede esperando ----------
-const LIMITES_ATASCO = { sin_piloto: 15, sin_recoger: 30, en_camino: 60, sin_ubicacion: 30 };   // minutos
+const LIMITES_ATASCO = { sin_piloto: 15, sin_recoger: 30, en_camino: 60, sin_ubicacion: 30, sin_cerrar: 180 };   // minutos
 function enviosAtascados() {
   const ya = "(e.programado_para IS NULL OR e.programado_para <= datetime('now'))";
   const mins = (col) => `CAST((julianday('now') - julianday(${col})) * 1440 AS INTEGER)`;
@@ -4993,9 +5008,10 @@ function enviosAtascados() {
     ...sel('sin_recoger', 'e.asignado_en', `e.estado = 'pendiente' AND e.mensajero_id IS NOT NULL AND e.asignacion = 'aceptado' AND e.asignado_en IS NOT NULL AND ${ya} AND ${mins('e.asignado_en')} >= ${LIMITES_ATASCO.sin_recoger}`),
     ...sel('en_camino', "(SELECT MIN(v.creado) FROM eventos v WHERE v.envio_id = e.id AND v.estado IN ('recogido','en_camino'))",
       `e.estado IN ('recogido','en_camino') AND ${mins("(SELECT MIN(v.creado) FROM eventos v WHERE v.envio_id = e.id AND v.estado IN ('recogido','en_camino'))")} >= ${LIMITES_ATASCO.en_camino}`),
+    ...sel('sin_cerrar', 'e.actualizado', `e.estado IN ('devolviendo','a_sede') AND ${mins('e.actualizado')} >= ${LIMITES_ATASCO.sin_cerrar}`),
     ...sel('sin_ubicacion', 'e.creado', `e.estado IN ('pendiente','recogido','en_camino') AND e.pedido_id IS NULL AND e.receptor_lat IS NULL AND e.destino_lat IS NULL AND ${mins('e.creado')} >= ${LIMITES_ATASCO.sin_ubicacion}`),
   ];
-  const textos = { sin_piloto: 'Sin piloto', sin_recoger: 'El piloto no ha recogido', en_camino: 'Mucho tiempo en camino', sin_ubicacion: 'Quien recibe no comparte su ubicación' };
+  const textos = { sin_piloto: 'Sin piloto', sin_recoger: 'El piloto no ha recogido', en_camino: 'Mucho tiempo en camino', sin_ubicacion: 'Quien recibe no comparte su ubicación', sin_cerrar: 'Devolución o paso a la sede sin terminar' };
   return lista.map((x) => ({ ...x, motivo_texto: textos[x.motivo] }));
 }
 
@@ -5099,7 +5115,8 @@ ruta('POST', '/api/admin/envios/:id/asignar', ({ req, params, body }) => {
     return { ok: true };
   }
   const m = pilotoPorId(numero(body.mensajero_id));
-  if (!m || !puedeTrabajar(m)) falla(400, 'Elige un piloto aprobado, con sus documentos vigentes, la política aceptada y sin efectivo pendiente de liquidar.');
+  if (!m) falla(400, 'Elige un piloto.');
+  if (!puedeTrabajar(m)) falla(400, `${m.nombre} no puede trabajar ahora: ${porQueNoTrabaja(m)}.`);
   if (!listoParaPiloto(e)) falla(400, motivoNoListo(e));
   db.prepare(`UPDATE envios SET mensajero_id = ?, asignacion = 'por_aceptar', asignado_en = datetime('now'), llego_origen = 0, llegando_destino = 0,
     actualizado = datetime('now') WHERE id = ?`).run(m.id, e.id);
