@@ -1674,3 +1674,18 @@ fieldset { min-width: 0; } .recientes { max-width: 100%; min-width: 0; }
 .efectivo-piloto.nivel-rojo strong { font-size: 1.15rem; }
 .efectivo-recibir { display: flex; justify-content: space-between; align-items: center; gap: .75rem; flex-wrap: wrap; background: #fff7d1; border: 1.5px solid #ecd98a; border-radius: 10px; padding: .7rem .9rem; margin-top: .6rem; }
 .efectivo-recibir small { display: block; color: var(--suave); max-width: 46ch; }
+
+/* Zona foco */
+.reparto-foco { grid-column: 1 / -1; margin: 0 0 .6rem; font-size: .9rem; background: #f6f8fd; border-radius: 8px; padding: .5rem .7rem; }
+.reparto-foco.pierde { background: #fde8e8; color: var(--alerta); font-weight: 700; }
+.reparto-foco:empty { display: none; }
+.vecinas-lista { display: flex; flex-wrap: wrap; gap: .4rem .9rem; }
+.opcion-chica { display: inline-flex; align-items: center; gap: .35rem; font-weight: 500; font-size: .93rem; }
+.opcion-chica[hidden] { display: none; }
+.foco-estado { border-radius: 10px; padding: .75rem .9rem; margin: .6rem 0; border: 1.5px solid #cfd8f3; background: #f6f8fd; }
+.foco-estado.aplica { background: #e7f6ee; border-color: #b6dfc8; }
+.foco-estado strong { display: block; }
+.foco-estado p { margin: .25rem 0 0; font-size: .93rem; }
+.chip-foco { display: inline-block; background: #e7f6ee; color: #146c43; border-radius: 999px; padding: .1rem .55rem; font-size: .78rem; font-weight: 700; margin-left: .35rem; }
+.ruta-foco { background: #fff7d1; border: 1.5px solid #ecd98a; border-radius: 10px; padding: .6rem .8rem; margin: .5rem 0; font-size: .93rem; }
+.ruta-foco strong { display: block; }

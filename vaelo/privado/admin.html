@@ -755,7 +755,8 @@ null))));
             r.lotes.length ? el('div', { class: 'lotes-lista' }, r.lotes.map(l => el('div', { class: 'lote-tarjeta' + (l.estado === 'nuevo' ? ' nuevo' : '') },
               el('div', {}, el('strong', { text: `${diaLargo(l.dia)} · ${l.pedidos.length} pedidos` }), ' ', el('span', { class: l.estado === 'nuevo' ? 'etiqueta-pendiente' : 'etiqueta-azul', text: l.estado === 'nuevo' ? 'Por repartir' : 'En ruta' }),
                 el('small', { text: `La empresa eligió: ${l.modo_texto}${l.modo === 'pickup' ? (l.paga === 'empresa' ? ' (paga la empresa)' : ' (paga cada cliente)') : ''} · ${l.recogida === 'sede' ? (l.recibido_en ? 'paquetes en la sede' + (l.dias_sede ? ` hace ${l.dias_sede} día(s)` : '') : 'la empresa los trae a la sede') : 'se recoge en su local'}` }),
-                l.recomendacion ? el('small', { text: 'Recomendación: ' + l.recomendacion.razon }) : null),
+                l.recomendacion ? el('small', { text: 'Recomendación: ' + l.recomendacion.razon }) : null,
+                l.foco ? el('small', { class: l.foco.aplica ? 'ok' : '', text: (l.foco.aplica ? `Aplica zona foco ${l.foco.zona}: ` : `No aplica zona foco ${l.foco.zona}: `) + l.foco.texto }) : null),
               l.estado === 'nuevo' ? el('button', { class: 'boton cinta', type: 'button', text: 'Dividir pedidos', onclick: () => abrirLote(l.id, emp.id) }) : null)))
               : el('p', { class: 'pista', text: 'No hay envíos por repartir.' }),
             r.confirmados_por_dia.length ? el('p', { class: 'pista', style: 'margin-top:1rem', text: 'Confirmados que la empresa todavía no manda: ' + r.confirmados_por_dia.map(d => `${d.n} para el ${diaLargo(d.dia)}`).join(' · ') }) : null);
@@ -795,8 +796,9 @@ null))));
 
     // ---------- Planes de tiendas: lo que recibe una minorista o una empresa ----------
     // Formulario de condiciones (sirve para un plan y para las excepciones de una tienda). Vacío = no se cambia.
-    function formCondiciones(valores, { excepcion = false, base = null, generales = null, tipo = 'empresa' } = {}) {
+    function formCondiciones(valores, { excepcion = false, base = null, generales = null, tipo = 'empresa', zonas = [] } = {}) {
       const v = valores || {};
+      const g = generales || {};
       const pista = (k, dineroQ = true) => {
         const b = base ? base[k] : generales ? ({ precio_zona: generales.precio_zona, precio_fuera: generales.precio_fuera, minimo: tipo === 'minorista' ? generales.minimo_minorista : generales.minimo_empresa, bodega_dia: generales.bodega_dia, bodega_dias_gratis: 0 })[k] : null;
         if (b == null) return excepcion ? 'Como el plan' : 'Sin definir';
@@ -812,6 +814,9 @@ null))));
         num('minimo', 'Mínimo de pedidos para pasar a recoger', { q: false }),
         num('cobro_tope', 'Máximo que el piloto cobra por paquete (Q)'), num('comision_valor', 'Valor de la comisión', { ayuda: 'Quetzales por paquete o porcentaje, según lo elegido' }),
         num('bodega_dias_gratis', 'Días de bodega sin costo', { q: false }), num('bodega_dia', 'Bodega por día después (Q)'),
+        num('foco_precio', 'Precio en zona foco (Q)'), num('foco_ganancia', 'Ganancia del piloto por entrega (Q)'),
+        num('foco_min_solo', 'Mínimo de pedidos si todos son de zona foco', { q: false }), num('foco_min_mixto', 'Mínimo en zona foco si hay pedidos de otras zonas', { q: false }),
+        num('foco_mayoria', 'Y deben ser más de este % de la carpeta', { q: false }),
       ];
       const porK = Object.fromEntries(campos.map((c) => [c.k, c]));
       const cobro = el('select', { id: 'cond-cobro' }, el('option', { value: '', text: excepcion ? 'Como el plan' : 'Sí, el piloto cobra el producto' }), excepcion ? el('option', { value: 'si', text: 'Sí, el piloto cobra el producto' }) : null, el('option', { value: 'no', text: 'No: la tienda cobra antes' }));
@@ -819,18 +824,58 @@ null))));
       const comision = el('select', { id: 'cond-comision' }, el('option', { value: '', text: excepcion ? 'Como el plan' : 'Sin comisión' }), excepcion ? el('option', { value: 'ninguna', text: 'Sin comisión' }) : null,
         el('option', { value: 'fija', text: 'Quetzales fijos por paquete cobrado' }), el('option', { value: 'porcentaje', text: 'Porcentaje de lo cobrado' }));
       comision.value = v.comision_tipo && (excepcion || v.comision_tipo !== 'ninguna') ? v.comision_tipo : '';
+      // Zona foco
+      const baseFoco = (k) => (base && base[k] != null ? base[k] : null);
+      const focoZona = el('select', { id: 'cond-foco_zona' }, el('option', { value: '', text: excepcion ? (baseFoco('foco_zona') ? `Como el plan (${baseFoco('foco_zona')})` : 'Como el plan (sin zona foco)') : 'Sin zona foco en el plan' }),
+        zonas.map((z) => el('option', { value: z, text: z })));
+      focoZona.value = v.foco_zona || '';
+      const focoModo = el('select', { id: 'cond-foco_modo' }, el('option', { value: '', text: excepcion ? 'Como el plan' : 'Pedidos solo zona foco' }),
+        excepcion ? el('option', { value: 'solo', text: 'Pedidos solo zona foco' }) : null, el('option', { value: 'vecinas', text: 'Zona foco con zonas vecinas' }));
+      focoModo.value = v.foco_modo && (excepcion || v.foco_modo !== 'solo') ? v.foco_modo : '';
+      const marcadas = new Set(v.foco_vecinas || []);
+      const vecinas = el('div', { class: 'vecinas-lista' }, zonas.map((z) => el('label', { class: 'opcion-chica' }, el('input', { type: 'checkbox', value: z, checked: marcadas.has(z) }), z)));
+      const cajaVecinas = el('div', { class: 'campo' }, el('label', { text: 'Zonas vecinas que también llevan el descuento' }), vecinas);
+      const reparto = el('p', { class: 'reparto-foco' });
+      const verFoco = () => {
+        const modo = focoModo.value || (excepcion ? baseFoco('foco_modo') : '') || 'solo';
+        cajaVecinas.hidden = modo !== 'vecinas';
+        const zonaSel = focoZona.value || (excepcion ? baseFoco('foco_zona') : '');
+        for (const c of vecinas.querySelectorAll('input')) c.closest('label').hidden = c.value === zonaSel;
+        const precio = Number(porK.foco_precio.i.value || baseFoco('foco_precio')), gana = Number(porK.foco_ganancia.i.value || baseFoco('foco_ganancia'));
+        if (precio > 0 || gana > 0) {
+          const vaelo = Math.round((precio - gana) * 100) / 100;
+          reparto.textContent = `Por cada entrega de zona foco: el cliente paga ${dinero(precio || 0)}, el piloto gana ${dinero(gana || 0)} y a Vaelo le quedan ${dinero(vaelo)}.`;
+          reparto.className = 'reparto-foco' + (vaelo < 0 ? ' pierde' : '');
+        } else reparto.textContent = 'Escribe el precio y la ganancia del piloto para ver el reparto.';
+      };
+      [focoZona, focoModo].forEach((x) => x.addEventListener('change', verFoco));
+      [porK.foco_precio.i, porK.foco_ganancia.i].forEach((x) => x.addEventListener('input', verFoco));
+      // Precio del plan: lo que le queda a Vaelo si el piloto gana lo de un envío normal
+      const quedaVaelo = el('p', { class: 'reparto-foco' });
+      const verQueda = () => {
+        const z = Number(porK.precio_zona.i.value || (base ? base.precio_zona : g.precio_zona)), f = Number(porK.precio_fuera.i.value || (base ? base.precio_fuera : g.precio_fuera));
+        if (!g.piloto_zona) { quedaVaelo.textContent = ''; return; }
+        const qz = Math.round((z - g.piloto_zona) * 100) / 100, qf = Math.round((f - g.piloto_fuera) * 100) / 100;
+        quedaVaelo.textContent = `El piloto gana siempre lo de un envío normal (${dinero(g.piloto_zona)} en zona, ${dinero(g.piloto_fuera)} fuera). A Vaelo le quedan ${dinero(qz)} en zona y ${dinero(qf)} fuera por envío.`;
+        quedaVaelo.className = 'reparto-foco' + (qz < 0 || qf < 0 ? ' pierde' : '');
+      };
+      [porK.precio_zona.i, porK.precio_fuera.i].forEach((x) => x.addEventListener('input', verQueda));
       const ascenso = excepcion ? null : el('input', { type: 'number', min: 1, step: '1', inputmode: 'numeric', id: 'cond-ascenso', value: v.ascenso_desde ?? '', placeholder: 'Sin aviso' });
       const ver = () => { porK.comision_valor.nodo.hidden = !['fija', 'porcentaje'].includes(comision.value); };
       comision.addEventListener('change', ver); ver();
       const grupo = (titulo, nota, ...hijos) => el('fieldset', { class: 'grupo-cond' }, el('legend', { text: titulo }), nota ? el('p', { class: 'pista', text: nota }) : null, el('div', { class: 'fila' }, hijos));
       const nodo = el('div', { class: 'form-cond' },
-        grupo('Precio del envío', 'Lo paga quien recibe. Los pedidos ya confirmados conservan su precio.', porK.precio_zona.nodo, porK.precio_fuera.nodo),
+        grupo('Precio del envío', 'Lo paga quien recibe. Los pedidos ya confirmados conservan su precio.', porK.precio_zona.nodo, porK.precio_fuera.nodo, quedaVaelo),
         grupo('Precio por volumen', 'Cuando la tienda llega a esas entregas en el mes, sus envíos siguientes bajan de precio.', porK.volumen_desde.nodo, porK.volumen_precio_zona.nodo, porK.volumen_precio_fuera.nodo),
         grupo('Recogida', null, porK.minimo.nodo),
         grupo('Cobro del producto', 'El piloto cobra el producto al entregar y Vaelo se lo entrega a la tienda.',
           el('div', { class: 'campo' }, el('label', { for: 'cond-cobro', text: '¿El piloto cobra el producto?' }), cobro), porK.cobro_tope.nodo,
           el('div', { class: 'campo' }, el('label', { for: 'cond-comision', text: 'Comisión de Vaelo por cobrar' }), comision), porK.comision_valor.nodo),
         grupo('Si no se pudo entregar', 'El paquete se guarda en la sede hasta que la tienda decida.', porK.bodega_dias_gratis.nodo, porK.bodega_dia.nodo),
+        grupo('Zona foco', 'Para tiendas que mandan casi todo a una misma zona. Cada carpeta se revisa sola al enviarla: si califica, sus envíos de zona foco bajan de precio y el piloto gana lo de aquí. La zona de cada pedido sale del punto marcado en el mapa.',
+          el('div', { class: 'campo' }, el('label', { for: 'cond-foco_zona', text: 'Zona foco' }), focoZona),
+          el('div', { class: 'campo' }, el('label', { for: 'cond-foco_modo', text: 'A qué pedidos aplica el descuento' }), focoModo), cajaVecinas,
+          porK.foco_precio.nodo, porK.foco_ganancia.nodo, reparto, porK.foco_min_solo.nodo, porK.foco_min_mixto.nodo, porK.foco_mayoria.nodo),
         ascenso ? grupo('Aviso de ascenso', 'El panel te avisa cuando una tienda de este plan llega a estas entregas en el mes, para que decidas si la subes de plan.',
           el('div', { class: 'campo' }, el('label', { for: 'cond-ascenso', text: 'Avisar desde cuántas entregas al mes' }), ascenso)) : null);
       const leer = () => {
@@ -839,9 +884,16 @@ null))));
         if (cobro.value) o.cobro_permitido = cobro.value;
         if (comision.value) o.comision_tipo = comision.value;
         if (ascenso && ascenso.value !== '') o.ascenso_desde = ascenso.value;
+        if (focoZona.value) o.foco_zona = focoZona.value;
+        if (focoModo.value) o.foco_modo = focoModo.value;
+        const vs = [...vecinas.querySelectorAll('input:checked')].map((c) => c.value);
+        if (!cajaVecinas.hidden && vs.length) o.foco_vecinas = vs;
         return o;
       };
-      return { nodo, leer };
+      // Antes de guardar: avisar si con estos precios Vaelo pierde dinero por envío
+      const perdida = () => [quedaVaelo, reparto].some((x) => x.classList.contains('pierde'));
+      verFoco(); verQueda();
+      return { nodo, leer, perdida };
     }
     const lineasPlan = (lineas) => el('dl', { class: 'plan-lineas' }, lineas.flatMap((l) => [el('dt', { text: l.titulo }), el('dd', { text: l.texto })]));
     // Vista previa: lo que leería la tienda con lo escrito en el formulario (no guarda nada)
@@ -857,10 +909,12 @@ null))));
       } });
       return { boton, caja };
     }
+    let zonasPlan = [];
     async function cargarPlanes() {
       const zona = $('zona-planes');
       let r;
       try { r = await api('/api/admin/planes'); } catch (e) { mostrarMensaje($('msg-planes'), e.message); return; }
+      zonasPlan = r.zonas || [];
       const tarjeta = (p) => el('article', { class: 'plan-tarjeta' },
         el('div', { class: 'plan-cabeza' }, el('div', {}, el('h3', { text: p.nombre }), p.descripcion ? sub(p.descripcion) : null),
           el('span', { class: 'etiqueta-azul', text: `${p.tiendas} ${p.tiendas === 1 ? 'tienda' : 'tiendas'}` })),
@@ -886,12 +940,13 @@ null))));
       const tipo = p && p.clave === 'minorista' ? 'minorista' : 'empresa';
       const nombre = el('input', { id: 'plan-nombre', maxlength: 40, value: p ? p.nombre : '', placeholder: 'Ej. Tienda frecuente' });
       const desc = el('input', { id: 'plan-desc', maxlength: 160, value: p ? p.descripcion : '', placeholder: 'Para quién es este plan' });
-      const f = formCondiciones(p ? p.condiciones : {}, { generales, tipo });
+      const f = formCondiciones(p ? p.condiciones : {}, { generales, tipo, zonas: zonasPlan });
       const msg = el('div', { class: 'mensaje', role: 'alert' });
       const vista = botonVistaTienda(f.leer, tipo, null);
       const guardar = el('button', { class: 'boton', type: 'button', text: p ? 'Guardar plan' : 'Crear plan', onclick: async () => {
         guardar.disabled = true;
         try {
+          if (f.perdida() && !confirm('Con estos precios Vaelo pierde dinero en cada envío (el piloto gana más de lo que paga el cliente). ¿Guardar de todos modos?')) { guardar.disabled = false; return; }
           await api(p ? '/api/admin/planes/' + p.id : '/api/admin/planes', { method: p ? 'PUT' : 'POST', body: { nombre: nombre.value, descripcion: desc.value, condiciones: f.leer() } });
           $('dlg').close(); window.avisoHecho?.(p ? 'Plan guardado' : 'Plan creado', nombre.value); cargarPlanes();
         } catch (e) { mostrarMensaje(msg, e.message); guardar.disabled = false; }
@@ -910,7 +965,7 @@ null))));
       try { r = await api(`/api/admin/empresas/${id}/condiciones`); } catch (e) { alert(e.message); return; }
       const plan = el('select', { id: 'ct-plan' }, r.planes.map((p) => el('option', { value: p.id, text: p.nombre + (p.clave === (r.tipo_cuenta === 'minorista' ? 'minorista' : 'empresa') ? ' (el de su tipo de cuenta)' : '') })));
       plan.value = String(r.plan ? r.plan.id : r.planes[0].id);
-      const f = formCondiciones(r.propias, { excepcion: true, base: r.del_plan });
+      const f = formCondiciones(r.propias, { excepcion: true, base: r.del_plan, generales: r.generales, zonas: r.zonas });
       const vence = el('input', { type: 'date', id: 'ct-vence', value: r.vence || '', min: new Date(Date.now() - 6 * 3600000).toISOString().slice(0, 10) });
       const nota = el('input', { id: 'ct-nota', maxlength: 200, value: r.nota || '', placeholder: 'Ej. Precio de bienvenida acordado por WhatsApp' });
       const msg = el('div', { class: 'mensaje', role: 'alert' });
@@ -918,6 +973,7 @@ null))));
       const guardar = el('button', { class: 'boton', type: 'button', text: 'Guardar condiciones', onclick: async () => {
         guardar.disabled = true;
         try {
+          if (f.perdida() && !confirm('Con estos precios Vaelo pierde dinero en cada envío (el piloto gana más de lo que paga el cliente). ¿Guardar de todos modos?')) { guardar.disabled = false; return; }
           await api(`/api/admin/empresas/${id}/condiciones`, { method: 'PUT', body: { plan_id: Number(plan.value), propias: f.leer(), vence: vence.value, nota: nota.value } });
           window.avisoHecho?.('Condiciones guardadas', r.tienda); abrirCondiciones(id, volver);
         } catch (e) { mostrarMensaje(msg, e.message); guardar.disabled = false; }
@@ -1061,6 +1117,9 @@ null))));
         el('p', { class: 'pista', text: `${l.pedidos.length} pedidos de ${l.empresa}. Recogida: ${l.recogida === 'sede' ? 'sede de Vaelo' : l.origen_direccion || 'local de la empresa'}. La empresa eligió ${l.modo_texto.toLowerCase()}.` }),
         el('p', { class: 'aviso-codigos' }, el('strong', { text: 'Paquetes marcados con: ' }), { etiqueta: 'guía impresa (el piloto revisa la guía o escanea)', codigo: `código escrito a mano (${l.pedidos.map((p) => p.codigo_corto).filter(Boolean).slice(0, 2).join(', ') || 'TB-01, TB-02'}…) con el nombre del cliente abajo` }[l.marcado === 'etiqueta' ? 'etiqueta' : 'codigo']),
         l.recomendacion ? el('div', { class: 'mensaje aviso' }, el('strong', { text: 'Recomendación: ' }), l.recomendacion.razon) : null,
+        l.foco ? el('div', { class: 'foco-estado' + (l.foco.aplica ? ' aplica' : '') },
+          el('strong', { text: l.foco.aplica ? `Aplica descuento de zona foco (${l.foco.zona})` : `No aplica descuento de zona foco (${l.foco.zona})` }),
+          el('p', { text: l.foco.texto + (l.foco.aplica ? ` ${l.foco.con_descuento} envío(s) con precio de zona foco${l.foco.precio != null ? ` (${dinero(l.foco.precio)}; el piloto gana ${dinero(l.foco.ganancia)} por cada uno)` : ''}. Los demás pagan el precio normal.` : ' Todos pagan el precio normal.') })) : null,
         l.recogida === 'sede' && !l.recibido_en ? el('div', { class: 'cargos-aviso' }, el('span', { text: 'La empresa trae los paquetes a la sede. Cuando lleguen, márcalo para poder asignar.' }),
           el('button', { class: 'boton chico', type: 'button', text: 'Paquetes recibidos', onclick: async () => { try { await api(`/api/admin/lotes-empresa/${loteId}/recibido`, { body: {} }); abrirLote(loteId, empresaId); } catch (e) { alert(e.message); } } })) : null,
         !l.se_puede_asignar ? el('div', { class: 'mensaje aviso', text: `Puedes preparar las rutas; se asignan el ${diaLargo(l.dia)}.` }) : null,

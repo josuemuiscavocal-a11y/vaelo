@@ -659,4 +659,10 @@ db.prepare("INSERT OR IGNORE INTO planes (clave, nombre, descripcion) VALUES ('e
 agregarColumnas('usuarios', [['efectivo_aviso', 'TEXT'], ['efectivo_nivel', 'TEXT'], ['efectivo_nivel_en', 'TEXT']]);
 db.prepare("INSERT OR IGNORE INTO ajustes (clave, valor) VALUES ('hora_cierre_efectivo', '22')").run();
 db.prepare("INSERT OR IGNORE INTO ajustes (clave, valor) VALUES ('efectivo_aviso_monto', '1000')").run();
+// Zona foco: la decisión de cada carpeta enviada (lotes_empresa.foco), la ganancia acordada del piloto y la marca en el envío
+agregarColumnas('lotes_empresa', [['foco', 'TEXT']]);
+agregarColumnas('envios', [['ganancia_acordada', 'REAL'], ['tarifa_foco', 'INTEGER NOT NULL DEFAULT 0']]);
+// Cuenta minorista por solicitud: pendiente | aprobada | rechazada (vacío = tiendas de antes, ya aprobadas)
+agregarColumnas('usuarios', [['tienda_estado', 'TEXT'], ['tienda_red', 'TEXT'], ['tienda_zona', 'TEXT'], ['tienda_semana', 'INTEGER'], ['tienda_solicitud_en', 'TEXT'], ['tienda_nota', 'TEXT'],
+  ['condiciones_vistas', 'TEXT']]);
 module.exports = { db, DB_PATH, DATA_DIR };

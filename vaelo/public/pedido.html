@@ -88,7 +88,7 @@
           el('dt', { text: 'Lugar' }), el('dd', { text: [d.direccion, d.zona].filter(Boolean).join(', ') + (d.referencias ? ` (${d.referencias})` : '') }),
           el('dt', { text: 'Recibe' }), el('dd', { text: `${d.recibe_nombre} · ${d.recibe_telefono}` }),
           d.cobro > 0 ? [el('dt', { text: 'Tu producto' }), el('dd', { text: `${dinero(d.cobro)} en efectivo al recibir` })] : null,
-          el('dt', { text: 'Envío' }), el('dd', { text: d.precio ? `${dinero(d.precio.precio)} en efectivo al recibir` : '—' })));
+          el('dt', { text: 'Envío' }), el('dd', { text: d.precio ? `${dinero(d.precio.precio)} en efectivo al recibir${d.precio.foco ? ' (con descuento de zona)' : ''}` : '—' })));
     }
 
     async function noPuedo() {

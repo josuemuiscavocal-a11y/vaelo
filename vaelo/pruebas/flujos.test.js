@@ -967,6 +967,12 @@ test('tienda minorista: cuenta normal que se activa sola, manda carpetas con men
   assert.equal((await lupe('POST', '/api/cuenta/minorista', { tienda: '' })).status, 400, 'pide el nombre de la tienda');
   const act = await lupe('POST', '/api/cuenta/minorista', { tienda: 'Moda Lupe' });
   assert.equal(act.status, 200, JSON.stringify(act.j)); assert.equal(act.j.tipo_cuenta, 'minorista'); assert.equal(act.j.minimo, 3);
+  // La cuenta de tienda queda en revisión hasta que la oficina la apruebe
+  assert.equal(act.j.pendiente, true);
+  assert.equal(db.prepare('SELECT tienda_estado FROM usuarios WHERE id = ?').get(lupeId).tienda_estado, 'pendiente');
+  assert.ok((await admin('GET', '/api/admin/tiendas/solicitudes')).j.solicitudes.some((x) => x.id === lupeId));
+  assert.equal((await admin('POST', `/api/admin/tiendas/${lupeId}/aprobar`, {})).status, 200);
+  assert.equal((await admin('POST', `/api/admin/tiendas/${lupeId}/aprobar`, {})).status, 400, 'ya aprobada');
   const sol = (await lupe('GET', '/api/empresa/solicitud')).j;
   assert.equal(sol.es_minorista, true); assert.equal(sol.es_empresa, false);
   assert.equal((await lupe('POST', '/api/empresa/lote-sede', { filas: [] })).status, 403, 'la bodega en la sede es solo para empresas con contrato');
@@ -1167,6 +1173,7 @@ test('planes de tiendas: precio, mínimo, cobro con comisión, volumen, excepcio
   const rosa = cliente();
   assert.equal((await rosa('POST', '/api/registro', { nombre: 'Rosa Paz', email: 'rosa@prueba.com', telefono: '55557788', password: 'clave-de-prueba-123', acepto_terminos: true, tienda: 'Rosa Shop' }, { 'x-real-ip': '10.7.7.7' })).status, 201);
   const rosaId = db.prepare("SELECT id FROM usuarios WHERE email = 'rosa@prueba.com'").get().id;
+  assert.equal((await admin('POST', `/api/admin/tiendas/${rosaId}/aprobar`, {})).status, 200);
   assert.equal(db.prepare('SELECT tipo_cuenta FROM usuarios WHERE id = ?').get(rosaId).tipo_cuenta, 'minorista');
   const carpeta = (await rosa('POST', '/api/empresa/carpetas', { dia: hoy })).j.carpeta.id;
   let n = 0;
@@ -1372,3 +1379,125 @@ test('efectivo en la mano del piloto: alerta por niveles según la hora, recorda
   assert.equal((await piloto('POST', '/api/piloto/en-linea', { en_linea: true, lat: ZONA1.lat, lng: ZONA1.lng })).status, 403);
   db.prepare('UPDATE envios SET liquidado_id = 999 WHERE id = ?').run(id);
 });
+
+// Crea una tienda minorista lista para enviar (registro + aprobación de la oficina si hace falta)
+async function tiendaLista(email, tienda) {
+  const t = cliente();
+  const r = await t('POST', '/api/registro', { nombre: 'Dueña ' + tienda, email, telefono: '5' + String(Math.floor(Math.random() * 1e7)).padStart(7, '0'), password: 'clave-de-prueba-123', acepto_terminos: true, tienda,
+    tienda_red: 'facebook.com/' + tienda.replace(/\W/g, ''), tienda_zona: 'Zona 24', tienda_semana: 20 }, { 'x-real-ip': '10.9.' + Math.floor(Math.random() * 250) + '.' + Math.floor(Math.random() * 250) });
+  assert.equal(r.status, 201, JSON.stringify(r.j));
+  const id = db.prepare('SELECT id FROM usuarios WHERE email = ?').get(email).id;
+  if (db.prepare('SELECT tienda_estado FROM usuarios WHERE id = ?').get(id)?.tienda_estado === 'pendiente') {
+    const ap = await admin('POST', `/api/admin/tiendas/${id}/aprobar`, { plan_id: db.prepare("SELECT id FROM planes WHERE clave = 'minorista'").get().id });
+    assert.equal(ap.status, 200, JSON.stringify(ap.j));
+  }
+  return { t, id };
+}
+
+test('zona foco: cada carpeta se revisa sola, baja el precio solo a lo que califica y el piloto gana lo acordado', async () => {
+  const reales = JSON.parse(fs.readFileSync(path.join(__dirname, 'datos', 'zonas-reales.json'), 'utf8'));
+  const antes = db.prepare('SELECT * FROM zonas_fijas').all();
+  db.exec('PRAGMA foreign_keys = OFF; DELETE FROM zonas_fijas');
+  for (const z of reales) db.prepare('INSERT INTO zonas_fijas (nombre, activa, poligono) VALUES (?, ?, ?)').run(z.nombre, z.activa, z.poligono);
+  try {
+    const hoy = new Date(Date.now() - 6 * 3600_000).toISOString().slice(0, 10);
+    const L = { 'Zona 24': [14.6183, -90.4368], 'Zona 17': [14.6408, -90.4752], 'Zona 1': [14.6360, -90.5130] };
+    const { t: sofi, id: sofiId } = await tiendaLista('sofi.lives@prueba.com', 'Sofi Lives');
+    const minorista = db.prepare("SELECT id FROM planes WHERE clave = 'minorista'").get().id;
+    const cond = (propias) => admin('PUT', `/api/admin/empresas/${sofiId}/condiciones`, { plan_id: minorista, propias });
+    // Validaciones
+    assert.equal((await cond({ foco_zona: 'Zona 99', foco_precio: 20, foco_ganancia: 10 })).status, 400, 'zona que no existe');
+    assert.equal((await cond({ foco_zona: 'Zona 24', foco_precio: 20, foco_ganancia: 25 })).status, 400, 'el piloto no gana más que el precio');
+    const ok = await cond({ foco_zona: 'Zona 24', foco_precio: 20, foco_ganancia: 10 });
+    assert.equal(ok.status, 200, JSON.stringify(ok.j));
+    assert.match(ok.j.lineas.map((l) => l.texto).join(' '), /tus envíos a Zona 24 cuestan Q20\.00.*desde 3.*al menos 5 en Zona 24/);
+    let n = 0;
+    const carpeta = async (zonas) => {
+      const c = (await sofi('POST', '/api/empresa/carpetas', { dia: hoy, nombre: 'C' + n })).j.carpeta.id;
+      const ids = [];
+      for (const z of zonas) { n++;
+        const r = await sofi('POST', `/api/empresa/carpetas/${c}/pedidos`, { descripcion: 'Blusa ' + n, tamano: 'pequeno', cliente_nombre: 'Clienta ' + n, cliente_telefono: '5566' + String(n).padStart(4, '0'), foto: FOTO, llenar: true,
+          dia: hoy, horario: 'cualquiera', direccion: 'Casa ' + n, zona: z, lat: L[z][0] + n * 1e-5, lng: L[z][1], recibe_nombre: 'Clienta ' + n, recibe_telefono: '5566' + String(n).padStart(4, '0'), metodo_pago: 'efectivo' });
+        assert.equal(r.status, 201, JSON.stringify(r.j)); ids.push(r.j.pedido.id); }
+      return { c, ids };
+    };
+    const vista = async (c) => (await sofi('GET', '/api/empresa/carpetas')).j.abiertas.find((x) => x.id === c).foco;
+    const enviar = async (c) => {
+      const r = await sofi('POST', `/api/empresa/carpetas/${c}/enviar`, { modo: 'una_moto', recogida: 'sede' }); assert.equal(r.status, 201, JSON.stringify(r.j));
+      assert.equal((await admin('POST', `/api/admin/lotes-empresa/${r.j.lote}/recibido`, {})).status, 200);
+      const calc = await admin('POST', `/api/admin/lotes-empresa/${r.j.lote}/calcular`, { modo: 'una_moto', motos: 1 });
+      const lote = (await admin('GET', `/api/admin/lotes-empresa/${r.j.lote}`)).j.lote;
+      assert.equal((await admin('POST', `/api/admin/lotes-empresa/${r.j.lote}/confirmar`, { modo: 'una_moto', rutas: calc.j.rutas.map((x) => ({ pedidos: x.pedidos, piloto_id: null })) })).status, 200);
+      return { r: r.j, lote };
+    };
+    const envio = (pid) => db.prepare('SELECT precio, ganancia_acordada, tarifa_foco FROM envios WHERE pedido_id = ?').get(pid);
+
+    // A: 3 pedidos, todos de Zona 24 → aplica
+    const A = await carpeta(['Zona 24', 'Zona 24', 'Zona 24']);
+    let f = await vista(A.c);
+    assert.equal(f.aplica, true); assert.equal(f.con_descuento, 3); assert.equal(f.precio, 20); assert.equal(f.ganancia, undefined, 'la tienda no ve lo que gana el piloto');
+    const tokA = db.prepare('SELECT token FROM pedidos_empresa WHERE id = ?').get(A.ids[0]).token;
+    const antesEnviar = (await cliente()('GET', '/api/pedido/' + tokA)).j;
+    assert.equal(antesEnviar.precio.precio, 35, 'antes de enviar, la compradora ve el precio normal: ' + JSON.stringify(antesEnviar.precio));
+    const sa = await enviar(A.c);
+    assert.equal(sa.r.foco.aplica, true); assert.equal(sa.lote.foco.aplica, true); assert.equal(sa.lote.foco.ganancia, 10);
+    assert.equal(sa.lote.pedidos.filter((p) => p.zona_foco).length, 3);
+    for (const id of A.ids) assert.deepEqual(envio(id), { precio: 20, ganancia_acordada: 10, tarifa_foco: 1 });
+    const pa = (await cliente()('GET', '/api/pedido/' + tokA)).j;
+    assert.equal(pa.precio.precio, 20); assert.equal(pa.precio.foco, true); assert.equal(pa.envio.precio, 20);
+    // Al entregar, el piloto gana lo acordado
+    const eA = db.prepare('SELECT id FROM envios WHERE pedido_id = ?').get(A.ids[0]).id;
+    db.prepare("UPDATE envios SET mensajero_id = ?, asignacion = 'aceptado' WHERE id = ?").run(pilotoId, eA);
+    db.prepare("UPDATE envios SET estado = 'en_camino' WHERE id = ?").run(eA);
+    const dA = db.prepare('SELECT codigo_entrega, destino_lat, destino_lng FROM envios WHERE id = ?').get(eA);
+    const ent = await piloto('POST', `/api/piloto/envios/${eA}/estado`, { estado: 'entregado', codigo: dA.codigo_entrega, foto: FOTO, recibio: 'Clienta', lat: dA.destino_lat, lng: dA.destino_lng });
+    assert.equal(ent.status, 200, JSON.stringify(ent.j));
+    assert.equal(db.prepare('SELECT ganancia_piloto FROM envios WHERE id = ?').get(eA).ganancia_piloto, 10);
+    const pil = (await piloto('GET', '/api/piloto/envios')).j;
+    const lista = pil.envios || pil.activos || pil;
+    if (Array.isArray(lista)) { const x = lista.find((e) => e.id === db.prepare('SELECT id FROM envios WHERE pedido_id = ?').get(A.ids[1]).id); if (x) { assert.equal(x.tarifa_foco, 1); assert.equal(x.ganancia_acordada, undefined); } }
+
+    // B: 4 en Zona 24 + 2 en Zona 17 → no aplica (hay otras zonas y menos de 5 en foco)
+    const B = await carpeta(['Zona 24', 'Zona 24', 'Zona 24', 'Zona 24', 'Zona 17', 'Zona 17']);
+    f = await vista(B.c);
+    assert.equal(f.aplica, false); assert.match(f.texto, /al menos 5 en Zona 24/); assert.match(f.falta, /falta 1 pedido en Zona 24/);
+    const sb = await enviar(B.c);
+    assert.equal(sb.lote.foco.aplica, false);
+    for (const id of B.ids) { const e = envio(id); assert.equal(e.precio, 35); assert.equal(e.tarifa_foco, 0); assert.equal(e.ganancia_acordada, 30, 'el piloto gana lo normal'); }
+
+    // C: 10 en Zona 24 + 2 en Zona 17, solo zona foco → aplica a los 10; los de Zona 17 pagan normal
+    const C = await carpeta([...Array(10).fill('Zona 24'), 'Zona 17', 'Zona 17']);
+    f = await vista(C.c); assert.equal(f.aplica, true); assert.equal(f.con_descuento, 10);
+    await enviar(C.c);
+    assert.equal(C.ids.filter((id) => envio(id).tarifa_foco).length, 10);
+    for (const id of C.ids.slice(10)) assert.deepEqual(envio(id), { precio: 35, ganancia_acordada: 30, tarifa_foco: 0 });
+
+    // D: lo mismo con «zona foco con zonas vecinas» (Zona 17) → los 12 con descuento
+    assert.equal((await cond({ foco_zona: 'Zona 24', foco_precio: 20, foco_ganancia: 10, foco_modo: 'vecinas', foco_vecinas: ['Zona 17', 'Zona 24'] })).status, 200);
+    assert.deepEqual(jsonPropias(sofiId).foco_vecinas, ['Zona 17'], 'la zona foco no se repite como vecina');
+    const D = await carpeta([...Array(10).fill('Zona 24'), 'Zona 17', 'Zona 1']);
+    f = await vista(D.c); assert.equal(f.aplica, true); assert.equal(f.con_descuento, 11); assert.equal(f.en_vecinas, 1); assert.equal(f.otras, 1);
+    await enviar(D.c);
+    assert.equal(envio(D.ids[10]).precio, 20, 'Zona 17 vecina con descuento'); assert.deepEqual(envio(D.ids[11]), { precio: 35, ganancia_acordada: 30, tarifa_foco: 0 }, 'Zona 1 (no es vecina) paga normal');
+
+    // E: 5 en Zona 24 + 6 en Zona 17 (solo foco) → la mayoría está fuera, no aplica
+    assert.equal((await cond({ foco_zona: 'Zona 24', foco_precio: 20, foco_ganancia: 10 })).status, 200);
+    const E = await carpeta([...Array(5).fill('Zona 24'), ...Array(6).fill('Zona 17')]);
+    f = await vista(E.c); assert.equal(f.aplica, false); assert.match(f.texto, /más de la mitad/);
+    // Los mínimos y el porcentaje se editan: con 40% sí aplica
+    assert.equal((await cond({ foco_zona: 'Zona 24', foco_precio: 20, foco_ganancia: 10, foco_mayoria: 40 })).status, 200);
+    f = await vista(E.c); assert.equal(f.aplica, true); assert.equal(f.con_descuento, 5);
+
+    // Precio de plan más bajo: la compradora paga menos, pero el piloto gana lo normal
+    assert.equal((await cond({ precio_zona: 30 })).status, 200);
+    const G = await carpeta(['Zona 17', 'Zona 17', 'Zona 17']);
+    await enviar(G.c);
+    for (const id of G.ids) assert.deepEqual(envio(id), { precio: 30, ganancia_acordada: 30, tarifa_foco: 0 });
+    assert.equal((await cond({})).status, 200);
+  } finally {
+    db.exec('DELETE FROM zonas_fijas');
+    for (const z of antes) db.prepare('INSERT INTO zonas_fijas (id, nombre, activa, poligono) VALUES (?, ?, ?, ?)').run(z.id, z.nombre, z.activa, z.poligono);
+    db.exec('PRAGMA foreign_keys = ON');
+  }
+});
+const jsonPropias = (id) => JSON.parse(db.prepare('SELECT condiciones_propias FROM usuarios WHERE id = ?').get(id).condiciones_propias || '{}');

@@ -688,8 +688,15 @@
       const e0 = lista[0];
       const abiertos = lista.filter(x => ['pendiente', 'recogido', 'en_camino'].includes(x.estado));
       const cab = (extra) => el('div', { class: 'cab' }, el('strong', { class: 'guia' }, `Ruta de ${e0.empresa}`), extra);
+      // Ruta minorista de zona foco: la tienda manda casi todo a una zona, el piloto maneja poco y gana menos por entrega
+      const deFoco = lista.filter(x => x.tarifa_foco), normales = lista.filter(x => !x.tarifa_foco);
+      const ganaDe = (l) => l.reduce((t, x) => t + (x.ganancia_piloto || 0), 0);
+      const avisoFoco = deFoco.length ? el('div', { class: 'ruta-foco' },
+        el('strong', { text: normales.length ? `Ruta mixta minorista: ${deFoco.length} de zona foco y ${normales.length} normal${normales.length === 1 ? '' : 'es'}` : `Ruta minorista de zona foco: ${deFoco.length} entrega${deFoco.length === 1 ? '' : 's'} en ${deFoco[0].destino_zona}` }),
+        `No es una entrega normal: en zona foco ganas ${dinero(deFoco[0].ganancia_piloto || 0)} por entrega porque casi no manejas.${normales.length ? ` Las ${normales.length} de otras zonas pagan normal.` : ''} En total ganas ${dinero(ganaDe(lista))}.`) : null;
       const paradasResumen = () => el('ol', { class: 'paradas-ruta' }, lista.map(x => el('li', { class: ['entregado', 'a_sede', 'en_sede', 'fallido'].includes(x.estado) ? 'hecha' : '' },
         el('span', { class: 'num', text: String(x.parada || '') }), el('div', {}, valorBusca(x), el('strong', { text: x.destino_nombre }),
+          x.tarifa_foco ? el('span', { class: 'chip-foco', text: 'Zona foco' }) : null,
           el('small', { text: `${x.destino_zona} · ${HORARIO_TXT[x.horario] || ''} · ${TAMANO_TXT[x.tamano] || ''}${cobroParada(x) ? ` · cobra ${dinero(cobroParada(x))}${Number(x.cobro_destinatario) > 0 ? ` (${x.metodo_pago === 'recibe' ? `${dinero(x.precio)} envío + ` : ''}${dinero(x.cobro_destinatario)} producto)` : ''}` : ''}` })),
         x.estado !== 'pendiente' ? chipEstado(x.estado) : null)));
       const cobros = lista.filter(x => cobroParada(x) > 0);
@@ -703,6 +710,7 @@
           el('div', { class: 'ruta-oferta-resumen' },
             el('div', {}, el('span', { text: 'Entregas' }), el('strong', { text: String(lista.length) })),
             el('div', {}, el('span', { text: 'Ganas en total' }), el('strong', { text: dinero(lista.reduce((t, x) => t + (x.ganancia_piloto || 0), 0)) }))),
+          avisoFoco,
           el('div', { class: 'mensaje aviso', text: `Van en orden, ya ordenadas por el camino más rápido. Al aceptar, aceptas toda la ruta.` }),
           e0.programado_para ? el('div', { class: 'mensaje aviso', text: 'Recoger el ' + fechaProgramada(e0.programado_para) }) : null,
           el('div', { class: 'parada' }, el('span', { text: 'Recoger en' }), [e0.origen_zona, e0.origen_direccion].filter(Boolean).join('. '), km != null ? el('div', { class: 'pista', text: `A ${km.toFixed(1)} km de ti` }) : null),
@@ -760,6 +768,7 @@
         } });
         actualizar();
         return el('article', { class: 'entrega-tarjeta activa ruta' }, cab(el('span', { class: 'estado pendiente', text: 'Recoger' })),
+          avisoFoco,
           bloquePersona(e0, { titulo: 'Recoges en', nombre: e0.origen_quien === 'sede' ? 'Sede de Vaelo' : e0.empresa, telefono: e0.origen_telefono, chip: null,
             zona: e0.origen_zona, referencias: e0.origen_direccion, punto: 'origen', accion: 'Ir a recoger' }),
           notaCobro,

@@ -516,7 +516,8 @@ async function vistaCarpeta(caja, yo, id) {
       el('div', {}, el('strong', { class: 'carpeta-cifra', text: `${c.confirmados}` }), el('span', { text: ` de ${c.minimo} confirmados` }), progresoCarpeta(c),
         c.dia < r.hoy ? el('small', { class: 'error-texto', text: 'El día de entrega ya pasó. Toca «Cambiar día o nombre» y tus clientes confirman la nueva fecha.' }) : null,
         !r.punto ? el('small', { class: 'error-texto', text: 'Falta el lugar donde el piloto recoge tus paquetes (abajo).' }) : null,
-        c.sin_foto && !listo ? el('small', { text: c.sin_foto === 1 ? 'Falta la foto de 1 paquete.' : `Falta la foto de ${c.sin_foto} paquetes.` }) : null),
+        c.sin_foto && !listo ? el('small', { text: c.sin_foto === 1 ? 'Falta la foto de 1 paquete.' : `Falta la foto de ${c.sin_foto} paquetes.` }) : null,
+        estadoFoco(c.foco, false)),
       listo && c.sin_foto ? el('div', { class: 'falta-fotos' }, el('p', {}, el('strong', { text: `Ya puedes enviarla, solo falta${c.sin_foto === 1 ? '' : 'n'} ${c.sin_foto} foto${c.sin_foto === 1 ? '' : 's'}.` }),
           ' Toma la foto de cada paquete ya empacado: así, si algo pasa, tenemos cómo comprobarlo.'),
         el('button', { class: 'boton cinta boton-grande', type: 'button', text: c.sin_foto === 1 ? 'Tomar la foto que falta' : `Tomar las ${c.sin_foto} fotos que faltan`, onclick: () => {
@@ -526,7 +527,8 @@ async function vistaCarpeta(caja, yo, id) {
         : el('p', { class: 'pista', text: `Cuando ${c.minimo - c.confirmados === 1 ? 'falte 0' : 'tengas ' + c.minimo} confirmados aparece «Enviar a Vaelo».`.replace('falte 0', 'confirme uno más') }))
     : el('section', { class: 'bloque carpeta-estado' }, el('div', {},
       el('strong', { text: { nuevo: 'Vaelo la está preparando', en_ruta: 'En reparto', terminado: 'Terminada', cancelado: 'Cancelada' }[c.lote?.estado] || 'Enviada a Vaelo' }),
-      c.lote ? el('small', { text: `${c.lote.modo_texto} · ${c.lote.entregados} de ${c.total} entregados${c.lote.en_camino ? ` · ${c.lote.en_camino} en camino` : ''}${c.lote.en_sede ? ` · ${c.lote.en_sede} en la sede de Vaelo` : ''}` }) : null),
+      c.lote ? el('small', { text: `${c.lote.modo_texto} · ${c.lote.entregados} de ${c.total} entregados${c.lote.en_camino ? ` · ${c.lote.en_camino} en camino` : ''}${c.lote.en_sede ? ` · ${c.lote.en_sede} en la sede de Vaelo` : ''}` }) : null,
+      estadoFoco(c.foco, true)),
       r.minorista ? null : el('a', { class: 'boton borde chico', href: `/api/empresa/excel?dia=${c.dia}`, text: 'Excel del día' }));
   poner(caja, cabecera, estadoCaja, abierta && !r.punto ? bloquePunto(r, recargar) : null,
     abierta ? el('div', { class: 'carpeta-acciones' }, anadir,
@@ -543,6 +545,13 @@ async function vistaCarpeta(caja, yo, id) {
         : el('div', { class: 'carpetas-vacio' }, el('p', { text: 'La carpeta está vacía. Toca «Añadir pedido» para apuntar el primero.' }))));
 }
 
+// Zona foco: si la carpeta califica para el descuento (en vivo mientras se arma; fijo cuando ya se envió)
+function estadoFoco(f, enviada) {
+  if (!f) return null;
+  const titulo = f.aplica ? (enviada ? `Con descuento de zona foco (${f.zona})` : `Tu carpeta tiene descuento de zona foco (${f.zona})`) : (enviada ? `Sin descuento de zona foco (${f.zona})` : `Todavía no tiene descuento de zona foco (${f.zona})`);
+  const precio = f.aplica && f.precio != null ? ` ${f.con_descuento === 1 ? 'Ese envío queda' : `Esos ${f.con_descuento} envíos quedan`} en ${dinero(f.precio)}.` : '';
+  return el('div', { class: 'foco-estado' + (f.aplica ? ' aplica' : '') }, el('strong', { text: titulo }), el('p', { text: f.texto + precio + (f.falta && !enviada ? ' ' + f.falta : '') }));
+}
 function filaPedido(p, r, c, recargar) {
   const enlace = location.origin + p.enlace;
   const fotoInput = el('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true, onchange: async () => {
@@ -857,6 +866,7 @@ async function dialogoEnviar(c, r, recargar) {
       poner(dlg, el('div', { class: 'celebra-caja' }, window.checkAnimado ? checkAnimado() : null, el('h2', { text: '¡Listo! Vaelo ya tiene tu carpeta' }),
         el('p', { text: x.whatsapp ? 'Te abrimos WhatsApp para acordar el precio del pickup. Después Vaelo asigna el piloto.' : 'Vaelo arma las rutas (primero la entrega más cercana) y te avisamos cuando cada piloto acepte.' }),
         x.pendientes ? el('p', { class: 'pista', text: `${x.pendientes} envío(s) sin confirmar quedaron en una carpeta nueva.` }) : null,
+        x.foco && x.foco.aplica ? el('p', { class: 'foco-estado aplica' }, el('strong', { text: `Tu carpeta tiene descuento de zona foco` }), `${x.foco.con_descuento} envío(s) a ${x.foco.zona} quedan en ${dinero(x.foco.precio)}.`) : null,
         x.whatsapp ? el('a', { class: 'boton cinta', href: x.whatsapp, target: '_blank', rel: 'noopener', text: 'Abrir WhatsApp de Vaelo' }) : null,
         el('button', { class: 'boton borde', type: 'button', style: 'margin-left:.5rem', text: 'Cerrar', onclick: () => dlg.close() })));
       recargar();
