@@ -239,8 +239,9 @@ const SERVICIOS_TIENDA = [
   ['campana', 'Avisos a tu cliente', 'Le avisamos cuando su pedido sale y cuando es la próxima entrega, con su código para recibir.'],
   ['dinero', 'Cobro al entregar', 'El piloto cobra tu producto y el envío. Vaelo te entrega tu dinero y lo ves aquí.'],
 ];
-function bloqueServicios(clave) {
-  let abierto = true; try { abierto = localStorage.getItem('servicios-' + clave) !== '0'; } catch { /* sin almacenamiento */ }
+function bloqueServicios(clave, primeraVez = true) {
+  // Abierto la primera vez (antes de su primera carpeta); después queda como la tienda lo dejó
+  let abierto = primeraVez; try { const g = localStorage.getItem('servicios-' + clave); if (g !== null) abierto = g === '1'; } catch { /* sin almacenamiento */ }
   const d = el('details', { class: 'servicios-tienda', open: abierto },
     el('summary', {}, el('strong', { text: 'Lo que Vaelo hace por tu tienda' }), el('small', { text: 'Logística completa, sin costo extra' })),
     el('ul', {}, SERVICIOS_TIENDA.map(([i, t, a]) => el('li', {}, icono(i), el('div', {}, el('strong', { text: t }), el('span', { text: a }))))));
@@ -266,7 +267,6 @@ async function panelEmpresa(caja, op = {}, minorista = null) {
       yo.recogida_dias ? el('p', { class: 'recogida-fija' }, icono('reloj'), ` Pasamos por tus paquetes: ${yo.recogida_dias.split(',').map(d => ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'][d]).join(', ')} a las ${yo.recogida_hora}.`) : null),
       minorista ? el('button', { class: 'boton borde chico', type: 'button', text: '¿Ya vendes mucho? Pide contrato de empresa', onclick: () => pintarEmpresa(caja, { ...op, solicitud: true }) })
         : el('a', { class: 'boton borde chico', href: '/politicas-empresas', target: '_blank', text: 'Políticas para empresas' })),
-    bloqueAppTiendas(), bloqueServicios(minorista ? 'minorista' : 'empresa'),
     minorista && minorista.solicitud && ['enviada', 'cita'].includes(minorista.solicitud.estado) ? el('div', { class: 'mensaje aviso', text: 'Tu solicitud de contrato de empresa está en revisión. Mientras tanto sigue usando tu tienda con normalidad.' }) : null,
     conBono && bono.por_envio > 0 ? el('button', { type: 'button', class: 'bono-franja', onclick: () => { vista = 'ganancias'; pintarPest(); abrir(); } },
       el('span', { class: 'bono-franja-q', text: dinero(bono.por_envio) }),
@@ -305,7 +305,7 @@ function progresoCarpeta(c) {
   const pct = Math.min(100, Math.round((c.confirmados / c.minimo) * 100));
   return el('div', { class: 'carpeta-progreso' },
     el('div', { class: 'progreso-barra' + (c.confirmados >= c.minimo ? ' completo' : '') }, el('i', { style: `width:${pct}%` })),
-    el('small', { text: c.confirmados >= c.minimo ? `${c.confirmados} confirmados: lista para mandar` : `${c.confirmados} de ${c.minimo} confirmados para mandarla` }));
+    el('small', { text: c.confirmados >= c.minimo ? `${c.confirmados} ${c.confirmados === 1 ? 'confirmado' : 'confirmados'}: lista para mandar` : `${c.confirmados} de ${c.minimo} confirmados para mandarla` }));
 }
 async function panelPedidos(caja, yo, abrirId) {
   if (abrirId) return vistaCarpeta(caja, yo, abrirId);
@@ -335,7 +335,7 @@ async function panelPedidos(caja, yo, abrirId) {
     el('div', {}, el('span', { text: 'Dinero de tus productos que Vaelo te tiene' }), el('strong', { text: dinero(cp.pendiente) }),
       el('small', { text: cp.pendiente > 0 ? `De ${cp.envios} entrega(s) ya cobrada(s). Vaelo te lo entrega y aquí queda marcado.` : 'Estás al día: ya te entregamos todo.' })),
     cp.pagado_30 > 0 ? el('div', {}, el('span', { text: 'Ya te entregamos (30 días)' }), el('strong', { text: dinero(cp.pagado_30) }), cp.ultimo_pago ? el('small', { text: 'Último: ' + fecha(cp.ultimo_pago, false) }) : null) : null) : null;
-  poner(caja, cajaCobros, bloquePunto(r, () => panelPedidos(caja, yo)),
+  poner(caja, bloqueAppTiendas(), bloqueServicios(r.minorista ? 'minorista' : 'empresa', !(r.abiertas.length + r.enviadas.length)), cajaCobros, bloquePunto(r, () => panelPedidos(caja, yo)),
     el('section', { class: 'bloque' },
       el('div', { class: 'cab-bloque' }, el('div', {}, el('h2', { text: 'Tus carpetas de envíos' }), el('p', { class: 'pista', text: 'Una carpeta por día de entrega.' })), nueva),
       r.abiertas.length ? el('div', { class: 'carpetas' }, r.abiertas.map(tarjeta)) : vacio),
@@ -471,7 +471,7 @@ async function vistaCarpeta(caja, yo, id) {
   const recargar = () => vistaCarpeta(caja, yo, id);
   const volver = () => panelPedidos(caja, yo);
   const listo = abierta && c.confirmados >= c.minimo;
-  const anadir = el('button', { class: 'boton boton-grande', type: 'button', onclick: () => dialogoNuevoEnvio(c, r, recargar) }, icono('mas'), ' Añadir envío');
+  const anadir = el('button', { class: 'boton boton-grande', type: 'button', onclick: () => dialogoNuevoEnvio(c, r, recargar) }, icono('mas'), ' Añadir pedido');
   const archivo = el('input', { type: 'file', accept: '.xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv', hidden: true });
   const msgArchivo = el('div', { class: 'mensaje', role: 'alert' });
   archivo.addEventListener('change', async () => {
@@ -507,8 +507,13 @@ async function vistaCarpeta(caja, yo, id) {
       el('div', {}, el('strong', { class: 'carpeta-cifra', text: `${c.confirmados}` }), el('span', { text: ` de ${c.minimo} confirmados` }), progresoCarpeta(c),
         c.dia < r.hoy ? el('small', { class: 'error-texto', text: 'El día de entrega ya pasó. Toca «Cambiar día o nombre» y tus clientes confirman la nueva fecha.' }) : null,
         !r.punto ? el('small', { class: 'error-texto', text: 'Falta el lugar donde el piloto recoge tus paquetes (abajo).' }) : null,
-        c.sin_foto ? el('small', { text: `Falta la foto de ${c.sin_foto} paquete(s).` }) : null),
-      listo ? el('button', { class: 'boton cinta boton-grande', type: 'button', text: 'Enviar a Vaelo', onclick: () => dialogoEnviar(c, r, recargar) })
+        c.sin_foto && !listo ? el('small', { text: c.sin_foto === 1 ? 'Falta la foto de 1 paquete.' : `Falta la foto de ${c.sin_foto} paquetes.` }) : null),
+      listo && c.sin_foto ? el('div', { class: 'falta-fotos' }, el('p', {}, el('strong', { text: `Ya puedes enviarla, solo falta${c.sin_foto === 1 ? '' : 'n'} ${c.sin_foto} foto${c.sin_foto === 1 ? '' : 's'}.` }),
+          ' Toma la foto de cada paquete ya empacado: así, si algo pasa, tenemos cómo comprobarlo.'),
+        el('button', { class: 'boton cinta boton-grande', type: 'button', text: c.sin_foto === 1 ? 'Tomar la foto que falta' : `Tomar las ${c.sin_foto} fotos que faltan`, onclick: () => {
+          const b = caja.querySelector('[data-falta-foto]'); if (b) { b.scrollIntoView({ behavior: 'smooth', block: 'center' }); b.classList.add('resaltar'); setTimeout(() => b.classList.remove('resaltar'), 2500); }
+        } }))
+      : listo ? el('button', { class: 'boton cinta boton-grande', type: 'button', text: 'Enviar a Vaelo', onclick: () => dialogoEnviar(c, r, recargar) })
         : el('p', { class: 'pista', text: `Cuando ${c.minimo - c.confirmados === 1 ? 'falte 0' : 'tengas ' + c.minimo} confirmados aparece «Enviar a Vaelo».`.replace('falte 0', 'confirme uno más') }))
     : el('section', { class: 'bloque carpeta-estado' }, el('div', {},
       el('strong', { text: { nuevo: 'Vaelo la está preparando', en_ruta: 'En reparto', terminado: 'Terminada', cancelado: 'Cancelada' }[c.lote?.estado] || 'Enviada a Vaelo' }),
@@ -526,7 +531,7 @@ async function vistaCarpeta(caja, yo, id) {
           pedidos.length ? el('button', { class: 'boton borde chico', type: 'button', text: 'Imprimir etiquetas', onclick: () => imprimirEtiquetas(pedidos, r.empresa) }) : null)),
       pedidos.length ? bloqueMarcado(c, abierta, pedidos, recargar) : null,
       pedidos.length ? el('ul', { class: 'pedidos-lista' }, pedidos.map((p) => filaPedido(p, r, c, recargar)))
-        : el('div', { class: 'carpetas-vacio' }, el('p', { text: 'La carpeta está vacía. Toca «Añadir envío» para registrar el primero.' }))));
+        : el('div', { class: 'carpetas-vacio' }, el('p', { text: 'La carpeta está vacía. Toca «Añadir pedido» para apuntar el primero.' }))));
 }
 
 function filaPedido(p, r, c, recargar) {
@@ -540,8 +545,8 @@ function filaPedido(p, r, c, recargar) {
   const wa = `https://wa.me/${waNum(p.cliente_telefono)}?text=${encodeURIComponent(textoEnlace(p, r, c.dia))}`;
   // Una acción principal a la vista; el resto en el menú "⋯"
   const principal = !editable ? null
+    : !p.tiene_foto ? el('label', { class: 'boton cinta chico doc-boton', 'data-falta-foto': '1' }, 'Tomar foto', fotoInput)
     : p.estado === 'confirmado' ? null
-    : !p.tiene_foto ? el('label', { class: 'boton cinta chico doc-boton' }, 'Tomar foto', fotoInput)
     : el('a', { class: 'boton cinta chico', href: wa, target: '_blank', rel: 'noopener', onclick: mandar, text: p.estado === 'esperando' ? 'Recordar' : 'Mandar enlace' });
   const opciones = editable ? [
     p.tiene_foto && p.estado !== 'confirmado' ? null : el('a', { href: wa, target: '_blank', rel: 'noopener', onclick: mandar, text: p.estado === 'confirmado' ? 'Mandar enlace otra vez' : 'Mandar enlace por WhatsApp' }),
@@ -685,9 +690,9 @@ function leerMensajeCliente(texto) {
 function dialogoNuevoEnvio(c, r, recargar) {
   const dlg = el('dialog', { class: 'dialogo hoja' });
   const msg = el('div', { class: 'mensaje', role: 'alert' });
-  const desc = el('input', { id: 'np-desc', maxlength: 200, placeholder: 'Blusa talla M, factura, caja de zapatos…' });
+  const desc = el('input', { id: 'np-desc', maxlength: 200, placeholder: 'Ej. Blusa negra talla M' });
   let tamano = 'pequeno';
-  const tamanos = el('div', { class: 'opciones' }, ...Object.entries(r.tamanos).map(([k, t]) => el('label', { class: 'opcion' },
+  const tamanos = el('div', { class: 'opciones opciones-tamano' }, ...Object.entries(r.tamanos).map(([k, t]) => el('label', { class: 'opcion' },
     el('input', { type: 'radio', name: 'np-tamano', value: k, checked: k === tamano, onchange: () => { tamano = k; } }), el('span', {}, t.nombre, el('small', { text: t.ayuda })))));
   const nombre = el('input', { id: 'np-nombre', maxlength: 100, autocomplete: 'off' });
   const tel = el('input', { id: 'np-tel', type: 'tel', maxlength: 30, placeholder: '5555 5555' });
@@ -718,12 +723,13 @@ function dialogoNuevoEnvio(c, r, recargar) {
   });
   const form = el('form', { novalidate: true },
     el('button', { class: 'boton borde chico', type: 'button', style: 'margin-bottom:.6rem', text: 'Pegar datos de WhatsApp', onclick: () => { cajaPegar.hidden = !cajaPegar.hidden; if (!cajaPegar.hidden) pegado.focus(); } }), cajaPegar,
-    el('div', { class: 'campo' }, el('label', { for: 'np-desc', text: '¿Qué es el paquete?' }), desc),
+    el('div', { class: 'fila' }, el('div', { class: 'campo' }, el('label', { for: 'np-nombre', text: '¿Quién te compró?' }), nombre), el('div', { class: 'campo' }, el('label', { for: 'np-tel', text: 'Su WhatsApp' }), tel)),
+    el('div', { class: 'campo' }, el('label', { for: 'np-desc', text: '¿Qué compró?' }), desc),
+    el('div', { class: 'campo' }, el('label', { for: 'np-cobro' }, '¿Cuánto le cobramos por el producto? (Q)', el('span', { class: 'ayuda', text: ' Opcional' })), cobro,
+      el('small', { class: 'pista', text: 'Sin contar el envío. Déjalo vacío si ya te pagó. El piloto lo cobra y Vaelo te entrega ese dinero.' })),
     el('div', { class: 'campo' }, el('label', { text: 'Tamaño' }), tamanos),
-    el('div', { class: 'foto-paquete foto-paquete-chica' }, el('label', { class: 'foto-paquete-boton', for: 'np-foto' }, vistaFoto, vacio, foto)),
-    el('div', { class: 'fila' }, el('div', { class: 'campo' }, el('label', { for: 'np-nombre', text: 'Nombre de tu cliente' }), nombre), el('div', { class: 'campo' }, el('label', { for: 'np-tel', text: 'WhatsApp de tu cliente' }), tel)),
-    el('div', { class: 'campo' }, el('label', { for: 'np-cobro' }, 'Cobrar tu producto al entregar (Q)', el('span', { class: 'ayuda', text: ' Opcional' })), cobro,
-      el('small', { class: 'pista', text: 'Lo que el piloto le cobra a tu cliente por lo que compró, sin contar el envío. Déjalo vacío si ya te pagó. Vaelo te entrega ese dinero.' })),
+    el('div', { class: 'campo' }, el('label', { for: 'np-foto' }, 'Foto del paquete', el('span', { class: 'ayuda', text: ' Puedes tomarla después, al empacar' })),
+      el('div', { class: 'foto-paquete foto-paquete-chica' }, el('label', { class: 'foto-paquete-boton', for: 'np-foto' }, vistaFoto, vacio, foto))),
     el('div', { class: 'campo' }, el('label', { text: 'Datos de entrega' }), modos, recomendacion), datosEntrega.nodo, msg, otro, guardar);
   form.addEventListener('submit', async (ev) => {
     ev.preventDefault();
@@ -738,14 +744,14 @@ function dialogoNuevoEnvio(c, r, recargar) {
       if (ventana) { ventana.location.href = `https://wa.me/${waNum(p.cliente_telefono)}?text=${encodeURIComponent(textoEnlace(p, r, c.dia))}`; api(`/api/empresa/pedidos/${p.id}/enlace`, { body: {} }).catch(() => {}); }
       if (otroChk.checked) {
         desc.value = ''; nombre.value = ''; tel.value = ''; cobro.value = ''; foto.value = ''; vistaFoto.hidden = true; vacio.hidden = false;
-        mostrarMensaje(msg, `Listo: ${p.cliente_nombre} quedó en la carpeta. Añade el siguiente.`, 'exito'); desc.focus(); guardar.disabled = false; dlg.dataset.cambios = '1';
+        mostrarMensaje(msg, `Listo: ${p.cliente_nombre} quedó en la carpeta. Añade el siguiente.`, 'exito'); nombre.focus(); guardar.disabled = false; dlg.dataset.cambios = '1';
       } else { dlg.close(); recargar(); }
     } catch (e) { if (ventana) ventana.close(); mostrarMensaje(msg, e.message); guardar.disabled = false; }
   });
   dlg.append(el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: () => dlg.close() }),
-    el('h2', { text: 'Añadir envío' }), el('p', { class: 'pista', text: `${c.nombre} · entrega ${diaEmp(c.dia)}` }), form);
+    el('h2', { text: 'Nuevo pedido' }), el('p', { class: 'pista', text: `Se entrega el ${diaEmp(c.dia)}` }), form);
   dlg.addEventListener('close', () => { dlg.remove(); if (dlg.dataset.cambios) recargar(); });
-  document.body.append(dlg); dlg.showModal(); desc.focus();
+  document.body.append(dlg); dlg.showModal(); nombre.focus();
 }
 
 // Campos de entrega cuando la empresa los llena (el día es el de la carpeta)

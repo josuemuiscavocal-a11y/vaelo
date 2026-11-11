@@ -1597,3 +1597,33 @@ fieldset { min-width: 0; } .recientes { max-width: 100%; min-width: 0; }
 .botones-confirmar { display: flex; gap: .6rem; margin-top: 1.1rem; }
 .botones-confirmar .boton { flex: 1; min-height: 48px; }
 .confirmar-peligro .boton.peligro { background: var(--alerta, #b42318); color: #fff; border-color: var(--alerta, #b42318); }
+
+/* Registro: ¿personal o tienda? */
+.uso-cuenta { border: 0; padding: 0; margin: 0 0 1rem; display: grid; gap: .5rem; }
+.uso-cuenta legend { font-weight: 700; margin-bottom: .45rem; padding: 0; }
+.uso-cuenta .opcion span { display: grid; gap: .1rem; }
+.uso-cuenta .opcion small { color: var(--suave); font-weight: 400; }
+
+/* Inicio: sección para quien vende en lives */
+.enlace-lives { display: inline-block; margin-top: 1rem; color: var(--cinta); font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+.seccion-lives { background: linear-gradient(160deg, #0e2463 0%, #1c3faa 100%); color: #fff; }
+.seccion-lives h2 { color: #fff; max-width: 22ch; }
+.etiqueta-lives { display: inline-block; background: var(--cinta); color: var(--tinta); font-weight: 700; font-size: .85rem; padding: .25rem .7rem; border-radius: 999px; margin-bottom: .8rem; }
+.bajada-lives { color: #d3dbf7; max-width: 60ch; font-size: 1.05rem; }
+.pasos-lives { list-style: none; counter-reset: paso; display: grid; gap: .8rem; padding: 0; margin: 1.4rem 0; }
+@media (min-width: 760px) { .pasos-lives { grid-template-columns: repeat(4, 1fr); } }
+.pasos-lives li { counter-increment: paso; background: rgba(255, 255, 255, .08); border: 1px solid rgba(255, 255, 255, .16); border-radius: 14px; padding: 1rem; display: grid; gap: .3rem; }
+.pasos-lives li::before { content: counter(paso); width: 30px; height: 30px; border-radius: 50%; background: var(--cinta); color: var(--tinta); display: grid; place-items: center; font-weight: 800; }
+.pasos-lives span { color: #d3dbf7; font-size: .93rem; line-height: 1.45; }
+.seccion-lives .boton { min-height: 50px; }
+
+/* Nuevo pedido: tamaños en dos columnas, compactos */
+.opciones-tamano { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
+.opciones-tamano .opcion span { padding: .55rem .7rem; min-height: 0; }
+.opciones-tamano .opcion small { font-size: .78rem; }
+
+/* Carpeta lista pero sin fotos: se guía a tomarlas */
+.falta-fotos p { margin: 0 0 .7rem; line-height: 1.45; }
+[data-falta-foto].resaltar { outline: 3px solid var(--azul, #1c3faa); outline-offset: 3px; animation: latido 1s ease-in-out 2; }
+@keyframes latido { 50% { transform: scale(1.06); } }
+@media (prefers-reduced-motion: reduce) { [data-falta-foto].resaltar { animation: none; } }

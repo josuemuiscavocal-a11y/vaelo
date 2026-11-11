@@ -564,10 +564,14 @@ ruta('POST', '/api/registro', async ({ req, body }) => {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) falla(400, 'Escribe un correo válido.');
   if (telefono.replace(/\D/g, '').length < 8) falla(400, 'Escribe un teléfono de 8 dígitos.');
   if (password.length < 8) falla(400, 'La contraseña debe tener al menos 8 caracteres.');
+  // Quien vende en lives o redes entra directo como tienda minorista (sin contrato)
+  const tienda = body.tienda === undefined ? null : texto(String(body.tienda), 60);
+  if (tienda !== null && tienda.length < 2) falla(400, 'Escribe el nombre de tu tienda (el que ven tus clientes en tus lives).');
   if (body.acepto_terminos !== true) falla(400, 'Para crear tu cuenta acepta los términos y el aviso de privacidad.');
   if (db.prepare('SELECT 1 FROM usuarios WHERE email = ?').get(email)) falla(409, 'Ya existe una cuenta con ese correo. Inicia sesión.');
-  const r = db.prepare("INSERT INTO usuarios (nombre, email, telefono, password_hash, email_verificado, terminos_aceptados) VALUES (?, ?, ?, ?, 0, datetime('now'))")
-    .run(nombre, email, telefono, hashPassword(password));
+  const r = db.prepare("INSERT INTO usuarios (nombre, email, telefono, password_hash, email_verificado, terminos_aceptados, tipo_cuenta, empresa_nombre) VALUES (?, ?, ?, ?, 0, datetime('now'), ?, ?)")
+    .run(nombre, email, telefono, hashPassword(password), tienda ? 'minorista' : 'personal', tienda);
+  if (tienda) avisarStaff({ titulo: 'Nueva tienda minorista', cuerpo: `${nombre} creó su cuenta como tienda "${tienda}".`, url: RUTA_ADMIN, etiqueta: 'minorista-nueva' });
   const id = Number(r.lastInsertRowid);
   const enviado = await enviarConfirmacion({ id, nombre, email });
   return { _status: 201, _headers: { 'Set-Cookie': crearSesion(req, id) }, ok: true, rol: 'cliente', correo_enviado: enviado };
@@ -4093,7 +4097,7 @@ function crearLoteEmpresa(u, pedidos, dia, body, alCrear) {
   if (!['una_moto', 'motos', 'pickup'].includes(body.modo)) falla(400, 'Elige cómo quieres que se repartan: una moto, varias motos o pickup.');
   if (pedidos.length < minimoLote(u)) falla(400, `Necesitas al menos ${minimoLote(u)} envíos confirmados para el mismo día. Tienes ${pedidos.length}.`);
   const sinFoto = pedidos.filter((p) => !p.foto);
-  if (sinFoto.length) falla(400, `Falta la foto del paquete en ${sinFoto.length} pedido(s): ${sinFoto.slice(0, 5).map((p) => p.codigo).join(', ')}.`);
+  if (sinFoto.length) falla(400, `Falta la foto del paquete de ${sinFoto.slice(0, 5).map((p) => `${p.cliente_nombre} (${codigoCortoPedido(p)})`).join(', ')}${sinFoto.length > 5 ? ` y ${sinFoto.length - 5} más` : ''}. Tómala desde «Tomar foto».`);
   if (body.modo !== 'pickup' && pedidos.some((p) => p.tamano === 'grande')) falla(400, 'Hay paquetes grandes: esos solo van en pickup.');
   const punto = puntoEmpresa(u);
   if (recogida === 'empresa' && !punto) falla(400, 'Marca primero dónde recoge el piloto los paquetes (tu local).');
