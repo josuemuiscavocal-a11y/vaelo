@@ -637,4 +637,22 @@ if (!db.prepare("SELECT 1 FROM ajustes WHERE clave = 'v6_tarifa_fija'").get()) {
   db.exec("INSERT INTO ajustes (clave, valor) VALUES ('comision_valor', '5') ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor");
   db.exec("INSERT INTO ajustes (clave, valor) VALUES ('v6_tarifa_fija', datetime('now'))");
 }
+
+// Planes de tiendas: lo que recibe una minorista o una empresa (precio, mínimo, cobro del producto, bodega).
+// Un valor vacío (null) en un plan significa "el general" de Tarifas y ajustes, así nada cambia hasta que se edite.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS planes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    clave TEXT UNIQUE,                               -- 'minorista' y 'empresa' son los de fábrica (no se borran)
+    nombre TEXT NOT NULL,
+    descripcion TEXT NOT NULL DEFAULT '',
+    condiciones TEXT NOT NULL DEFAULT '{}',
+    creado TEXT NOT NULL DEFAULT (datetime('now')), actualizado TEXT
+  );
+`);
+agregarColumnas('usuarios', [['plan_id', 'INTEGER'], ['condiciones_propias', 'TEXT'], ['condiciones_vence', 'TEXT'], ['condiciones_nota', 'TEXT']]);
+agregarColumnas('pedidos_empresa', [['precio_fijado', 'REAL'], ['precio_fijado_pref', 'INTEGER'], ['precio_fijado_clave', 'TEXT']]);
+agregarColumnas('envios', [['comision_cobro', 'REAL NOT NULL DEFAULT 0']]);
+db.prepare("INSERT OR IGNORE INTO planes (clave, nombre, descripcion) VALUES ('minorista', 'Minorista', 'Tiendas de lives y ventas por redes')").run();
+db.prepare("INSERT OR IGNORE INTO planes (clave, nombre, descripcion) VALUES ('empresa', 'Empresa', 'Empresas con contrato')").run();
 module.exports = { db, DB_PATH, DATA_DIR };

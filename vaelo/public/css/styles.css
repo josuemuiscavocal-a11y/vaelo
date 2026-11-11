@@ -1637,3 +1637,26 @@ fieldset { min-width: 0; } .recientes { max-width: 100%; min-width: 0; }
 /* Aviso de confirmar correo para tiendas: más discreto y se puede cerrar */
 .aviso-suave { position: relative; padding-right: 2.4rem; font-size: .92rem; background: #fffbea; }
 .aviso-suave .cerrar-aviso { position: absolute; top: .4rem; right: .4rem; }
+
+/* Planes de tiendas (panel de oficina) y condiciones que ve la tienda */
+.planes-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 1rem; margin-top: 1rem; }
+.plan-tarjeta { border: 1.5px solid var(--linea); border-radius: 12px; padding: 1.1rem; background: #fff; display: flex; flex-direction: column; gap: .6rem; }
+.plan-cabeza { display: flex; justify-content: space-between; align-items: flex-start; gap: .75rem; }
+.plan-cabeza h3 { margin: 0; }
+.plan-tarjeta .navegar { margin-top: auto; }
+.plan-lineas { margin: 0; display: grid; gap: .55rem; }
+.plan-lineas dt { font-weight: 700; font-size: .85rem; color: var(--azul-hondo); }
+.plan-lineas dd { margin: .1rem 0 0; font-size: .93rem; color: var(--tinta); line-height: 1.45; }
+.form-cond { display: grid; gap: .9rem; margin: .5rem 0 1rem; }
+.grupo-cond { border: 1.5px solid var(--linea); border-radius: 10px; padding: .8rem 1rem .2rem; margin: 0; min-width: 0; }
+.grupo-cond legend { font-weight: 800; font-size: .95rem; padding: 0 .4rem; }
+.grupo-cond .pista { margin: 0 0 .6rem; }
+.vista-tienda { background: #f6f8fd; border: 1.5px solid #cfd8f3; border-radius: 10px; padding: .9rem 1rem; margin: .5rem 0 1rem; display: grid; gap: .6rem; }
+.vista-tienda[hidden] { display: none; }
+.aviso-ascenso { border-left: 5px solid var(--cinta); }
+.condiciones-tienda summary { cursor: pointer; display: flex; justify-content: space-between; align-items: center; gap: .75rem; flex-wrap: wrap; list-style: none; }
+.condiciones-tienda summary::-webkit-details-marker { display: none; }
+.condiciones-tienda summary::after { content: "Ver"; font-weight: 700; color: var(--azul); font-size: .9rem; }
+.condiciones-tienda[open] summary::after { content: "Ocultar"; }
+.condiciones-tienda summary span { color: var(--suave); font-size: .9rem; margin-right: auto; }
+.condiciones-tienda .plan-lineas { margin-top: .9rem; }

@@ -333,13 +333,22 @@ async function panelPedidos(caja, yo, abrirId) {
   const cp = r.cobros_producto;
   const cajaCobros = cp && (cp.pendiente > 0 || cp.pagado_30 > 0) ? el('section', { class: 'bloque cobros-tienda' },
     el('div', {}, el('span', { text: 'Dinero de tus productos que Vaelo te tiene' }), el('strong', { text: dinero(cp.pendiente) }),
-      el('small', { text: cp.pendiente > 0 ? `De ${cp.envios} entrega(s) ya cobrada(s). Vaelo te lo entrega y aquí queda marcado.` : 'Estás al día: ya te entregamos todo.' })),
+      el('small', { text: cp.pendiente > 0 ? `De ${cp.envios} entrega(s) ya cobrada(s)${cp.comision > 0 ? `, ya descontada la comisión de ${dinero(cp.comision)}` : ''}. Vaelo te lo entrega y aquí queda marcado.` : 'Estás al día: ya te entregamos todo.' })),
     cp.pagado_30 > 0 ? el('div', {}, el('span', { text: 'Ya te entregamos (30 días)' }), el('strong', { text: dinero(cp.pagado_30) }), cp.ultimo_pago ? el('small', { text: 'Último: ' + fecha(cp.ultimo_pago, false) }) : null) : null) : null;
   poner(caja, bloqueAppTiendas(), bloqueServicios(r.minorista ? 'minorista' : 'empresa', !(r.abiertas.length + r.enviadas.length)), cajaCobros, bloquePunto(r, () => panelPedidos(caja, yo)),
     el('section', { class: 'bloque' },
       el('div', { class: 'cab-bloque' }, el('div', {}, el('h2', { text: 'Tus carpetas de envíos' }), el('p', { class: 'pista', text: 'Una carpeta por día de entrega.' })), nueva),
       r.abiertas.length ? el('div', { class: 'carpetas' }, r.abiertas.map(tarjeta)) : vacio),
-    r.enviadas.length ? el('section', { class: 'bloque' }, el('h2', { text: 'Enviadas a Vaelo' }), el('div', { class: 'carpetas' }, r.enviadas.map(tarjeta))) : null);
+    r.enviadas.length ? el('section', { class: 'bloque' }, el('h2', { text: 'Enviadas a Vaelo' }), el('div', { class: 'carpetas' }, r.enviadas.map(tarjeta))) : null,
+    bloqueCondiciones(r.condiciones));
+}
+// Lo que Vaelo le da a esta tienda (su plan), en palabras sencillas
+function bloqueCondiciones(c) {
+  if (!c || !c.lineas || !c.lineas.length) return null;
+  return el('details', { class: 'bloque condiciones-tienda' },
+    el('summary', {}, el('strong', { text: 'Tus condiciones con Vaelo' }), el('span', { text: c.plan ? `Plan ${c.plan}` : '' })),
+    el('dl', { class: 'plan-lineas' }, c.lineas.flatMap((l) => [el('dt', { text: l.titulo }), el('dd', { text: l.texto })])),
+    c.vence ? el('p', { class: 'pista', text: `Tienes condiciones especiales hasta el ${fecha(c.vence + ' 12:00:00', false)}.` }) : null);
 }
 // Punto de recogida: donde el piloto pasa por los paquetes
 function bloquePunto(r, alCambiar) {
@@ -725,7 +734,7 @@ function dialogoNuevoEnvio(c, r, recargar) {
     el('button', { class: 'boton borde chico', type: 'button', style: 'margin-bottom:.6rem', text: 'Pegar datos de WhatsApp', onclick: () => { cajaPegar.hidden = !cajaPegar.hidden; if (!cajaPegar.hidden) pegado.focus(); } }), cajaPegar,
     el('div', { class: 'fila' }, el('div', { class: 'campo' }, el('label', { for: 'np-nombre', text: '¿Quién te compró?' }), nombre), el('div', { class: 'campo' }, el('label', { for: 'np-tel', text: 'Su WhatsApp' }), tel)),
     el('div', { class: 'campo' }, el('label', { for: 'np-desc', text: '¿Qué compró?' }), desc),
-    el('div', { class: 'campo' }, el('label', { for: 'np-cobro' }, '¿Cuánto le cobramos por el producto? (Q)', el('span', { class: 'ayuda', text: ' Opcional' })), cobro,
+    el('div', { class: 'campo', hidden: r.condiciones && r.condiciones.cobro_permitido === false }, el('label', { for: 'np-cobro' }, '¿Cuánto le cobramos por el producto? (Q)', el('span', { class: 'ayuda', text: r.condiciones && r.condiciones.cobro_tope ? ` Opcional, hasta ${dinero(r.condiciones.cobro_tope)}` : ' Opcional' })), cobro,
       el('small', { class: 'pista', text: 'Sin contar el envío. Déjalo vacío si ya te pagó. El piloto lo cobra y Vaelo te entrega ese dinero.' })),
     el('div', { class: 'campo' }, el('label', { text: 'Tamaño' }), tamanos),
     el('div', { class: 'campo' }, el('label', { for: 'np-foto' }, 'Foto del paquete', el('span', { class: 'ayuda', text: ' Puedes tomarla después, al empacar' })),

@@ -1160,3 +1160,143 @@ test('precios con las zonas reales de Vaelo: Q35 dentro, Q45 fuera, y la ubicaci
     for (const z of antes) db.prepare('INSERT INTO zonas_fijas (id, nombre, activa, poligono) VALUES (?, ?, ?, ?)').run(z.id, z.nombre, z.activa, z.poligono);
   }
 });
+
+test('planes de tiendas: precio, mínimo, cobro con comisión, volumen, excepciones con vencimiento, permisos e historial', async () => {
+  db.exec('UPDATE zonas_fijas SET poligono = NULL');   // sin formas: la zona elegida manda
+  const hoy = new Date(Date.now() - 6 * 3600_000).toISOString().slice(0, 10);
+  const rosa = cliente();
+  assert.equal((await rosa('POST', '/api/registro', { nombre: 'Rosa Paz', email: 'rosa@prueba.com', telefono: '55557788', password: 'clave-de-prueba-123', acepto_terminos: true, tienda: 'Rosa Shop' }, { 'x-real-ip': '10.7.7.7' })).status, 201);
+  const rosaId = db.prepare("SELECT id FROM usuarios WHERE email = 'rosa@prueba.com'").get().id;
+  assert.equal(db.prepare('SELECT tipo_cuenta FROM usuarios WHERE id = ?').get(rosaId).tipo_cuenta, 'minorista');
+  const carpeta = (await rosa('POST', '/api/empresa/carpetas', { dia: hoy })).j.carpeta.id;
+  let n = 0;
+  const pedido = async (cobro = '') => { n++; return rosa('POST', `/api/empresa/carpetas/${carpeta}/pedidos`, { descripcion: 'Vestido ' + n, tamano: 'pequeno', cliente_nombre: 'Compradora ' + n, cliente_telefono: '5555710' + n, cobro,
+    foto: FOTO, llenar: true, dia: hoy, horario: 'cualquiera', direccion: 'Casa ' + n, zona: 'Zona 1', lat: 14.633, lng: -90.52, recibe_nombre: 'Compradora ' + n, recibe_telefono: '5555710' + n, metodo_pago: 'efectivo' }); };
+  const precioDe = async (id) => (await cliente()('GET', '/api/pedido/' + db.prepare('SELECT token FROM pedidos_empresa WHERE id = ?').get(id).token)).j;
+
+  // De fábrica: dos planes y nada cambia (Q35, mínimo 3)
+  const lista = (await admin('GET', '/api/admin/planes')).j;
+  assert.deepEqual(lista.planes.map((p) => p.clave), ['minorista', 'empresa']); assert.equal(lista.puede_editar, true);
+  const planMin = lista.planes[0];
+  assert.equal(planMin.tiendas >= 1, true); assert.match(planMin.resumen[0].texto, /Q35\.00 en zonas preferenciales y Q45\.00/);
+  const p1 = (await pedido(150)).j.pedido;
+  assert.equal((await precioDe(p1.id)).precio.precio, 35);
+  let panel = (await rosa('GET', '/api/empresa/carpetas')).j;
+  assert.equal(panel.minimo, 3); assert.equal(panel.condiciones.plan, 'Minorista'); assert.match(panel.condiciones.lineas.map((l) => l.texto).join(' '), /desde 3 pedidos confirmados/);
+
+  // Validaciones del editor
+  const cambiar = (condiciones, nombre = 'Minorista') => admin('PUT', `/api/admin/planes/${planMin.id}`, { nombre, descripcion: 'Lives', condiciones });
+  assert.equal((await cambiar({ precio_zona: 0 })).status, 400, 'precio fuera de rango');
+  assert.equal((await cambiar({ comision_tipo: 'porcentaje', comision_valor: 80 })).status, 400, 'comisión de más de 50%');
+  assert.equal((await cambiar({ comision_tipo: 'fija' })).status, 400, 'comisión sin valor');
+  assert.equal((await cambiar({ volumen_desde: 5 })).status, 400, 'volumen sin precio');
+  assert.equal((await cambiar({}, 'Empresa')).status, 400, 'nombre repetido');
+  assert.equal((await admin('DELETE', `/api/admin/planes/${planMin.id}`)).status, 400, 'los de fábrica no se borran');
+  const vista = (await admin('GET', '/api/admin/planes/vista?tipo=minorista&c=' + encodeURIComponent(JSON.stringify({ precio_zona: 30, comision_tipo: 'porcentaje', comision_valor: 3 })))).j;
+  assert.match(vista.lineas[0].texto, /Q30\.00/); assert.match(vista.lineas.map((l) => l.texto).join(' '), /descuenta el 3%/);
+
+  // El plan cambia: precio Q32, mínimo 2, comisión Q5, tope Q300, 2 días de bodega gratis, volumen desde 2 entregas a Q30
+  const ok = await cambiar({ precio_zona: 32, minimo: 2, comision_tipo: 'fija', comision_valor: 5, cobro_tope: 300, bodega_dias_gratis: 2, volumen_desde: 2, volumen_precio_zona: 30, ascenso_desde: 2 });
+  assert.equal(ok.status, 200, JSON.stringify(ok.j));
+  assert.equal((await precioDe(p1.id)).precio.precio, 35, 'el pedido ya confirmado conserva su precio');
+  assert.equal((await pedido(500)).status, 400, 'cobro por encima del tope del plan');
+  const p2 = (await pedido(80)).j.pedido;
+  const v2 = await precioDe(p2.id);
+  assert.equal(v2.precio.precio, 32, 'el pedido nuevo usa el precio del plan'); assert.equal(v2.tarifa_zona, 32);
+  panel = (await rosa('GET', '/api/empresa/carpetas')).j;
+  assert.equal(panel.minimo, 2); assert.equal(panel.condiciones.cobro_tope, 300);
+  assert.match(panel.condiciones.lineas.map((l) => l.texto).join(' '), /Q32\.00 en zonas.*Desde 2 entregas en el mes.*Llevas 0: te faltan 2.*descuenta Q5\.00.*2 días sin costo/);
+
+  // Con 2 confirmados ya se puede enviar; cada envío sale con su precio y la comisión del cobro
+  const env = await rosa('POST', `/api/empresa/carpetas/${carpeta}/enviar`, { modo: 'una_moto', recogida: 'sede' });
+  assert.equal(env.status, 201, JSON.stringify(env.j));
+  assert.equal((await admin('POST', `/api/admin/lotes-empresa/${env.j.lote}/recibido`, {})).status, 200);
+  const calc = await admin('POST', `/api/admin/lotes-empresa/${env.j.lote}/calcular`, { modo: 'una_moto', motos: 1 });
+  assert.equal((await admin('POST', `/api/admin/lotes-empresa/${env.j.lote}/confirmar`, { modo: 'una_moto', rutas: calc.j.rutas.map((r) => ({ pedidos: r.pedidos, piloto_id: null })) })).status, 200);
+  const e1 = db.prepare('SELECT * FROM envios WHERE pedido_id = ?').get(p1.id), e2 = db.prepare('SELECT * FROM envios WHERE pedido_id = ?').get(p2.id);
+  assert.equal(e1.precio, 35); assert.equal(e2.precio, 32); assert.equal(e1.comision_cobro, 5); assert.equal(e2.comision_cobro, 5);
+  assert.equal((await precioDe(p2.id)).precio.precio, 32, 'ya enviado, sigue con su precio');
+
+  // Entregados: a la tienda se le debe lo cobrado menos la comisión, igual en la caja de oficina
+  db.prepare("UPDATE envios SET estado = 'entregado', entregado_en = datetime('now') WHERE id IN (?, ?)").run(e1.id, e2.id);
+  const cp = (await rosa('GET', '/api/empresa/carpetas')).j.cobros_producto;
+  assert.equal(cp.pendiente, 220, '150 + 80 menos Q5 de comisión por cada uno'); assert.equal(cp.comision, 10);
+  const enCaja = (await admin('GET', '/api/admin/caja')).j.cobros.find((x) => x.id === rosaId);
+  assert.equal(enCaja.monto, 220); assert.equal(enCaja.comision, 10);
+  assert.equal((await admin('POST', '/api/admin/caja/pagar-cobros', { cliente_id: rosaId })).status, 200);
+  assert.equal((await rosa('GET', '/api/empresa/carpetas')).j.cobros_producto.pendiente, 0);
+
+  // Con 2 entregas en el mes aplica el precio por volumen, y el panel avisa que puede subir de plan
+  const carpeta2 = (await rosa('POST', '/api/empresa/carpetas', { dia: hoy, nombre: 'Segunda' })).j.carpeta.id;
+  const pedido2 = async (extra = {}) => { n++; return rosa('POST', `/api/empresa/carpetas/${carpeta2}/pedidos`, { descripcion: 'Falda ' + n, tamano: 'pequeno', cliente_nombre: 'Compradora ' + n, cliente_telefono: '5555720' + n,
+    foto: FOTO, llenar: true, dia: hoy, horario: 'cualquiera', direccion: 'Casa ' + n, zona: 'Zona 1', lat: 14.633, lng: -90.52, recibe_nombre: 'Compradora ' + n, recibe_telefono: '5555720' + n, metodo_pago: 'efectivo', ...extra }); };
+  const p3 = (await pedido2()).j.pedido;
+  assert.equal((await precioDe(p3.id)).precio.precio, 30, 'precio por volumen');
+  const sug = (await admin('GET', '/api/admin/planes')).j.sugerencias.find((s) => s.id === rosaId);
+  assert.ok(sug, 'aviso de ascenso'); assert.equal(sug.entregas, 2);
+
+  // Excepción solo para esta tienda, con vencimiento
+  const manana = new Date(Date.now() + 18 * 3600_000).toISOString().slice(0, 10);
+  assert.equal((await admin('PUT', `/api/admin/empresas/${rosaId}/condiciones`, { plan_id: planMin.id, propias: { precio_zona: 28 }, vence: '2020-01-01' })).status, 400, 'vencimiento en el pasado');
+  const exc = await admin('PUT', `/api/admin/empresas/${rosaId}/condiciones`, { plan_id: planMin.id, propias: { precio_zona: 28, volumen_desde: 999, volumen_precio_zona: 27, cobro_permitido: 'no' }, vence: manana, nota: 'Trato de bienvenida' });
+  assert.equal(exc.status, 200, JSON.stringify(exc.j));
+  assert.equal((await precioDe(p3.id)).precio.precio, 30, 'el confirmado no cambia');
+  const p4 = (await pedido2()).j.pedido;
+  assert.equal((await precioDe(p4.id)).precio.precio, 28, 'excepción vigente');
+  assert.equal((await pedido2({ cobro: 50 })).status, 400, 'la excepción quitó el cobro del producto');
+  let cond = (await admin('GET', `/api/admin/empresas/${rosaId}/condiciones`)).j;
+  assert.deepEqual(cond.propias, { precio_zona: 28, volumen_desde: 999, volumen_precio_zona: 27, cobro_permitido: false }); assert.equal(cond.vencidas, false); assert.equal(cond.del_plan.precio_zona, 32);
+  assert.equal((await rosa('GET', '/api/empresa/carpetas')).j.condiciones.vence, manana);
+  // Al vencer vuelve sola a su plan
+  db.prepare("UPDATE usuarios SET condiciones_vence = '2020-01-01' WHERE id = ?").run(rosaId);
+  const p5 = (await pedido2({ cobro: 50 })).j.pedido;
+  assert.equal((await precioDe(p5.id)).precio.precio, 30, 'vencida la excepción, vuelve al plan (con volumen)');
+  cond = (await admin('GET', `/api/admin/empresas/${rosaId}/condiciones`)).j;
+  assert.equal(cond.vencidas, true);
+  // Si quien recibe cambia el lugar a otra zona, el precio se vuelve a calcular con las condiciones de hoy
+  const tok = db.prepare('SELECT token FROM pedidos_empresa WHERE id = ?').get(p4.id).token;
+  const mov = await cliente()('POST', '/api/pedido/' + tok, { dia: hoy, horario: 'tarde', lat: 14.9, lng: -90.9, zona: 'Otra zona o municipio', direccion: 'Finca', recibe_nombre: 'Compradora', recibe_telefono: '55557209' });
+  assert.equal(mov.status, 200, JSON.stringify(mov.j)); assert.equal(mov.j.precio.precio, 45);
+
+  // Bodega: 2 días sin costo y después la tarifa general
+  db.prepare("UPDATE envios SET estado = 'en_sede', sede_llegada = datetime('now', '-60 hours') WHERE id = ?").run(e1.id);
+  const sede = (await admin('GET', `/api/admin/empresas-activas/${rosaId}`)).j.en_sede.find((x) => x.id === e1.id);
+  assert.equal(sede.dias, 3); assert.equal(sede.cargo, 10, '3 días menos 2 gratis, a Q10');
+  db.prepare("UPDATE envios SET estado = 'entregado', sede_llegada = NULL WHERE id = ?").run(e1.id);
+
+  // Plan nuevo: se asigna, se borra y la tienda vuelve al de su tipo de cuenta
+  const nuevo = await admin('POST', '/api/admin/planes', { nombre: 'Tienda frecuente', descripcion: 'Más de 40 al mes', condiciones: { precio_zona: 29, minimo: 1 } });
+  assert.equal(nuevo.status, 201, JSON.stringify(nuevo.j));
+  assert.equal((await admin('POST', '/api/admin/planes', { nombre: 'tienda FRECUENTE', condiciones: {} })).status, 400, 'nombre repetido');
+  assert.equal((await admin('PUT', `/api/admin/empresas/${rosaId}/condiciones`, { plan_id: nuevo.j.plan.id, propias: {} })).status, 200);
+  assert.equal(db.prepare('SELECT plan_id, condiciones_propias FROM usuarios WHERE id = ?').get(rosaId).plan_id, nuevo.j.plan.id);
+  panel = (await rosa('GET', '/api/empresa/carpetas')).j;
+  assert.equal(panel.minimo, 1); assert.equal(panel.condiciones.plan, 'Tienda frecuente');
+  assert.equal((await precioDe((await pedido2()).j.pedido.id)).precio.precio, 29);
+  const borrar = await admin('DELETE', `/api/admin/planes/${nuevo.j.plan.id}`);
+  assert.equal(borrar.status, 200); assert.equal(borrar.j.tiendas, 1);
+  assert.equal((await rosa('GET', '/api/empresa/carpetas')).j.condiciones.plan, 'Minorista');
+
+  // Permisos: oficina ve, solo administración cambia; una tienda no entra
+  db.prepare("INSERT OR IGNORE INTO usuarios (nombre,email,telefono,password_hash,rol,email_verificado,verificacion,permisos) VALUES ('Oficina Planes','oficina.planes@prueba.com','55559911',?,'operador',1,'verificado','envios,empresas')").run(hashPassword('clave-larga-123'));
+  const op = cliente();
+  assert.equal((await op('POST', '/api/acceso-familia', { email: 'oficina.planes@prueba.com', password: 'clave-larga-123' })).status, 200);
+  const deOficina = await op('GET', '/api/admin/planes');
+  assert.equal(deOficina.status, 200); assert.equal(deOficina.j.puede_editar, false);
+  assert.equal((await op('PUT', `/api/admin/planes/${planMin.id}`, { nombre: 'Minorista', condiciones: {} })).status, 403);
+  assert.equal((await op('PUT', `/api/admin/empresas/${rosaId}/condiciones`, { propias: {} })).status, 403);
+  assert.equal((await op('GET', `/api/admin/empresas/${rosaId}/condiciones`)).j.puede_editar, false);
+  assert.ok([401, 403].includes((await rosa('GET', '/api/admin/planes', null, { Referer: BASE + '/tienda' })).status));
+  db.prepare("UPDATE usuarios SET permisos = 'envios' WHERE email = 'oficina.planes@prueba.com'").run();
+  assert.equal((await op('GET', '/api/admin/planes')).status, 403, 'sin permiso de Empresas no ve los planes');
+
+  // Historial: qué cambió y cómo estaba antes
+  const h = db.prepare("SELECT accion, detalle FROM historial WHERE ruta = '/api/admin/planes/:id' AND accion LIKE 'Cambió el plan%' ORDER BY id DESC LIMIT 1").get();
+  assert.match(h.accion, /Cambió el plan «Minorista»: .*Precio en zonas preferenciales: 32/); assert.match(h.detalle, /Plan «Minorista»\. Antes: todo en los valores generales/);
+  const h2 = db.prepare("SELECT accion, detalle FROM historial WHERE ruta = '/api/admin/empresas/:id/condiciones' AND accion LIKE '%excepciones: %' ORDER BY id DESC LIMIT 1").get();
+  assert.match(h2.accion, /Precio en zonas preferenciales: 28.*vencen el/); assert.match(h2.detalle, /Rosa Shop/);
+
+  // Dejar el plan como estaba para no afectar otras pruebas
+  assert.equal((await cambiar({})).status, 200);
+  assert.equal((await rosa('GET', '/api/empresa/carpetas')).j.minimo, 3);
+});

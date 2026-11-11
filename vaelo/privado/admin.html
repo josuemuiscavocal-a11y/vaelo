@@ -10,7 +10,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/vendor/maplibre/maplibre-gl.css?v=4.7.1">
-  <link rel="stylesheet" href="/css/styles.css?v=20261109b">
+  <link rel="stylesheet" href="/css/styles.css?v=20261111b">
   <link rel="stylesheet" href="/css/suave.css?v=20261111a">
 </head>
 <body class="app-panel">
@@ -22,6 +22,7 @@
         <button role="tab" id="tab-mensajeros" aria-selected="false" aria-controls="panel-mensajeros" data-icono="piloto">Pilotos<span class="insignia" id="insignia-mensajeros" hidden></span></button>
         <button role="tab" id="tab-clientes" aria-selected="false" aria-controls="panel-clientes" data-icono="clientes">Clientes<span class="insignia" id="insignia-clientes" hidden></span></button>
         <button role="tab" id="tab-empresas" aria-selected="false" aria-controls="panel-empresas" data-icono="tienda">Empresas<span class="insignia" id="insignia-empresas" hidden></span></button>
+        <button role="tab" id="tab-planes" aria-selected="false" aria-controls="panel-planes" data-icono="etiqueta">Planes</button>
         <button role="tab" id="tab-quejas" aria-selected="false" aria-controls="panel-quejas" data-icono="alerta">Quejas<span class="insignia" id="insignia-quejas" hidden></span></button>
         <button role="tab" id="tab-caja" aria-selected="false" aria-controls="panel-caja" class="solo-admin" data-icono="caja">Caja<span class="insignia" id="insignia-caja" hidden></span></button>
         <button role="tab" id="tab-descuentos" aria-selected="false" aria-controls="panel-descuentos" class="solo-admin" data-icono="etiqueta">Descuentos</button>
@@ -173,6 +174,11 @@
           <h2>Historial</h2>
           <div id="caja-historial"></div>
         </div>
+      </section>
+
+      <section id="panel-planes" role="tabpanel" aria-labelledby="tab-planes" hidden>
+        <div id="msg-planes" class="mensaje" role="alert"></div>
+        <div id="zona-planes"></div>
       </section>
 
       <section id="panel-descuentos" role="tabpanel" aria-labelledby="tab-descuentos" hidden>
@@ -395,9 +401,9 @@
     let filtroEstado = 'activos', temporizador = null, mensajeros = [], vehiculos = [], mapaFlota = null, capaFlota = null;
     const sub = (t) => el('small', { style: 'color:var(--suave)', text: t || '' });
 
-    const tabs = ['envios', 'mensajeros', 'clientes', 'empresas', 'quejas', 'caja', 'descuentos', 'reportes', 'historial', 'tarifas'];
+    const tabs = ['envios', 'mensajeros', 'clientes', 'empresas', 'planes', 'quejas', 'caja', 'descuentos', 'reportes', 'historial', 'tarifas'];
     const TITULOS = { envios: ['Envíos', 'Pedidos y su estado'], mensajeros: ['Pilotos', 'Flota en vivo, documentos y aprobaciones'], clientes: ['Clientes', 'Identidad, empresas y calificaciones'],
-      caja: ['Caja', 'Efectivo, pagos a pilotos, reembolsos y cargos'], empresas: ['Empresas', 'Contratos y paquetes en la sede'], descuentos: ['Descuentos', 'Promociones y cupones'], reportes: ['Reportes', 'Cómo va el negocio'],
+      caja: ['Caja', 'Efectivo, pagos a pilotos, reembolsos y cargos'], empresas: ['Empresas', 'Contratos y paquetes en la sede'], planes: ['Planes', 'Lo que recibe cada tienda: precio, mínimo y cobros'], descuentos: ['Descuentos', 'Promociones y cupones'], reportes: ['Reportes', 'Cómo va el negocio'],
       tarifas: ['Tarifas y ajustes', 'Precios, zonas, sede y equipo'], quejas: ['Quejas', 'Reportes de clientes y empresas'], historial: ['Historial', 'Qué hizo cada persona en el panel'] };
     function abrirTab(nombre) {
       tabs.forEach(t => { $('tab-' + t).setAttribute('aria-selected', String(t === nombre)); $('panel-' + t).hidden = t !== nombre; });
@@ -411,6 +417,7 @@
       if (nombre === 'tarifas') { cargarTarifas(); cargarOperadores(); }
       if (nombre === 'caja') cargarCaja();
       if (nombre === 'empresas') cargarEmpresas();
+      if (nombre === 'planes') cargarPlanes();
       if (nombre === 'descuentos') cargarDescuentos();
       if (nombre === 'reportes') { cargarReportes(); cargarCierres(); }
     }
@@ -773,7 +780,8 @@ null))));
           const dato = (t, v) => el('div', {}, el('span', { text: t }), v || '—');
           poner(cuerpo, el('div', { class: 'datos' }, dato('Contacto', `${emp.contacto} · ${emp.telefono || ''}`), dato('Correo', emp.email), dato('Recogida', emp.punto ? emp.punto.direccion : 'No la ha marcado'),
             dato('Representante', [s.rep_nombre, s.rep_telefono].filter(Boolean).join(' · ')), dato('NIT', s.nit), dato('Giro', s.giro), dato('Contrato desde', s.aprobada_en ? fecha(s.aprobada_en, false) : '')),
-            el('div', { class: 'navegar' }, emp.telefono ? el('a', { class: 'boton cinta chico', href: `https://wa.me/${waTel(emp.telefono)}`, target: '_blank', rel: 'noopener', text: 'WhatsApp de la empresa' }) : null));
+            el('div', { class: 'navegar' }, el('button', { class: 'boton chico', type: 'button', text: 'Condiciones de esta tienda', onclick: () => abrirCondiciones(emp.id, () => abrirEmpresa(emp.id, 'datos')) }),
+              emp.telefono ? el('a', { class: 'boton cinta chico', href: `https://wa.me/${waTel(emp.telefono)}`, target: '_blank', rel: 'noopener', text: 'WhatsApp de la empresa' }) : null));
         }
       };
       poner($('dlg-cuerpo'), el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: () => $('dlg').close() }),
@@ -782,6 +790,159 @@ null))));
       if (!$('dlg').open) $('dlg').showModal();
     }
     const waTel = (t) => { let n = String(t || '').replace(/\D/g, ''); if (n.length === 8) n = '502' + n; return n; };
+
+    // ---------- Planes de tiendas: lo que recibe una minorista o una empresa ----------
+    // Formulario de condiciones (sirve para un plan y para las excepciones de una tienda). Vacío = no se cambia.
+    function formCondiciones(valores, { excepcion = false, base = null, generales = null, tipo = 'empresa' } = {}) {
+      const v = valores || {};
+      const pista = (k, dineroQ = true) => {
+        const b = base ? base[k] : generales ? ({ precio_zona: generales.precio_zona, precio_fuera: generales.precio_fuera, minimo: tipo === 'minorista' ? generales.minimo_minorista : generales.minimo_empresa, bodega_dia: generales.bodega_dia, bodega_dias_gratis: 0 })[k] : null;
+        if (b == null) return excepcion ? 'Como el plan' : 'Sin definir';
+        return `${excepcion ? 'Plan' : 'General'}: ${dineroQ ? dinero(b) : b}`;
+      };
+      const num = (k, etiqueta, { q = true, ayuda = '' } = {}) => {
+        const i = el('input', { type: 'number', min: 0, step: q ? '0.01' : '1', inputmode: q ? 'decimal' : 'numeric', id: 'cond-' + k, value: v[k] ?? '', placeholder: pista(k, q) });
+        return { k, i, nodo: el('div', { class: 'campo' }, el('label', { for: 'cond-' + k }, etiqueta, ayuda ? el('span', { class: 'ayuda', text: ayuda }) : null), i) };
+      };
+      const campos = [
+        num('precio_zona', 'Precio en zonas preferenciales (Q)'), num('precio_fuera', 'Precio a otras zonas (Q)'),
+        num('volumen_desde', 'Precio por volumen: desde cuántas entregas al mes', { q: false }), num('volumen_precio_zona', 'Por volumen, en zona (Q)'), num('volumen_precio_fuera', 'Por volumen, a otras zonas (Q)'),
+        num('minimo', 'Mínimo de pedidos para pasar a recoger', { q: false }),
+        num('cobro_tope', 'Máximo que el piloto cobra por paquete (Q)'), num('comision_valor', 'Valor de la comisión', { ayuda: 'Quetzales por paquete o porcentaje, según lo elegido' }),
+        num('bodega_dias_gratis', 'Días de bodega sin costo', { q: false }), num('bodega_dia', 'Bodega por día después (Q)'),
+      ];
+      const porK = Object.fromEntries(campos.map((c) => [c.k, c]));
+      const cobro = el('select', { id: 'cond-cobro' }, el('option', { value: '', text: excepcion ? 'Como el plan' : 'Sí, el piloto cobra el producto' }), excepcion ? el('option', { value: 'si', text: 'Sí, el piloto cobra el producto' }) : null, el('option', { value: 'no', text: 'No: la tienda cobra antes' }));
+      cobro.value = v.cobro_permitido === false ? 'no' : v.cobro_permitido === true && excepcion ? 'si' : '';
+      const comision = el('select', { id: 'cond-comision' }, el('option', { value: '', text: excepcion ? 'Como el plan' : 'Sin comisión' }), excepcion ? el('option', { value: 'ninguna', text: 'Sin comisión' }) : null,
+        el('option', { value: 'fija', text: 'Quetzales fijos por paquete cobrado' }), el('option', { value: 'porcentaje', text: 'Porcentaje de lo cobrado' }));
+      comision.value = v.comision_tipo && (excepcion || v.comision_tipo !== 'ninguna') ? v.comision_tipo : '';
+      const ascenso = excepcion ? null : el('input', { type: 'number', min: 1, step: '1', inputmode: 'numeric', id: 'cond-ascenso', value: v.ascenso_desde ?? '', placeholder: 'Sin aviso' });
+      const ver = () => { porK.comision_valor.nodo.hidden = !['fija', 'porcentaje'].includes(comision.value); };
+      comision.addEventListener('change', ver); ver();
+      const grupo = (titulo, nota, ...hijos) => el('fieldset', { class: 'grupo-cond' }, el('legend', { text: titulo }), nota ? el('p', { class: 'pista', text: nota }) : null, el('div', { class: 'fila' }, hijos));
+      const nodo = el('div', { class: 'form-cond' },
+        grupo('Precio del envío', 'Lo paga quien recibe. Los pedidos ya confirmados conservan su precio.', porK.precio_zona.nodo, porK.precio_fuera.nodo),
+        grupo('Precio por volumen', 'Cuando la tienda llega a esas entregas en el mes, sus envíos siguientes bajan de precio.', porK.volumen_desde.nodo, porK.volumen_precio_zona.nodo, porK.volumen_precio_fuera.nodo),
+        grupo('Recogida', null, porK.minimo.nodo),
+        grupo('Cobro del producto', 'El piloto cobra el producto al entregar y Vaelo se lo entrega a la tienda.',
+          el('div', { class: 'campo' }, el('label', { for: 'cond-cobro', text: '¿El piloto cobra el producto?' }), cobro), porK.cobro_tope.nodo,
+          el('div', { class: 'campo' }, el('label', { for: 'cond-comision', text: 'Comisión de Vaelo por cobrar' }), comision), porK.comision_valor.nodo),
+        grupo('Si no se pudo entregar', 'El paquete se guarda en la sede hasta que la tienda decida.', porK.bodega_dias_gratis.nodo, porK.bodega_dia.nodo),
+        ascenso ? grupo('Aviso de ascenso', 'El panel te avisa cuando una tienda de este plan llega a estas entregas en el mes, para que decidas si la subes de plan.',
+          el('div', { class: 'campo' }, el('label', { for: 'cond-ascenso', text: 'Avisar desde cuántas entregas al mes' }), ascenso)) : null);
+      const leer = () => {
+        const o = {};
+        for (const c of campos) if (c.i.value !== '' && !c.nodo.hidden) o[c.k] = c.i.value;
+        if (cobro.value) o.cobro_permitido = cobro.value;
+        if (comision.value) o.comision_tipo = comision.value;
+        if (ascenso && ascenso.value !== '') o.ascenso_desde = ascenso.value;
+        return o;
+      };
+      return { nodo, leer };
+    }
+    const lineasPlan = (lineas) => el('dl', { class: 'plan-lineas' }, lineas.flatMap((l) => [el('dt', { text: l.titulo }), el('dd', { text: l.texto })]));
+    // Vista previa: lo que leería la tienda con lo escrito en el formulario (no guarda nada)
+    function botonVistaTienda(leer, tipo, base) {
+      const caja = el('div', { class: 'vista-tienda', hidden: true });
+      const boton = el('button', { class: 'boton borde', type: 'button', text: 'Así lo ve la tienda', onclick: async () => {
+        try {
+          const c = { ...(base || {}), ...leer() };
+          for (const k of Object.keys(c)) if (c[k] == null) delete c[k];
+          const r = await api(`/api/admin/planes/vista?tipo=${tipo}&c=${encodeURIComponent(JSON.stringify(c))}`);
+          poner(caja, el('strong', { text: 'Así lo lee la tienda en «Mi tienda»' }), lineasPlan(r.lineas)); caja.hidden = false;
+        } catch (e) { poner(caja, el('div', { class: 'mensaje error', text: e.message })); caja.hidden = false; }
+      } });
+      return { boton, caja };
+    }
+    async function cargarPlanes() {
+      const zona = $('zona-planes');
+      let r;
+      try { r = await api('/api/admin/planes'); } catch (e) { mostrarMensaje($('msg-planes'), e.message); return; }
+      const tarjeta = (p) => el('article', { class: 'plan-tarjeta' },
+        el('div', { class: 'plan-cabeza' }, el('div', {}, el('h3', { text: p.nombre }), p.descripcion ? sub(p.descripcion) : null),
+          el('span', { class: 'etiqueta-azul', text: `${p.tiendas} ${p.tiendas === 1 ? 'tienda' : 'tiendas'}` })),
+        lineasPlan(p.resumen),
+        p.condiciones.ascenso_desde ? el('p', { class: 'pista', text: `Aviso de ascenso desde ${p.condiciones.ascenso_desde} entregas al mes.` }) : null,
+        r.puede_editar ? el('div', { class: 'navegar' }, el('button', { class: 'boton chico', type: 'button', text: 'Editar plan', onclick: () => editarPlan(p, r.generales) }),
+          !p.de_fabrica ? el('button', { class: 'boton peligro chico', type: 'button', text: 'Borrar', onclick: async () => {
+            if (!confirm(`¿Borrar el plan «${p.nombre}»?${p.tiendas ? ` Sus ${p.tiendas} tienda(s) vuelven al plan de su tipo de cuenta.` : ''}`)) return;
+            try { await api('/api/admin/planes/' + p.id, { method: 'DELETE' }); cargarPlanes(); } catch (e) { mostrarMensaje($('msg-planes'), e.message); }
+          } }) : null) : null);
+      poner(zona,
+        r.sugerencias.length ? el('div', { class: 'bloque aviso-ascenso' }, el('h2', { text: 'Tiendas listas para subir de plan' }),
+          r.sugerencias.map((s) => el('div', { class: 'caja-fila' }, el('div', {}, el('strong', { text: s.nombre }), el('br'), sub(`${s.entregas} entregas este mes · plan ${s.plan} (aviso desde ${s.desde})`)),
+            el('button', { class: 'boton chico', type: 'button', text: 'Ver condiciones', onclick: () => abrirCondiciones(s.id) })))) : null,
+        el('div', { class: 'bloque' },
+          el('div', { class: 'cab-bloque' }, el('div', {}, el('h2', { text: 'Planes de tiendas' }),
+            el('p', { class: 'bloque-nota', text: 'Cada tienda recibe lo que diga su plan. Lo que dejes vacío usa el valor general de Tarifas y ajustes. Para un trato especial con una sola tienda, ábrela en Empresas > Datos > Condiciones de esta tienda.' })),
+            r.puede_editar ? el('button', { class: 'boton', type: 'button', text: 'Nuevo plan', onclick: () => editarPlan(null, r.generales) }) : null),
+          r.puede_editar ? null : el('p', { class: 'pista', text: 'Solo administración puede cambiar los planes.' }),
+          el('div', { class: 'planes-grid' }, r.planes.map(tarjeta))));
+    }
+    function editarPlan(p, generales) {
+      const tipo = p && p.clave === 'minorista' ? 'minorista' : 'empresa';
+      const nombre = el('input', { id: 'plan-nombre', maxlength: 40, value: p ? p.nombre : '', placeholder: 'Ej. Tienda frecuente' });
+      const desc = el('input', { id: 'plan-desc', maxlength: 160, value: p ? p.descripcion : '', placeholder: 'Para quién es este plan' });
+      const f = formCondiciones(p ? p.condiciones : {}, { generales, tipo });
+      const msg = el('div', { class: 'mensaje', role: 'alert' });
+      const vista = botonVistaTienda(f.leer, tipo, null);
+      const guardar = el('button', { class: 'boton', type: 'button', text: p ? 'Guardar plan' : 'Crear plan', onclick: async () => {
+        guardar.disabled = true;
+        try {
+          await api(p ? '/api/admin/planes/' + p.id : '/api/admin/planes', { method: p ? 'PUT' : 'POST', body: { nombre: nombre.value, descripcion: desc.value, condiciones: f.leer() } });
+          $('dlg').close(); window.avisoHecho?.(p ? 'Plan guardado' : 'Plan creado', nombre.value); cargarPlanes();
+        } catch (e) { mostrarMensaje(msg, e.message); guardar.disabled = false; }
+      } });
+      $('dlg').classList.remove('ancha');
+      poner($('dlg-cuerpo'), el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: () => $('dlg').close() }),
+        el('h2', { text: p ? `Plan ${p.nombre}` : 'Nuevo plan' }),
+        el('p', { class: 'pista', text: p && p.tiendas ? `Lo que cambies aplica a ${p.tiendas} tienda(s) en sus pedidos nuevos. Los ya confirmados conservan su precio.` : 'Deja vacío lo que deba seguir el valor general.' }),
+        el('div', { class: 'fila' }, el('div', { class: 'campo' }, el('label', { for: 'plan-nombre', text: 'Nombre del plan' }), nombre), el('div', { class: 'campo' }, el('label', { for: 'plan-desc', text: 'Descripción (solo la ve oficina)' }), desc)),
+        f.nodo, vista.caja, msg, el('div', { class: 'navegar' }, guardar, vista.boton));
+      if (!$('dlg').open) $('dlg').showModal();
+    }
+    // Condiciones de una tienda: su plan y sus excepciones con vencimiento
+    async function abrirCondiciones(id, volver) {
+      let r;
+      try { r = await api(`/api/admin/empresas/${id}/condiciones`); } catch (e) { alert(e.message); return; }
+      const plan = el('select', { id: 'ct-plan' }, r.planes.map((p) => el('option', { value: p.id, text: p.nombre + (p.clave === (r.tipo_cuenta === 'minorista' ? 'minorista' : 'empresa') ? ' (el de su tipo de cuenta)' : '') })));
+      plan.value = String(r.plan ? r.plan.id : r.planes[0].id);
+      const f = formCondiciones(r.propias, { excepcion: true, base: r.del_plan });
+      const vence = el('input', { type: 'date', id: 'ct-vence', value: r.vence || '', min: new Date(Date.now() - 6 * 3600000).toISOString().slice(0, 10) });
+      const nota = el('input', { id: 'ct-nota', maxlength: 200, value: r.nota || '', placeholder: 'Ej. Precio de bienvenida acordado por WhatsApp' });
+      const msg = el('div', { class: 'mensaje', role: 'alert' });
+      const vista = botonVistaTienda(f.leer, r.tipo_cuenta, r.del_plan);
+      const guardar = el('button', { class: 'boton', type: 'button', text: 'Guardar condiciones', onclick: async () => {
+        guardar.disabled = true;
+        try {
+          await api(`/api/admin/empresas/${id}/condiciones`, { method: 'PUT', body: { plan_id: Number(plan.value), propias: f.leer(), vence: vence.value, nota: nota.value } });
+          window.avisoHecho?.('Condiciones guardadas', r.tienda); abrirCondiciones(id, volver);
+        } catch (e) { mostrarMensaje(msg, e.message); guardar.disabled = false; }
+      } });
+      const quitar = el('button', { class: 'boton peligro', type: 'button', text: 'Quitar excepciones', hidden: !Object.keys(r.propias).length, onclick: async () => {
+        if (!confirm(`¿Quitar las excepciones de ${r.tienda}? Vuelve a lo que dice su plan.`)) return;
+        try { await api(`/api/admin/empresas/${id}/condiciones`, { method: 'PUT', body: { plan_id: Number(plan.value), propias: {} } }); abrirCondiciones(id, volver); } catch (e) { mostrarMensaje(msg, e.message); }
+      } });
+      $('dlg').classList.remove('ancha');
+      poner($('dlg-cuerpo'), el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: () => $('dlg').close() }),
+        volver ? el('button', { class: 'boton borde chico', type: 'button', text: 'Volver a la tienda', onclick: volver }) : null,
+        el('h2', { style: 'margin-top:.75rem', text: `Condiciones de ${r.tienda}` }),
+        el('p', { class: 'pista', text: `${r.entregas_mes} entregas este mes.` }),
+        r.vencidas ? el('div', { class: 'mensaje error', text: `Las excepciones vencieron el ${r.vence}: la tienda ya volvió a lo que dice su plan. Cámbiales la fecha para reactivarlas o quítalas.` }) : null,
+        el('div', { class: 'vista-tienda' }, el('strong', { text: 'Lo que tiene hoy' }), lineasPlan(r.lineas)),
+        r.puede_editar ? [
+          el('div', { class: 'campo', style: 'margin-top:1rem' }, el('label', { for: 'ct-plan', text: 'Plan' }), plan),
+          el('h3', { style: 'margin-top:1rem', text: 'Excepciones solo para esta tienda' }),
+          el('p', { class: 'pista', text: 'Escribe solo lo que negociaste distinto al plan. Lo vacío sigue al plan.' }),
+          f.nodo,
+          el('div', { class: 'fila' }, el('div', { class: 'campo' }, el('label', { for: 'ct-vence' }, 'Vencen el', el('span', { class: 'ayuda', text: ' Vacío: no vencen. Al vencer, la tienda vuelve sola a su plan.' })), vence),
+            el('div', { class: 'campo' }, el('label', { for: 'ct-nota', text: 'Nota para oficina' }), nota)),
+          vista.caja, msg, el('div', { class: 'navegar' }, guardar, vista.boton, quitar)]
+          : el('p', { class: 'pista', text: 'Solo administración puede cambiar las condiciones.' }));
+      if (!$('dlg').open) $('dlg').showModal();
+    }
+
 
     // "Dividir pedidos": calcular rutas, ajustarlas a mano, elegir pilotos y confirmar
     const COLORES_RUTA = ['#1c3faa', '#d9480f', '#17824a', '#9c36b5', '#e8b800', '#0b7285', '#c2255c', '#495057'];
@@ -1629,7 +1790,7 @@ null))));
     let rolPanel = 'admin';
     // Pestañas que ve cada empleado según sus permisos (la administración ve todo)
     let permisosPanel = null;
-    const AREA_TAB = { envios: 'envios', mensajeros: 'pilotos', clientes: 'clientes', empresas: 'empresas', quejas: 'envios' };
+    const AREA_TAB = { envios: 'envios', mensajeros: 'pilotos', clientes: 'clientes', empresas: 'empresas', planes: 'empresas', quejas: 'envios' };
     function aplicarRol(rol, permisos) {
       rolPanel = rol; permisosPanel = permisos || null;
       document.querySelectorAll('.solo-admin').forEach(x => { x.hidden = rol !== 'admin'; });
@@ -1759,7 +1920,7 @@ null))));
       } catch (e) { mostrarMensaje($('msg-caja'), e.message); }
       cargarSueldos(); cargarCierre();
       const lista = (filas, boton, ruta, pregunta) => filas.length ? filas.map(x => el('div', { class: 'caja-fila' },
-        el('div', {}, el('strong', { text: x.empresa_nombre || x.nombre }), el('br'), sub(`${x.envios} envíos${x.telefono ? ' · ' + x.telefono : ''}`)), el('strong', { class: 'caja-monto', text: dinero(x.monto) }),
+        el('div', {}, el('strong', { text: x.empresa_nombre || x.nombre }), el('br'), sub(`${x.envios} envíos${x.telefono ? ' · ' + x.telefono : ''}${x.comision > 0 ? ' · ya descontada la comisión de ' + dinero(x.comision) : ''}`)), el('strong', { class: 'caja-monto', text: dinero(x.monto) }),
         el('button', { class: 'boton chico', type: 'button', text: boton, onclick: async () => {
           if (!confirm(pregunta(x))) return;
           try { await api(ruta, { body: { cliente_id: x.id } }); cargarCaja(); } catch (e) { mostrarMensaje($('msg-caja'), e.message); }
