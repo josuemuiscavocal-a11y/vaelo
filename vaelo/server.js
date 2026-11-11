@@ -1486,7 +1486,7 @@ ruta('GET', '/api/admin/mensajeros', ({ req }) => {
   const quien = requiereStaff(req);
   const filas = db.prepare(`${SQL_PILOTO} WHERE u.rol = 'mensajero'
     ORDER BY CASE u.estado_piloto WHEN 'en_revision' THEN 0 WHEN 'aprobado' THEN 1 WHEN 'suspendido' THEN 2 ELSE 3 END, u.nombre`).all();
-  return { mensajeros: filas.map(pilotoSalida), estados: ESTADOS_PILOTO };
+  return { mensajeros: filas.map((p) => ({ ...pilotoSalida(p), carga: cargaPiloto(p.id) })), estados: ESTADOS_PILOTO };
 });
 
 ruta('GET', '/api/admin/mensajeros/:id', ({ req, params }) => {
@@ -1627,9 +1627,28 @@ ruta('GET', '/api/admin/flota', ({ req }) => {
     const minutos = p.ubic_fecha ? Math.round((Date.now() - fechaMs(p.ubic_fecha)) / 60_000) : null;
     return { id: p.id, nombre: p.nombre, telefono: p.telefono, vehiculo: p.vehiculo, placa: p.veh_placa, en_linea: vivo,
       sin_senal: !vivo && !!activo && activo.asignacion === 'aceptado', lat: p.ubic_lat, lng: p.ubic_lng, ubic_fecha: p.ubic_fecha, minutos,
-      activos: p.activos, envio: activo || null };
+      activos: p.activos, envio: activo || null, carga: cargaPiloto(p.id) };
   }) };
 });
+
+// Qué lleva ahora cada piloto: si está en una ruta de empresa o con varios envíos de un mismo cliente, asignarle
+// más envíos sueltos lo puede distraer. El panel lo muestra debajo del nombre y pide confirmar.
+function cargaPiloto(pilotoId) {
+  const filas = db.prepare(`SELECT usuario_id, pedido_id, grupo FROM envios WHERE mensajero_id = ? AND estado IN ('pendiente','recogido','en_camino')
+    AND asignacion IN ('aceptado','por_aceptar')`).all(pilotoId);
+  if (!filas.length) return null;
+  const deEmpresa = filas.filter((f) => f.pedido_id);
+  if (deEmpresa.length) {
+    const nombres = [...new Set(deEmpresa.map((f) => nombreEmpresa(f.usuario_id)))];
+    return { tipo: 'empresa', n: deEmpresa.length, texto: `En envíos de empresa · ${nombres.join(', ')} (${deEmpresa.length} por entregar)`, distrae: true };
+  }
+  const porGrupo = {};
+  for (const f of filas) if (f.grupo) porGrupo[f.grupo] = (porGrupo[f.grupo] || 0) + 1;
+  const mayor = Math.max(0, ...Object.values(porGrupo));
+  if (mayor >= 3) return { tipo: 'cliente', n: mayor, texto: `Llevando ${mayor} envíos de un mismo cliente`, distrae: true };
+  if (filas.length >= 3) return { tipo: 'varios', n: filas.length, texto: `Con ${filas.length} envíos en curso`, distrae: true };
+  return { tipo: 'pocos', n: filas.length, texto: `Con ${filas.length} envío${filas.length === 1 ? '' : 's'} en curso`, distrae: false };
+}
 
 // Pilotos ordenados por cercanía al punto de recogida de un envío
 ruta('GET', '/api/admin/envios/:id/cercanos', ({ req, params }) => {
@@ -1640,11 +1659,12 @@ ruta('GET', '/api/admin/envios/:id/cercanos', ({ req, params }) => {
   const lista = db.prepare(`${SQL_PILOTO} WHERE u.rol = 'mensajero' AND u.estado_piloto = 'aprobado' AND u.activo = 1`).all()
     .filter((p) => puedeTrabajar(p))
     .map((p) => ({ id: p.id, nombre: p.nombre, vehiculo: p.vehiculo, vehiculo_id: p.vehiculo_id, placa: p.veh_placa, activos: p.activos,
-      calificacion: p.calificacion, en_linea: enLineaReal(p),
+      calificacion: p.calificacion, en_linea: enLineaReal(p), carga: cargaPiloto(p.id),
       km: o && p.ubic_lat != null && enLineaReal(p) ? Math.round(distanciaRecta(o, { lat: p.ubic_lat, lng: p.ubic_lng }) * 10) / 10 : null }));
-  // Primero los que están en línea; entre ellos, los de más estrellas arriba (los nuevos cuentan como 4) y luego el más cercano
+  // Primero los que están en línea y libres (los que van en ruta de empresa o con muchos envíos, abajo); luego estrellas y cercanía
   const nivel = (p) => Math.round((p.calificacion ?? 4) * 2) / 2;
-  lista.sort((a, b) => (b.en_linea - a.en_linea) || (nivel(b) - nivel(a)) || ((a.km ?? 9999) - (b.km ?? 9999)) || (a.activos - b.activos));
+  const ocupado = (p) => (p.carga && p.carga.distrae ? 1 : 0);
+  lista.sort((a, b) => (b.en_linea - a.en_linea) || (ocupado(a) - ocupado(b)) || (nivel(b) - nivel(a)) || ((a.km ?? 9999) - (b.km ?? 9999)) || (a.activos - b.activos));
   return { pilotos: lista, con_ubicacion: !!o };
 });
 
@@ -1657,10 +1677,10 @@ ruta('POST', '/api/admin/envios/:id/asignar-cercano', ({ req, params }) => {
   if (!listoParaPiloto(e)) falla(400, motivoNoListo(e));
   const o = e.origen_lat != null ? { lat: e.origen_lat, lng: e.origen_lng } : null;
   const lista = db.prepare(`${SQL_PILOTO} WHERE u.rol = 'mensajero' AND u.estado_piloto = 'aprobado' AND u.activo = 1 AND u.vehiculo_id = ?`).all(e.vehiculo_id)
-    .filter((p) => puedeTrabajar(p) && enLineaReal(p))
+    .filter((p) => puedeTrabajar(p) && enLineaReal(p) && !cargaPiloto(p.id)?.distrae)   // no se le carga a quien va en ruta de empresa o con muchos envíos
     .map((p) => ({ p, km: o && p.ubic_lat != null ? distanciaRecta(o, { lat: p.ubic_lat, lng: p.ubic_lng }) : 999 }))
     .sort((a, b) => (a.p.activos - b.p.activos) * 2 + (a.km - b.km));
-  if (!lista.length) falla(400, 'No hay pilotos en línea con ese vehículo. Elige uno de la lista o espera a que alguien se conecte.');
+  if (!lista.length) falla(400, 'No hay pilotos libres en línea con ese vehículo (los demás van en ruta de empresa o con varios envíos). Elige uno de la lista o espera a que alguien se desocupe.');
   const m = lista[0].p;
   db.prepare(`UPDATE envios SET mensajero_id = ?, asignacion = 'por_aceptar', asignado_en = datetime('now'), llego_origen = 0, llegando_destino = 0,
     actualizado = datetime('now') WHERE id = ?`).run(m.id, e.id);
@@ -4440,7 +4460,7 @@ const loteParaPanel = (id) => db.prepare('SELECT * FROM lotes_empresa WHERE id =
 function pilotosPara(vehiculoId) {
   return db.prepare(`${SQL_PILOTO} WHERE u.rol = 'mensajero' AND u.estado_piloto = 'aprobado' AND u.activo = 1`).all()
     .filter((p) => puedeTrabajar(p) && (!vehiculoId || p.vehiculo_id === vehiculoId))
-    .map((p) => ({ id: p.id, nombre: p.nombre, vehiculo: p.vehiculo, vehiculo_id: p.vehiculo_id, en_linea: enLineaReal(p), activos: p.activos, lat: enLineaReal(p) ? p.ubic_lat : null, lng: enLineaReal(p) ? p.ubic_lng : null }));
+    .map((p) => ({ id: p.id, nombre: p.nombre, vehiculo: p.vehiculo, vehiculo_id: p.vehiculo_id, en_linea: enLineaReal(p), activos: p.activos, carga: cargaPiloto(p.id), lat: enLineaReal(p) ? p.ubic_lat : null, lng: enLineaReal(p) ? p.ubic_lng : null }));
 }
 ruta('GET', '/api/admin/lotes-empresa/:id', ({ req, params }) => {
   const quien = requiereStaff(req);

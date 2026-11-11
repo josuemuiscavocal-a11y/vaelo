@@ -1508,3 +1508,5 @@ fieldset { min-width: 0; } .recientes { max-width: 100%; min-width: 0; }
 .marcado-opciones .marcado-chip.recomendado:not([aria-pressed="true"]) { border-color: #1f8a4c; }
 .marcado-opciones .marcado-chip.recomendado small { color: #1f6b3d; opacity: 1; font-weight: 700; }
 .marcado-opciones .marcado-chip.recomendado[aria-pressed="true"] small { color: #bfe8cf; }
+.carga-piloto { display: inline-block; font-size: .75rem; font-weight: 700; border-radius: 999px; padding: .1rem .55rem; margin-top: .2rem; background: #eef2fd; color: var(--azul-hondo); }
+.carga-piloto.ocupado { background: #fff1d6; color: #8a5a00; border: 1px solid #f2c46b; }

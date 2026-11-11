@@ -592,7 +592,7 @@ null))));
       const selPil = el('select', { id: 'fl-pil' });
       const pintarPilotos = () => {
         const lista = m.mensajeros.filter(p => p.puede_trabajar).sort((a, b) => (b.vehiculo_id === Number(selVeh.value)) - (a.vehiculo_id === Number(selVeh.value)) || b.en_linea_real - a.en_linea_real);
-        poner(selPil, ...(lista.length ? lista.map(p => el('option', { value: p.id, text: `${p.nombre} · ${p.vehiculo || 'sin vehículo'}${p.en_linea_real ? ' · en línea' : ''}` })) : [el('option', { value: '', text: 'No hay pilotos disponibles' })]));
+        poner(selPil, ...(lista.length ? lista.map(p => el('option', { value: p.id, text: `${p.nombre} · ${p.vehiculo || 'sin vehículo'}${p.en_linea_real ? ' · en línea' : ''}${textoCargaCorto(p.carga)}` })) : [el('option', { value: '', text: 'No hay pilotos disponibles' })]));
       };
       selVeh.addEventListener('change', pintarPilotos); pintarPilotos();
       const precio = el('input', { id: 'fl-precio', type: 'number', min: 1, step: '0.01', class: 'entrada-grande', placeholder: '0.00' });
@@ -607,6 +607,8 @@ null))));
       precio.addEventListener('input', pintarTotal); pintarTotal();
       const resultado = el('div');
       const boton = el('button', { class: 'boton', type: 'button', text: 'Crear flete y generar enlace', onclick: async () => {
+        const elegido = m.mensajeros.find(p => String(p.id) === String(selPil.value));
+        if (elegido && !confirmarCarga(elegido.nombre, elegido.carga, 'este flete')) return;
         boton.disabled = true;
         try {
           const r = await api('/api/admin/fletes', { body: { precio: precio.value, ayudantes: ayud, vehiculo_id: selVeh.value, mensajero_id: selPil.value, cliente_telefono: tel.value, descripcion: desc.value } });
@@ -822,7 +824,7 @@ null))));
       };
       const pintarRutas = () => {
         const opcionesPiloto = (sel) => [el('option', { value: '', text: modo === 'pickup' ? 'Elige el piloto del pickup' : 'Ofrecer al piloto libre más cercano' }),
-          ...pilotosDe().map(p => el('option', { value: p.id, text: `${p.nombre}${p.en_linea ? ' · en línea' : ''}${p.activos ? ` · ${p.activos} activos` : ''}`, selected: String(sel) === String(p.id) }))];
+          ...pilotosDe().map(p => el('option', { value: p.id, text: `${p.nombre}${p.en_linea ? ' · en línea' : ''}${p.carga && p.carga.distrae ? textoCargaCorto(p.carga) : p.activos ? ` · ${p.activos} activos` : ''}`, selected: String(sel) === String(p.id) }))];
         const conTiempo = rutas.filter(q => q.minutos);
         const resumenRutas = rutas.length > 1 && conTiempo.length ? el('p', { class: 'rutas-resumen' },
           el('strong', { text: `${rutas.length} rutas` }), ` · la más larga ~${(Math.max(...conTiempo.map(q => q.minutos)) / 60).toFixed(1).replace('.0', '')} h, la más corta ~${(Math.min(...conTiempo.map(q => q.minutos)) / 60).toFixed(1).replace('.0', '')} h · ${conTiempo.reduce((t, q) => t + (q.km || 0), 0).toFixed(1)} km en total`) : null;
@@ -869,6 +871,10 @@ null))));
       const bloqueTransf = null;
       const confirmar = el('button', { class: 'boton accion-principal', type: 'button', text: 'Confirmar rutas y avisar a los pilotos', disabled: !l.se_puede_asignar || (l.recogida === 'sede' && !l.recibido_en), onclick: async () => {
         if (!rutas.length) { mostrarMensaje(msg, 'Primero calcula las rutas.'); return; }
+        for (const q of rutas) {
+          const p = pilotosDe().find(x => String(x.id) === String(q.piloto_id));
+          if (p && !confirmarCarga(p.nombre, p.carga, 'otra ruta')) return;
+        }
         confirmar.disabled = true;
         try {
           const x = await api(`/api/admin/lotes-empresa/${loteId}/confirmar`, { body: { modo, rutas: rutas.map(q => ({ pedidos: q.pedidos, piloto_id: q.piloto_id })), pickup_precio: precio.value } });
@@ -1045,17 +1051,27 @@ null))));
           const { pilotos, con_ubicacion } = await api(`/api/admin/envios/${e.id}/cercanos`);
           if (!pilotos.length) poner(listaCercanos, el('p', { class: 'pista', text: 'No hay pilotos aprobados con documentos vigentes.' }));
           else poner(listaCercanos, ...pilotos.map((p, i) => el('div', { class: 'cercano' + (i === 0 && p.en_linea ? ' mejor' : '') },
-            el('div', {}, el('span', { class: 'punto-linea' + (p.en_linea ? ' si' : '') }), el('strong', { text: p.nombre }),
+            el('div', {}, el('span', { class: 'punto-linea' + (p.en_linea ? ' si' : '') }), el('strong', { text: p.nombre }), p.carga ? el('div', {}, chipCarga(p.carga)) : null,
               el('div', { class: 'pista' }, [p.en_linea ? (p.km != null ? `a ${p.km} km` : 'en línea') : 'fuera de línea', p.vehiculo, p.placa, `${p.activos} activos`, p.calificacion ? `${p.calificacion} de 5` : null].filter(Boolean).join(' · '),
                 p.vehiculo_id !== e.vehiculo_id ? el('span', { class: 'etiqueta-pendiente', style: 'margin-left:.4rem', text: 'Otro vehículo' }) : null,
                 i === 0 && p.en_linea && con_ubicacion ? el('span', { class: 'etiqueta-completa', style: 'margin-left:.4rem', text: 'Más cercano' }) : null)),
             p.id === e.mensajero_id ? el('span', { class: 'pista', text: 'Asignado' })
               : el('button', { class: 'boton chico', type: 'button', text: 'Asignar', onclick: (ev) => {
                   if (!p.en_linea && !confirm(`${p.nombre} está fuera de línea y quizá no vea el aviso. ¿Asignar de todas formas?`)) return;
+                  if (!confirmarCarga(p.nombre, p.carga, 'este envío')) return;
                   guardar(ev.target, () => api(`/api/admin/envios/${e.id}/asignar`, { body: { mensajero_id: p.id } }));
                 } }))));
         } catch (err) { poner(listaCercanos, el('p', { class: 'mensaje error', text: err.message })); }
       }
+    }
+
+    // Carga del piloto: si va en ruta de empresa o con varios envíos, asignarle más lo puede distraer
+    const chipCarga = (c) => c ? el('span', { class: 'carga-piloto' + (c.distrae ? ' ocupado' : ''), text: c.texto }) : null;
+    const textoCargaCorto = (c) => (c && c.distrae ? (c.tipo === 'empresa' ? ' · en envíos de empresa' : ` · ${c.texto.toLowerCase()}`) : '');
+    function confirmarCarga(nombre, c, que = 'más envíos') {
+      if (!c || !c.distrae) return true;
+      const por = c.tipo === 'empresa' ? `está haciendo una ruta de empresa (${c.texto.replace('En envíos de empresa · ', '')})` : c.texto.toLowerCase();
+      return confirm(`${nombre} ${por}.\n\nAsignarle ${que} lo puede distraer y hacer que trabaje mal (paquetes confundidos o atrasos).\n\n¿Asignar de todas formas?`);
     }
 
     // ---------- Pilotos: mapa en vivo y lista ----------
@@ -1078,7 +1094,7 @@ null))));
           : rv.porVencer.length ? el('span', { class: 'etiqueta-azul', text: 'Por vencer' }) : el('span', { class: 'etiqueta-completa', text: 'Completos' });
         const ficha = rolPanel === 'admin';
         return el('tr', { class: ficha ? 'clic' : '', tabindex: 0, onclick: () => ficha && abrirFicha(p.id), onkeydown: (ev) => { if (ficha && ev.key === 'Enter') abrirFicha(p.id); } },
-          el('td', {}, el('span', { class: 'punto-linea' + (p.en_linea_real ? ' si' : ''), title: p.en_linea_real ? 'En línea' : 'Fuera de línea' }), el('strong', { text: p.nombre }), el('br'), sub(p.telefono)),
+          el('td', {}, el('span', { class: 'punto-linea' + (p.en_linea_real ? ' si' : ''), title: p.en_linea_real ? 'En línea' : 'Fuera de línea' }), el('strong', { text: p.nombre }), el('br'), sub(p.telefono), p.carga ? [el('br'), chipCarga(p.carga)] : null),
           el('td', {}, etiquetaEstado(p), ...extras.map(x => [el('br'), x])),
           el('td', {}, p.vehiculo || '—', el('br'), sub(p.veh_placa || '')),
           el('td', {}, docs),
@@ -1108,6 +1124,7 @@ null))));
         const texto = el('div', { class: 'popup-piloto' }, el('strong', { text: p.nombre }), el('br'), `${p.vehiculo || ''} ${p.placa || ''}`, el('br'),
           p.sin_senal ? el('span', { style: 'color:#b4261c', text: `Sin señal hace ${p.minutos} min` }) : `Actualizado hace ${p.minutos ?? 0} min`, el('br'),
           p.envio ? `${p.envio.guia}: ${p.envio.asignacion === 'por_aceptar' ? 'esperando que acepte' : p.envio.estado === 'pendiente' ? 'va a recoger' : 'va a entregar en ' + p.envio.destino_zona}` : 'Libre',
+          p.carga && p.carga.distrae ? [el('br'), chipCarga(p.carga)] : null,
           el('br'), telLink(p.telefono));
         if (capaFlota) {
           if (destino && destino[0] != null) capaFlota.linea([[p.lat, p.lng], destino], { color: '#0e2463', ancho: 2, punteada: true, opacidad: 0.7 });

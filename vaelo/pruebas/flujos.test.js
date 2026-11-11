@@ -939,3 +939,21 @@ test('códigos sin cruzarse: clientes con las mismas iniciales, empresa con las 
   assert.deepEqual(activos, [], 'códigos repetidos en curso: ' + JSON.stringify(activos));
   db.prepare("UPDATE envios SET estado = 'cancelado' WHERE usuario_id IN (SELECT id FROM usuarios WHERE email LIKE 'zq%@prueba.com')").run();
 });
+
+test('panel: el piloto en ruta de empresa sale marcado y "Al más cercano" no le carga envíos sueltos', async () => {
+  const e = db.prepare("SELECT id FROM envios WHERE pedido_id IS NOT NULL ORDER BY id DESC LIMIT 1").get();
+  if (!e) return;
+  db.prepare("UPDATE envios SET mensajero_id = ?, asignacion = 'aceptado', estado = 'en_camino' WHERE id = ?").run(pilotoId, e.id);
+  const pil = (await admin('GET', '/api/admin/mensajeros')).j.mensajeros.find((p) => p.id === pilotoId);
+  assert.equal(pil.carga.tipo, 'empresa'); assert.match(pil.carga.texto, /En envíos de empresa/); assert.equal(pil.carga.distrae, true);
+  // Un envío suelto: en la lista de cercanos sale con su aviso y abajo de los libres
+  const s = await envioEnCamino().catch(() => null);
+  if (s) {
+    db.prepare("UPDATE envios SET mensajero_id = NULL, asignacion = NULL, estado = 'pendiente' WHERE id = ?").run(s.id);
+    const lista = (await admin('GET', `/api/admin/envios/${s.id}/cercanos`)).j.pilotos;
+    const yo = lista.find((p) => p.id === pilotoId);
+    assert.ok(yo && yo.carga && yo.carga.distrae);
+    db.prepare("UPDATE envios SET estado = 'cancelado' WHERE id = ?").run(s.id);
+  }
+  db.prepare("UPDATE envios SET estado = 'entregado' WHERE id = ?").run(e.id);
+});
