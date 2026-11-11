@@ -143,6 +143,7 @@
       </section>
 
       <section id="panel-lista" role="tabpanel" aria-labelledby="tab-lista" hidden>
+        <div id="promo-tienda"></div>
         <div class="filtros" id="filtro-envios" role="tablist"></div>
         <div id="lista" class="lista-envios"></div>
       </section>
@@ -158,6 +159,7 @@
           </div>
           <button class="boton" type="submit">Guardar datos</button>
         </form>
+        <section class="bloque" id="bloque-tienda" hidden></section>
         <section class="bloque" id="bloque-direcciones">
           <h2>Contactos guardados</h2>
           <p style="color:var(--suave)">Se guardan al enviar un paquete escribiendo un nombre en "Guardar este contacto como".</p>
@@ -634,6 +636,41 @@
         el('span', { style: 'text-align:right' }, el('span', { class: 'monto', text: dinero(c.monto) }), el('br'), el('span', { class: estado(c)[1], text: estado(c)[0] })))))
         : el('p', { class: 'pista', text: 'No tienes cargos.' }));
     }
+    // Tienda minorista: para quien vende en lives o redes y manda varios pedidos a la vez
+    function pintarTienda() {
+      const caja = $('bloque-tienda'), promo = $('promo-tienda');
+      const tipo = yoCliente.tipo_cuenta;
+      caja.hidden = tipo === 'empresa';
+      promo.replaceChildren(tipo === 'personal' || !tipo ? el('button', { type: 'button', class: 'promo-tienda', onclick: () => { abrirTab('cuenta'); caja.scrollIntoView({ behavior: 'smooth' }); } },
+        el('strong', { text: '¿Vendes en lives o por redes?' }), el('span', { text: 'Activa tu tienda y manda todos tus pedidos juntos.' })) : '');
+      if (tipo === 'empresa') return;
+      const msg = el('div', { class: 'mensaje', role: 'alert' });
+      if (tipo === 'minorista') {
+        caja.replaceChildren(el('h2', { text: 'Tu tienda' }),
+          el('p', { class: 'pista' }, 'Tu cuenta es de tienda minorista: ', el('strong', { text: yoCliente.empresa_nombre || '' }), '. Tus pedidos de lives se manejan en la pestaña «Mi tienda». También puedes seguir enviando paquetes sueltos como siempre.'), msg,
+          el('div', { style: 'display:flex;gap:.5rem;flex-wrap:wrap' },
+            el('button', { class: 'boton', type: 'button', text: 'Ir a Mi tienda', onclick: () => abrirTab('empresa') }),
+            el('button', { class: 'boton borde', type: 'button', text: 'Volver a cuenta personal', onclick: async () => {
+              if (!confirm('Tu cuenta volverá a ser personal y dejarás de ver «Mi tienda». ¿Seguro?')) return;
+              try { await api('/api/cuenta/minorista', { body: { activar: false } }); await cargarCuenta(); } catch (e) { mostrarMensaje(msg, e.message); }
+            } })));
+        return;
+      }
+      const tienda = el('input', { id: 'nombre-tienda', maxlength: 60, placeholder: 'Ej. Moda Luna GT' });
+      caja.replaceChildren(el('h2', { text: '¿Vendes en lives o por redes?' }),
+        el('p', { class: 'pista', text: 'Activa tu tienda gratis. Sin contrato y sin papeles: sigue siendo tu misma cuenta, pero con una pestaña «Mi tienda» para mandar todos los pedidos de tu live juntos.' }),
+        el('ul', { class: 'lista-simple' },
+          el('li', { text: 'Apuntas cada pedido en una carpeta del día y le mandas el enlace a tu cliente por WhatsApp.' }),
+          el('li', { text: 'Tu cliente confirma su dirección y su horario. Tú no tienes que pedirle nada más.' }),
+          el('li', { text: 'Con los confirmados que pide la carpeta, la envías a Vaelo: recogemos todo junto y armamos la ruta.' }),
+          el('li', { text: 'Cada cliente paga su envío al recibir. Si cobras contra entrega, el piloto te trae tu dinero.' })), msg,
+        el('div', { class: 'campo' }, el('label', { for: 'nombre-tienda', text: 'Nombre de tu tienda' }), tienda),
+        el('button', { class: 'boton', type: 'button', text: 'Activar mi tienda', onclick: async (ev) => {
+          ev.target.disabled = true;
+          try { await api('/api/cuenta/minorista', { body: { tienda: tienda.value } }); await cargarCuenta(); abrirTab('empresa'); }
+          catch (e) { mostrarMensaje(msg, e.message); ev.target.disabled = false; }
+        } }));
+    }
     // Avisos de la cuenta: correo sin confirmar y datos de empresa
     let yoCliente = null, correoActivo = false;
     async function cargarCuenta() {
@@ -645,7 +682,9 @@
       if (yoCliente.rol === 'cliente') {
 
         $('campo-paquetes').hidden = yoCliente.tipo_cuenta !== 'empresa';
-        $('tab-empresa').hidden = yoCliente.tipo_cuenta !== 'empresa';
+        $('tab-empresa').hidden = !['empresa', 'minorista'].includes(yoCliente.tipo_cuenta);
+        $('tab-empresa').textContent = yoCliente.tipo_cuenta === 'minorista' ? 'Mi tienda' : 'Mi empresa';
+        pintarTienda();
         if (yoCliente.tipo_cuenta === 'empresa' && yoCliente.descuento_empresa > 0) avisos.push(el('div', { class: 'mensaje exito', text: `Tu empresa tiene ${yoCliente.descuento_empresa}% de descuento en sus envíos.` }));
         if (correoActivo && !yoCliente.email_verificado) avisos.push(el('div', { class: 'mensaje aviso aviso-accion' },
           el('span', {}, 'Confirma tu correo: te enviamos un enlace a ', el('strong', { text: yoCliente.email }), '. Revisa también la carpeta de spam.'),
@@ -1018,14 +1057,14 @@
       $('barra-boton').addEventListener('click', () => $('form-envio').requestSubmit());
 
       if (location.pathname === '/mi-cuenta') {
-        const tabInicial = usuario.tipo_cuenta === 'empresa' && !new URLSearchParams(location.search).get('envio') ? 'empresa' : 'lista';
+        const tabInicial = ['empresa', 'minorista'].includes(usuario.tipo_cuenta) && !new URLSearchParams(location.search).get('envio') ? 'empresa' : 'lista';
         abrirTab(tabInicial);
         if (tabInicial !== 'lista') cargarEnvios();   // así el resumen de arriba (en curso, entregados) no sale en cero
       } else cargarEnvios();
       // Desde un aviso del celular: abre ese envío
       const abrir = new URLSearchParams(location.search).get('envio');
       if (abrir) verDetalle(Number(abrir));
-      if (new URLSearchParams(location.search).get('empresa')) { if (usuario.tipo_cuenta === 'empresa') abrirTab('empresa'); else location.href = '/empresas'; }
+      if (new URLSearchParams(location.search).get('empresa')) { if (['empresa', 'minorista'].includes(usuario.tipo_cuenta)) abrirTab('empresa'); else location.href = '/empresas'; }
     })();
   </script>
 </body>

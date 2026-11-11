@@ -525,7 +525,8 @@ agregarColumnas('usuarios', [
   ['empresa_lat', 'REAL'], ['empresa_lng', 'REAL'], ['empresa_direccion', 'TEXT'], ['empresa_zona', 'TEXT'],   // punto de recogida de la empresa
 ]);
 insAj.run('tarifa_empresa_fuera', '45');      // pedidos de empresa fuera de las zonas con tarifa fija
-insAj.run('min_pedidos_lote', '10');          // pedidos confirmados del mismo día para "Enviar a Vaelo"
+insAj.run('min_pedidos_lote', '10');
+insAj.run('min_pedidos_minorista', '3');    // lo mismo para tiendas minoristas (ventas en lives)          // pedidos confirmados del mismo día para "Enviar a Vaelo"
 insAj.run('cupo_moto', '30');                 // cupo de una moto: sobre 1, pequeño 5, mediano 15
 insAj.run('horas_ruta_moto', '4');            // más que esto en una sola moto: se recomienda partir la ruta
 insAj.run('horas_recordatorio', '24');        // si el cliente no llena su enlace en este tiempo, se avisa a la empresa
@@ -556,6 +557,7 @@ agregarColumnas('envios', [['calif_receptor', 'INTEGER'], ['calif_receptor_comen
 // Código corto para escribir a mano en el paquete (TB-07): sin impresora, el piloto sabe cuál es cuál
 agregarColumnas('envios', [['codigo_corto', 'TEXT']]);
 agregarColumnas('pedidos_empresa', [['codigo_corto', 'TEXT'], ['codigo_dia', 'TEXT']]);
+agregarColumnas('pedidos_empresa', [['cobro', 'REAL NOT NULL DEFAULT 0']]);   // lo que la tienda cobra por su producto al entregar
 // Cómo marca la empresa sus paquetes: etiqueta impresa, código escrito (TB-07) o nombre del cliente escrito
 agregarColumnas('carpetas_empresa', [['marcado', "TEXT NOT NULL DEFAULT 'codigo'"]]);
 agregarColumnas('lotes_empresa', [['marcado', "TEXT NOT NULL DEFAULT 'codigo'"]]);

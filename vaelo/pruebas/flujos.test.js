@@ -957,3 +957,57 @@ test('panel: el piloto en ruta de empresa sale marcado y "Al más cercano" no le
   }
   db.prepare("UPDATE envios SET estado = 'entregado' WHERE id = ?").run(e.id);
 });
+
+test('tienda minorista: cuenta normal que se activa sola, manda carpetas con menos pedidos y cobra su producto al entregar', async () => {
+  const lupe = cliente();
+  const ip = { 'x-real-ip': '10.9.8.' + Math.floor(Math.random() * 200) };
+  assert.equal((await lupe('POST', '/api/registro', { nombre: 'Lupe Ramírez', email: 'lupe@prueba.com', telefono: '55554321', password: 'clave-de-prueba-123', acepto_terminos: true }, ip)).status, 201);
+  const lupeId = db.prepare("SELECT id FROM usuarios WHERE email = 'lupe@prueba.com'").get().id;
+  assert.equal((await lupe('GET', '/api/empresa/carpetas')).status, 403, 'una cuenta personal no tiene carpetas');
+  assert.equal((await lupe('POST', '/api/cuenta/minorista', { tienda: '' })).status, 400, 'pide el nombre de la tienda');
+  const act = await lupe('POST', '/api/cuenta/minorista', { tienda: 'Moda Lupe' });
+  assert.equal(act.status, 200, JSON.stringify(act.j)); assert.equal(act.j.tipo_cuenta, 'minorista'); assert.equal(act.j.minimo, 3);
+  const sol = (await lupe('GET', '/api/empresa/solicitud')).j;
+  assert.equal(sol.es_minorista, true); assert.equal(sol.es_empresa, false);
+  assert.equal((await lupe('POST', '/api/empresa/lote-sede', { filas: [] })).status, 403, 'la bodega en la sede es solo para empresas con contrato');
+  assert.equal((await lupe('GET', '/api/empresa/bono')).j.activo, false);
+  const hoy = new Date(Date.now() - 6 * 3600_000).toISOString().slice(0, 10);
+  const carpeta = (await lupe('POST', '/api/empresa/carpetas', { dia: hoy })).j.carpeta.id;
+  assert.equal((await lupe('POST', `/api/empresa/carpetas/${carpeta}/pedidos`, { descripcion: 'Blusa', tamano: 'pequeno', cliente_nombre: 'Clienta', cliente_telefono: '55556000', cobro: -5 })).status, 400, 'cobro negativo');
+  const ids = [];
+  for (let i = 0; i < 3; i++) {
+    const r = await lupe('POST', `/api/empresa/carpetas/${carpeta}/pedidos`, { descripcion: 'Blusa ' + i, tamano: 'pequeno', cliente_nombre: 'Clienta ' + i, cliente_telefono: '5555600' + i, cobro: i === 0 ? 150 : '',
+      foto: FOTO, llenar: true, dia: hoy, horario: 'cualquiera', direccion: 'Casa ' + i, zona: 'Zona 1', lat: 14.633 + i * 0.004, lng: -90.52, recibe_nombre: 'Clienta ' + i, recibe_telefono: '5555600' + i, metodo_pago: 'efectivo' });
+    assert.equal(r.status, 201, JSON.stringify(r.j)); ids.push(r.j.pedido.id);
+    if (i === 0) assert.equal(r.j.pedido.cobro, 150);
+    if (i === 1) {
+      const c = (await lupe('GET', `/api/empresa/carpetas/${carpeta}`)).j.carpeta;
+      assert.equal(c.minimo, 3, 'la tienda minorista necesita 3, no 10');
+      assert.equal((await lupe('POST', `/api/empresa/carpetas/${carpeta}/enviar`, { modo: 'una_moto', recogida: 'sede' })).status, 400, 'solo 2 confirmados');
+    }
+  }
+  assert.equal((await lupe('PUT', `/api/empresa/pedidos/${ids[1]}`, { cobro: 80 })).status, 200);
+  const anon = cliente();
+  const vista = (await anon('GET', '/api/pedido/' + db.prepare('SELECT token FROM pedidos_empresa WHERE id = ?').get(ids[0]).token)).j;
+  assert.equal(vista.cobro, 150, 'quien compra ve cuánto paga por su producto'); assert.equal(vista.empresa, 'Moda Lupe');
+  const env = await lupe('POST', `/api/empresa/carpetas/${carpeta}/enviar`, { modo: 'una_moto', recogida: 'sede' });
+  assert.equal(env.status, 201, JSON.stringify(env.j)); assert.equal(env.j.pedidos, 3);
+  assert.equal((await lupe('POST', '/api/cuenta/minorista', { activar: false })).status, 400, 'no vuelve a personal con pedidos en curso');
+  const emp = (await admin('GET', '/api/admin/empresas-activas')).j.empresas.find((x) => x.id === lupeId);
+  assert.ok(emp, 'la oficina ve la tienda en Empresas activas'); assert.equal(emp.tipo_cuenta, 'minorista'); assert.equal(emp.lotes_nuevos, 1);
+  assert.equal((await admin('GET', `/api/admin/empresas-activas/${lupeId}`)).status, 200);
+  assert.equal((await admin('POST', `/api/admin/lotes-empresa/${env.j.lote}/recibido`, {})).status, 200);
+  const calc = await admin('POST', `/api/admin/lotes-empresa/${env.j.lote}/calcular`, { modo: 'una_moto', motos: 1 });
+  assert.equal(calc.status, 200, JSON.stringify(calc.j));
+  const ok = await admin('POST', `/api/admin/lotes-empresa/${env.j.lote}/confirmar`, { modo: 'una_moto', rutas: calc.j.rutas.map((r) => ({ pedidos: r.pedidos, piloto_id: null })) });
+  assert.equal(ok.status, 200, JSON.stringify(ok.j));
+  assert.equal(db.prepare('SELECT cobro_destinatario FROM envios WHERE pedido_id = ?').get(ids[0]).cobro_destinatario, 150, 'el piloto cobra el producto');
+  assert.equal(db.prepare('SELECT cobro_destinatario FROM envios WHERE pedido_id = ?').get(ids[1]).cobro_destinatario, 80);
+  assert.equal(db.prepare('SELECT cobro_destinatario FROM envios WHERE pedido_id = ?').get(ids[2]).cobro_destinatario, 0);
+  // La oficina también puede cambiar el tipo de cuenta
+  const otra = db.prepare("SELECT id FROM usuarios WHERE email = 'ana@prueba.com'").get().id;
+  assert.equal((await admin('PUT', `/api/admin/clientes/${otra}/empresa`, { tipo_cuenta: 'minorista', empresa_nombre: 'Tienda Ana' })).status, 200);
+  assert.equal(db.prepare('SELECT tipo_cuenta FROM usuarios WHERE id = ?').get(otra).tipo_cuenta, 'minorista');
+  assert.equal((await admin('PUT', `/api/admin/clientes/${otra}/empresa`, { tipo_cuenta: 'personal' })).status, 200);
+  assert.equal(db.prepare('SELECT tipo_cuenta, empresa_nombre FROM usuarios WHERE id = ?').get(otra).empresa_nombre, null);
+});

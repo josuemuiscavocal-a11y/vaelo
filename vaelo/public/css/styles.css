@@ -1515,3 +1515,10 @@ fieldset { min-width: 0; } .recientes { max-width: 100%; min-width: 0; }
 /* Cifras de reportes: los montos grandes no se salen de su tarjeta */
 .cifra { min-width: 0; }
 .cifra strong { display: block; font-size: clamp(1.15rem, 2.1vw, 1.7rem); overflow-wrap: anywhere; line-height: 1.15; font-variant-numeric: tabular-nums; }
+
+/* Invitación a activar la tienda minorista (en "Mis envíos") */
+.promo-tienda { display: flex; flex-direction: column; gap: .15rem; width: 100%; margin: 0 0 .9rem; padding: .75rem 1rem; text-align: left; font: inherit; cursor: pointer;
+  background: var(--gris, #f3f4f8); border: 1px dashed var(--borde, #c9cede); border-radius: 12px; color: inherit; }
+.promo-tienda strong { font-size: .98rem; }
+.promo-tienda span { font-size: .9rem; color: var(--suave); }
+.promo-tienda:hover { border-color: var(--azul, #1c3faa); }

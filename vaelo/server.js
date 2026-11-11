@@ -636,7 +636,7 @@ ruta('GET', '/api/envios', ({ req }) => {
     return out;
   }), datos_transferencia: getAjustes().datos_transferencia || '',
   // Empresas: sus pedidos van en carpetas, pero cuentan en el resumen de arriba (en curso y entregados)
-  pedidos: db.prepare('SELECT tipo_cuenta FROM usuarios WHERE id = ?').get(u.id)?.tipo_cuenta === 'empresa' ? db.prepare(`SELECT SUM(estado IN ('pendiente','recogido','en_camino','fallido','devolviendo','a_sede','en_sede')) AS curso,
+  pedidos: esNegocio(db.prepare('SELECT tipo_cuenta FROM usuarios WHERE id = ?').get(u.id)) ? db.prepare(`SELECT SUM(estado IN ('pendiente','recogido','en_camino','fallido','devolviendo','a_sede','en_sede')) AS curso,
     SUM(estado = 'entregado') AS entregados FROM envios WHERE usuario_id = ? AND pedido_id IS NOT NULL`).get(u.id) : null };
 });
 
@@ -2255,7 +2255,7 @@ ruta('GET', '/api/recibe/:token', ({ params }) => {
   const confirmado = entrega ? !!e.origen_confirmado_en : !!e.receptor_confirmado_en;
   return {
     rol: e._rol, guia: e.guia, estado: e.estado, activo, vehiculo: e.vehiculo, fragil: !!e.fragil, descripcion: e.descripcion,
-    remitente: e.flete ? (e.flete_cliente || 'Vaelo').split(/\s+/)[0] : e.tipo_cuenta === 'empresa' && e.empresa_nombre ? e.empresa_nombre : (e.remitente || '').split(/\s+/)[0],
+    remitente: e.flete ? (e.flete_cliente || 'Vaelo').split(/\s+/)[0] : esNegocio(e) && e.empresa_nombre ? e.empresa_nombre : (e.remitente || '').split(/\s+/)[0],
     destinatario: e.destino_nombre, destino_zona: e.destino_zona, referencias: entrega ? e.origen_direccion : e.destino_direccion,
     nombre_sugerido: entrega ? e.origen_nombre : e.destino_nombre, origen_zona: e.origen_zona,
     // Lo que paga quien recibe al tener el paquete: el envío si "paga quien recibe" y lo que pidió cobrar quien envía
@@ -2539,11 +2539,12 @@ ruta('PUT', '/api/admin/clientes/:id/empresa', ({ req, params, body }) => {
   requiereRol(req, 'admin');
   const u = db.prepare("SELECT id FROM usuarios WHERE id = ? AND rol = 'cliente'").get(Number(params.id));
   if (!u) falla(404, 'No encontramos ese cliente.');
-  const empresa = body.tipo_cuenta === 'empresa';
+  const empresa = body.tipo_cuenta === 'empresa', minorista = body.tipo_cuenta === 'minorista';
   const desc = empresa ? numero(body.descuento_empresa || 0) : 0;
   if (!(desc >= 0 && desc <= 90)) falla(400, 'El descuento de empresa debe ser de 0 a 90%.');
+  if (!empresa && !minorista) revisarSinPedidosAbiertos(u.id);
   db.prepare('UPDATE usuarios SET tipo_cuenta = ?, empresa_nombre = ?, descuento_empresa = ?, credito_permitido = ? WHERE id = ?')
-    .run(empresa ? 'empresa' : 'personal', empresa ? texto(body.empresa_nombre, 100) || null : null, desc, 0, u.id);
+    .run(empresa ? 'empresa' : minorista ? 'minorista' : 'personal', empresa || minorista ? texto(body.empresa_nombre, 100) || null : null, desc, 0, u.id);
   if (empresa && body.recogida_dias !== undefined) {
     const dias = String(body.recogida_dias || '').split(',').map(Number).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6);
     const hora = /^([01]\d|2[0-3]):[0-5]\d$/.test(body.recogida_hora || '') ? body.recogida_hora : null;
@@ -3256,7 +3257,8 @@ function solicitudSalida(s) {
 ruta('GET', '/api/empresa/solicitud', ({ req }) => {
   const u = requiereRol(req, 'cliente');
   return { solicitud: solicitudSalida(solicitudDe(u.id)), documentos: DOCS_EMPRESA, estados: ESTADOS_SOLICITUD,
-    es_empresa: db.prepare('SELECT tipo_cuenta FROM usuarios WHERE id = ?').get(u.id).tipo_cuenta === 'empresa' };
+    es_empresa: db.prepare('SELECT tipo_cuenta FROM usuarios WHERE id = ?').get(u.id).tipo_cuenta === 'empresa',
+    es_minorista: db.prepare('SELECT tipo_cuenta FROM usuarios WHERE id = ?').get(u.id).tipo_cuenta === 'minorista' };
 });
 ruta('PUT', '/api/empresa/solicitud', ({ req, body }) => {
   const u = requiereRol(req, 'cliente');
@@ -3355,10 +3357,40 @@ ruta('POST', '/api/admin/empresas/:id', ({ req, params, body }) => {
   falla(400, 'Acción no válida.');
 });
 
+// ---------- Tienda minorista: cuenta normal que vende en lives o redes y manda varios pedidos a la vez ----------
+const esNegocio = (u) => !!u && (u.tipo_cuenta === 'empresa' || u.tipo_cuenta === 'minorista');
+function revisarSinPedidosAbiertos(uid) {
+  const n = db.prepare("SELECT COUNT(*) AS n FROM pedidos_empresa WHERE usuario_id = ? AND estado IN ('pendiente','esperando','confirmado','vencido','no_puede') AND lote_id IS NULL").get(uid).n;
+  const l = db.prepare("SELECT COUNT(*) AS n FROM lotes_empresa WHERE usuario_id = ? AND estado IN ('nuevo','en_ruta')").get(uid).n;
+  if (n || l) falla(400, 'Primero termina o borra los pedidos que tienes en tus carpetas.');
+}
+ruta('POST', '/api/cuenta/minorista', ({ req, body }) => {
+  const yo = requiereRol(req, 'cliente');
+  const u = db.prepare('SELECT * FROM usuarios WHERE id = ?').get(yo.id);
+  if (u.tipo_cuenta === 'empresa') falla(400, 'Tu cuenta ya es de empresa: ya tienes todo lo de la tienda.');
+  if (body.activar === false) {
+    if (u.tipo_cuenta !== 'minorista') return { ok: true };
+    revisarSinPedidosAbiertos(u.id);
+    db.prepare("UPDATE usuarios SET tipo_cuenta = 'personal', empresa_nombre = NULL WHERE id = ?").run(u.id);
+    return { ok: true, tipo_cuenta: 'personal' };
+  }
+  const tienda = texto(body.tienda, 60);
+  if (tienda.length < 2) falla(400, 'Escribe el nombre de tu tienda (el que ven tus clientes en tus lives).');
+  db.prepare("UPDATE usuarios SET tipo_cuenta = 'minorista', empresa_nombre = ?, descuento_empresa = 0 WHERE id = ?").run(tienda, u.id);
+  avisarStaff({ titulo: 'Nueva tienda minorista', cuerpo: `${u.nombre} activó su tienda "${tienda}".`, url: RUTA_ADMIN, etiqueta: 'minorista-' + u.id });
+  return { ok: true, tipo_cuenta: 'minorista', minimo: minimoLote({ tipo_cuenta: 'minorista' }) };
+});
+
 // ---------- Empresas: envíos a la sede de Vaelo (10 paquetes o más) ----------
 function requiereEmpresa(req) {
   const u = requiereRol(req, 'cliente');
   const f = db.prepare('SELECT * FROM usuarios WHERE id = ?').get(u.id);
+  if (!esNegocio(f)) falla(403, 'Este apartado es para empresas y tiendas.');
+  return f;
+}
+// La bodega en la sede (10 paquetes o más) es solo para empresas con contrato
+function requiereEmpresaFirmada(req) {
+  const f = requiereEmpresa(req);
   if (f.tipo_cuenta !== 'empresa') falla(403, 'Este apartado es para empresas con contrato firmado.');
   return f;
 }
@@ -3373,7 +3405,7 @@ function cobrarBodegaEmpresa(e) {
   crearCargo(e.usuario_id, e.id, 'bodega_empresa', monto, `${e.paquetes > 1 ? e.paquetes + ' paquetes, ' : ''}${dias} día(s) en la sede`);
 }
 ruta('POST', '/api/empresa/lote-sede', async ({ req, body }) => {
-  const u = requiereEmpresa(req);
+  const u = requiereEmpresaFirmada(req);
   const aj = getAjustes(), minimo = Number(aj.min_paquetes_sede) || 10;
   if (!sedeUbicacion()) falla(400, 'Todavía no está configurada la ubicación de la sede. Escríbenos por WhatsApp.');
   const filas = Array.isArray(body.filas) ? body.filas : [];
@@ -3418,7 +3450,7 @@ function lotesDe(usuarioId) {
     return { ...l, dias_en_sede: dias, costo_hoy: redondear(dias * tarifa * l.en_sede) };
   });
 }
-ruta('GET', '/api/empresa/lotes', ({ req }) => ({ lotes: lotesDe(requiereEmpresa(req).id), tarifa: Number(getAjustes().cargo_bodega_empresa) || 0, minimo: Number(getAjustes().min_paquetes_sede) || 10,
+ruta('GET', '/api/empresa/lotes', ({ req }) => ({ lotes: lotesDe(requiereEmpresaFirmada(req).id), tarifa: Number(getAjustes().cargo_bodega_empresa) || 0, minimo: Number(getAjustes().min_paquetes_sede) || 10,
   sede: getAjustes().sede_direccion || '' }));
 ruta('GET', '/api/admin/lotes-sede', ({ req }) => {
   requiereStaff(req);
@@ -3505,7 +3537,7 @@ function pedidoSalida(p, conDinero = false) {
   const out = { id: p.id, codigo: p.codigo, codigo_corto: p.estado === 'cancelado' ? p.codigo_corto : codigoCortoPedido(p), descripcion: p.descripcion, tamano: p.tamano, tamano_texto: TAMANOS[p.tamano]?.nombre || p.tamano,
     cliente_nombre: p.cliente_nombre, cliente_telefono: p.cliente_telefono, dia: p.dia, horario: p.horario, horario_texto: HORARIOS[p.horario] || '',
     direccion: p.direccion, zona: p.zona, lat: p.lat, lng: p.lng, referencias: p.referencias, recibe_nombre: p.recibe_nombre, recibe_telefono: p.recibe_telefono,
-    metodo_pago: p.metodo_pago, estado: estadoPedido(p), estado_texto: ESTADOS_PEDIDO[estadoPedido(p)], tiene_foto: !!p.foto, enlace: '/pedido/' + p.token,
+    metodo_pago: p.metodo_pago, cobro: Number(p.cobro) || 0, estado: estadoPedido(p), estado_texto: ESTADOS_PEDIDO[estadoPedido(p)], tiene_foto: !!p.foto, enlace: '/pedido/' + p.token,
     confirmado_por: p.confirmado_por, confirmado_en: p.confirmado_en, enlace_enviado_en: p.enlace_enviado_en, lote_id: p.lote_id, creado: p.creado,
     transferencia_ok: !!p.transferencia_ok, avisos: db.prepare('SELECT COUNT(*) AS n FROM push_pedidos WHERE pedido_id = ?').get(p.id).n };
   if (conDinero) out.precio = precioPedido(p).precio;
@@ -3632,6 +3664,13 @@ function repararCodigosRepetidos() {
 }
 if (require.main === module) { try { const n = repararCodigosRepetidos(); if (n) console.log(`Códigos de paquete repetidos corregidos: ${n}`); } catch (err) { console.error('Códigos:', err.message); } }
 
+// Lo que la tienda cobra por su producto al entregar (contra entrega). 0 = no se cobra nada aparte del envío
+function leerCobroPedido(v) {
+  if (v === '' || v == null) return 0;
+  const n = numero(v);
+  if (!Number.isFinite(n) || n < 0 || n > 50000) falla(400, 'Revisa el monto a cobrar por el producto (de Q0 a Q50,000).');
+  return redondear(n);
+}
 function crearPedido(u, b) {
   const tamano = TAMANOS[b.tamano] ? b.tamano : falla(400, 'Elige el tamaño del paquete.');
   const descripcion = texto(b.descripcion, 200);
@@ -3639,8 +3678,9 @@ function crearPedido(u, b) {
   const cliente_nombre = texto(b.cliente_nombre, 100), cliente_telefono = texto(b.cliente_telefono, 30);
   if (cliente_nombre.length < 2) falla(400, 'Escribe el nombre de tu cliente.');
   if (digitos(cliente_telefono).length < 8) falla(400, 'Escribe el WhatsApp de tu cliente (8 dígitos).');
-  const r = db.prepare('INSERT INTO pedidos_empresa (usuario_id, codigo, token, descripcion, tamano, cliente_nombre, cliente_telefono) VALUES (?, ?, ?, ?, ?, ?, ?)')
-    .run(u.id, nuevaGuia(), crypto.randomBytes(16).toString('hex'), descripcion, tamano, cliente_nombre, cliente_telefono);
+  const cobro = leerCobroPedido(b.cobro);
+  const r = db.prepare('INSERT INTO pedidos_empresa (usuario_id, codigo, token, descripcion, tamano, cliente_nombre, cliente_telefono, cobro) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(u.id, nuevaGuia(), crypto.randomBytes(16).toString('hex'), descripcion, tamano, cliente_nombre, cliente_telefono, cobro);
   return db.prepare('SELECT * FROM pedidos_empresa WHERE id = ?').get(Number(r.lastInsertRowid));
 }
 // Si ya tiene todos los datos de entrega, queda confirmado
@@ -3817,7 +3857,11 @@ function puntoEmpresa(u) {
 const origenLote = (l) => l.recogida === 'sede' ? sedeUbicacion() : (l.origen_lat != null ? { lat: l.origen_lat, lng: l.origen_lng } : null);
 
 // ---------- Empresa: registrar pedidos ----------
-const minimoLote = () => Math.round(ajNum('min_pedidos_lote', 10));
+// Mínimo de pedidos para "Enviar a Vaelo": las tiendas minoristas (ventas en lives) mandan menos
+const minimoLote = (u) => {
+  const tipo = u && (u.tipo_cuenta || db.prepare('SELECT tipo_cuenta FROM usuarios WHERE id = ?').get(u.usuario_id)?.tipo_cuenta);
+  return tipo === 'minorista' ? Math.max(1, Math.round(ajNum('min_pedidos_minorista', 3))) : Math.max(1, Math.round(ajNum('min_pedidos_lote', 10)));
+};
 ruta('GET', '/api/empresa/pedidos', ({ req }) => {
   const u = requiereEmpresa(req);
   const filas = db.prepare(`SELECT * FROM pedidos_empresa WHERE usuario_id = ? AND (estado IN ('pendiente','confirmado','vencido')
@@ -3833,7 +3877,7 @@ ruta('GET', '/api/empresa/pedidos', ({ req }) => {
     .map((l) => ({ id: l.id, dia: l.dia, modo: l.modo, modo_texto: MODOS_LOTE[l.modo], recogida: l.recogida, paga: l.paga, estado: l.estado, creado: l.creado, recibido_en: l.recibido_en,
       pedidos: db.prepare('SELECT COUNT(*) AS n FROM pedidos_empresa WHERE lote_id = ?').get(l.id).n,
       entregados: db.prepare("SELECT COUNT(*) AS n FROM envios WHERE lote_empresa_id = ? AND estado = 'entregado'").get(l.id).n }));
-  return { pedidos, dias: Object.values(dias).sort((a, b) => a.dia.localeCompare(b.dia)), lotes, minimo: minimoLote(), punto: puntoEmpresa(u), tamanos: TAMANOS, horarios: HORARIOS,
+  return { pedidos, dias: Object.values(dias).sort((a, b) => a.dia.localeCompare(b.dia)), lotes, minimo: minimoLote(u), punto: puntoEmpresa(u), tamanos: TAMANOS, horarios: HORARIOS,
     modos: MODOS_LOTE, empresa: u.empresa_nombre || u.nombre, whatsapp: getAjustes().whatsapp || '', sede: getAjustes().sede_direccion || '',
     zonas: [...zonasFijas().map((z) => z.nombre), OTRA_ZONA] };
 });
@@ -3866,6 +3910,7 @@ ruta('PUT', '/api/empresa/pedidos/:id', ({ req, params, body }) => {
   const datos = {};
   if (body.descripcion !== undefined) { datos.descripcion = texto(body.descripcion, 200); if (datos.descripcion.length < 2) falla(400, 'Escribe qué es el paquete.'); }
   if (body.tamano !== undefined) datos.tamano = TAMANOS[body.tamano] ? body.tamano : falla(400, 'Elige el tamaño.');
+  if (body.cobro !== undefined) datos.cobro = leerCobroPedido(body.cobro);
   if (body.cliente_nombre !== undefined) { datos.cliente_nombre = texto(body.cliente_nombre, 100); if (datos.cliente_nombre.length < 2) falla(400, 'Escribe el nombre de tu cliente.'); }
   if (body.cliente_telefono !== undefined) { datos.cliente_telefono = texto(body.cliente_telefono, 30); if (digitos(datos.cliente_telefono).length < 8) falla(400, 'Revisa el WhatsApp de tu cliente.'); }
   const cp = carpetaDe(p);
@@ -3955,7 +4000,7 @@ ruta('GET', '/api/empresa/recomendacion', ({ req, query }) => {
   const pedidos = db.prepare("SELECT * FROM pedidos_empresa WHERE usuario_id = ? AND dia = ? AND estado = 'confirmado' AND lote_id IS NULL").all(u.id, dia);
   if (!pedidos.length) falla(404, 'No hay pedidos confirmados para ese día.');
   const origen = puntoEmpresa(u) || sedeUbicacion();
-  return { recomendacion: origen ? recomendar(origen, pedidos) : null, pedidos: pedidos.length, minimo: minimoLote() };
+  return { recomendacion: origen ? recomendar(origen, pedidos) : null, pedidos: pedidos.length, minimo: minimoLote(u) };
 });
 ruta('POST', '/api/empresa/enviar', ({ req, body }) => {
   const u = requiereEmpresa(req);
@@ -3968,7 +4013,7 @@ function crearLoteEmpresa(u, pedidos, dia, body, alCrear) {
   const recogida = body.recogida === 'sede' ? 'sede' : 'empresa';
   const paga = body.modo === 'pickup' && body.paga === 'empresa' ? 'empresa' : 'clientes';
   if (!['una_moto', 'motos', 'pickup'].includes(body.modo)) falla(400, 'Elige cómo quieres que se repartan: una moto, varias motos o pickup.');
-  if (pedidos.length < minimoLote()) falla(400, `Necesitas al menos ${minimoLote()} envíos confirmados para el mismo día. Tienes ${pedidos.length}.`);
+  if (pedidos.length < minimoLote(u)) falla(400, `Necesitas al menos ${minimoLote(u)} envíos confirmados para el mismo día. Tienes ${pedidos.length}.`);
   const sinFoto = pedidos.filter((p) => !p.foto);
   if (sinFoto.length) falla(400, `Falta la foto del paquete en ${sinFoto.length} pedido(s): ${sinFoto.slice(0, 5).map((p) => p.codigo).join(', ')}.`);
   if (body.modo !== 'pickup' && pedidos.some((p) => p.tamano === 'grande')) falla(400, 'Hay paquetes grandes: esos solo van en pickup.');
@@ -4047,7 +4092,7 @@ function carpetaSalida(c, conPedidos = false) {
   const out = { id: c.id, nombre: c.nombre, dia: c.dia, dia_texto: fechaLarga(c.dia), estado: c.estado, creado: c.creado, marcado: marcadoValido(c.marcado), marcado_texto: MARCADOS[marcadoValido(c.marcado)],
     total: filas.length, confirmados: cuenta((p) => p.estado === 'confirmado'), esperando: cuenta((p) => p.estado === 'pendiente' && p.enlace_enviado_en),
     sin_datos: cuenta((p) => p.estado === 'pendiente' && !p.enlace_enviado_en), no_puede: cuenta((p) => ['no_puede', 'vencido'].includes(p.estado)),
-    sin_foto: cuenta((p) => p.estado !== 'cancelado' && !p.foto), grandes: cuenta((p) => p.tamano === 'grande'), minimo: minimoLote() };
+    sin_foto: cuenta((p) => p.estado !== 'cancelado' && !p.foto), grandes: cuenta((p) => p.tamano === 'grande'), minimo: minimoLote(c) };
   if (c.lote_id) {
     const l = db.prepare('SELECT * FROM lotes_empresa WHERE id = ?').get(c.lote_id);
     if (l) out.lote = { id: l.id, estado: l.estado, modo: l.modo, modo_texto: MODOS_LOTE[l.modo], recogida: l.recogida, recibido_en: l.recibido_en,
@@ -4060,7 +4105,7 @@ function carpetaSalida(c, conPedidos = false) {
     .map((p) => (out.marcado === 'codigo' ? p : { ...p, codigo_corto: null }));   // con etiqueta o nombre no se usa el código
   return out;
 }
-const datosPanelEmpresa = (u) => ({ minimo: minimoLote(), punto: puntoEmpresa(u), tamanos: TAMANOS, horarios: HORARIOS, modos: MODOS_LOTE, empresa: u.empresa_nombre || u.nombre,
+const datosPanelEmpresa = (u) => ({ minimo: minimoLote(u), punto: puntoEmpresa(u), tamanos: TAMANOS, horarios: HORARIOS, modos: MODOS_LOTE, empresa: u.empresa_nombre || u.nombre,
   whatsapp: getAjustes().whatsapp || '', sede: getAjustes().sede_direccion || '', zonas: [...zonasFijas().map((z) => z.nombre), OTRA_ZONA], hoy: hoyGT() });
 ruta('GET', '/api/empresa/carpetas', ({ req }) => {
   const u = requiereEmpresa(req);
@@ -4166,7 +4211,7 @@ ruta('GET', '/api/empresa/carpetas/:id/recomendacion', ({ req, params }) => {
   const pedidos = db.prepare("SELECT * FROM pedidos_empresa WHERE carpeta_id = ? AND estado = 'confirmado' AND lote_id IS NULL").all(c.id);
   if (!pedidos.length) falla(404, 'Todavía no hay envíos confirmados en esta carpeta.');
   const origen = puntoEmpresa(u) || sedeUbicacion();
-  return { recomendacion: origen ? recomendar(origen, pedidos) : null, pedidos: pedidos.length, minimo: minimoLote() };
+  return { recomendacion: origen ? recomendar(origen, pedidos) : null, pedidos: pedidos.length, minimo: minimoLote(u) };
 });
 // Mandar la carpeta a Vaelo: salen los confirmados; los que siguen sin confirmar pasan a una carpeta nueva
 ruta('POST', '/api/empresa/carpetas/:id/enviar', ({ req, params, body }) => {
@@ -4198,7 +4243,7 @@ ruta('GET', '/api/pedido/:token', ({ params }) => {
   const aj = getAjustes();
   const out = { codigo: p.codigo, empresa: nombreEmpresa(p.usuario_id), descripcion: p.descripcion, tamano: TAMANOS[p.tamano]?.nombre, cliente_nombre: p.cliente_nombre,
     estado: estadoPedido(p), dia: p.dia, horario: p.horario, direccion: p.direccion, zona: p.zona, lat: p.lat, lng: p.lng, referencias: p.referencias,
-    recibe_nombre: p.recibe_nombre || p.cliente_nombre, recibe_telefono: p.recibe_telefono || p.cliente_telefono, metodo_pago: p.metodo_pago,
+    recibe_nombre: p.recibe_nombre || p.cliente_nombre, recibe_telefono: p.recibe_telefono || p.cliente_telefono, metodo_pago: p.metodo_pago, cobro: Number(p.cobro) || 0,
     editable: ['pendiente', 'confirmado', 'vencido', 'no_puede'].includes(p.estado) && !p.lote_id, en_lote: !!p.lote_id,
     dia_fijo: p.carpeta_id ? carpetaDe(p)?.dia || null : null, no_puede_nota: p.no_puede_nota,
     precio: p.lat != null || p.zona ? precioPedido(p) : null, tarifa_zona: vehiculoMoto()?.tarifa_zona ?? 35, tarifa_fuera: vehiculoMoto() ? tarifaFuera(vehiculoMoto()) : 45,
@@ -4438,7 +4483,7 @@ ruta('GET', '/api/admin/empresas/:id/estado-cuenta', ({ req, res, params, query 
 });
 ruta('GET', '/api/admin/empresas-activas', ({ req }) => {
   requiereStaff(req);
-  const lista = db.prepare("SELECT id, nombre, empresa_nombre, telefono, email FROM usuarios WHERE tipo_cuenta = 'empresa' AND rol = 'cliente' ORDER BY COALESCE(empresa_nombre, nombre)").all()
+  const lista = db.prepare("SELECT id, nombre, empresa_nombre, telefono, email, tipo_cuenta FROM usuarios WHERE tipo_cuenta IN ('empresa','minorista') AND rol = 'cliente' ORDER BY COALESCE(empresa_nombre, nombre)").all()
     .map((u) => ({ ...u, ...resumenEmpresa(u.id) }));
   lista.sort((a, b) => b.lotes_nuevos - a.lotes_nuevos || b.en_ruta - a.en_ruta || b.en_sede - a.en_sede || b.confirmados - a.confirmados);
   return { empresas: lista, recogidas_hoy: recogidasDeHoy(), lotes_nuevos: lista.reduce((t, e) => t + e.lotes_nuevos, 0), solicitudes: db.prepare("SELECT COUNT(*) AS n FROM solicitudes_empresa WHERE estado = 'enviada'").get().n };
@@ -4454,7 +4499,7 @@ function loteSalida(l, conDinero) {
 ruta('GET', '/api/admin/empresas-activas/:id', ({ req, params }) => {
   const quien = requiereStaff(req);
   const conDinero = !esOperador(quien);
-  const u = db.prepare("SELECT * FROM usuarios WHERE id = ? AND tipo_cuenta = 'empresa'").get(Number(params.id)) || falla(404, 'No encontramos esa empresa.');
+  const u = db.prepare("SELECT * FROM usuarios WHERE id = ? AND tipo_cuenta IN ('empresa','minorista')").get(Number(params.id)) || falla(404, 'No encontramos esa empresa.');
   const s = solicitudDe(u.id);
   const lotes = db.prepare("SELECT * FROM lotes_empresa WHERE usuario_id = ? AND estado IN ('nuevo','en_ruta') ORDER BY dia, id").all(u.id).map((l) => loteSalida(l, conDinero));
   const enRuta = db.prepare(`${SQL_ENVIO} WHERE e.usuario_id = ? AND e.pedido_id IS NOT NULL AND e.estado IN ('pendiente','recogido','en_camino') ORDER BY e.grupo, e.parada`).all(u.id)
@@ -4611,10 +4656,10 @@ ruta('POST', '/api/admin/lotes-empresa/:id/confirmar', ({ req, params, body }) =
             destino_nombre, destino_telefono, destino_direccion, destino_zona, destino_lat, destino_lng, tipo_tarifa, precio, precio_base, metodo_pago, cobro_destinatario, notas,
             codigo_entrega, programado_para, receptor_token, receptor_nombre, receptor_confirmado_en, receptor_lat, receptor_lng, receptor_ubic_fecha, pago_estado, paquetes,
             foto_paquete, pedido_id, lote_empresa_id, parada, tamano, horario, grupo, cobro_en_recogida, mensajero_id, asignacion, asignado_en, asignado_por, precio_d_lat, precio_d_lng)
-          VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, 'zona', ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${piloto ? "datetime('now')" : 'NULL'}, ?, ?, ?)`).run(
+          VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, 'zona', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${piloto ? "datetime('now')" : 'NULL'}, ?, ?, ?)`).run(
           p.codigo, l.usuario_id, vehiculo.id, p.descripcion, l.origen_direccion || '', l.recogida === 'sede' ? (zonaDePunto(origen) || OTRA_ZONA) : (emp.empresa_zona || zonaDePunto(origen) || OTRA_ZONA),
           emp.telefono || '', origen.lat, origen.lng, l.recogida === 'sede' ? 'sede' : 'cliente', l.recogida === 'sede' ? 'Sede Vaelo' : (emp.empresa_nombre || emp.nombre),
-          p.recibe_nombre, p.recibe_telefono, p.direccion, zonaReal(p), p.lat, p.lng, precio, precio, metodo, [p.referencias, `Cliente de ${emp.empresa_nombre || emp.nombre}`].filter(Boolean).join('. '),
+          p.recibe_nombre, p.recibe_telefono, p.direccion, zonaReal(p), p.lat, p.lng, precio, precio, metodo, redondear(Number(p.cobro) || 0), [p.referencias, `Cliente de ${emp.empresa_nombre || emp.nombre}`].filter(Boolean).join('. '),
           String(crypto.randomInt(1000, 10000)), programado, crypto.randomBytes(16).toString('hex'), p.recibe_nombre, p.confirmado_en, p.lat, p.lng, p.confirmado_en, pagoEstado,
           p.foto, p.id, l.id, grupo ? i + 1 : null, p.tamano, p.horario, grupo, pagaEmpresa && metodoEmpresa === 'efectivo' ? precioTotal : null,
           piloto ? piloto.id : null, piloto ? 'por_aceptar' : null, piloto ? 'oficina' : null, p.lat, p.lng);
@@ -5221,7 +5266,7 @@ ruta('PUT', '/api/admin/ajustes', ({ req, body }) => {
   }
   if (body.whatsapp_pagos !== undefined) up.run('whatsapp_pagos', String(body.whatsapp_pagos).replace(/\D/g, '').slice(0, 15));
   // Montos de cargos, seguro y tarifa fija
-  const montos = { dias_liquidar: [1, 60], cargo_bodega_empresa: [0, 1000], min_paquetes_sede: [1, 500], dias_reclamo: [1, 60], cargo_devolucion: [0, 1000], cargo_bodega_dia: [0, 1000], cargo_reentrega: [0, 1000], cargo_cancelacion: [0, 1000], pct_piloto_cancelacion: [0, 100],
+  const montos = { dias_liquidar: [1, 60], cargo_bodega_empresa: [0, 1000], min_paquetes_sede: [1, 500], min_pedidos_lote: [1, 500], min_pedidos_minorista: [1, 100], dias_reclamo: [1, 60], cargo_devolucion: [0, 1000], cargo_bodega_dia: [0, 1000], cargo_reentrega: [0, 1000], cargo_cancelacion: [0, 1000], pct_piloto_cancelacion: [0, 100],
     horas_decidir_fallido: [0.25, 48], seguro_pct: [0, 50], seguro_minimo: [0, 1000], responsabilidad_max: [0, 100000], km_max_tarifa_fija: [1, 200] };
   for (const [k, [min, max]] of Object.entries(montos)) {
     if (body[k] === undefined) continue;

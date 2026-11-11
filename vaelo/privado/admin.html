@@ -347,6 +347,8 @@
             <div class="campo"><label for="aj-precio_ayudante">Fletes: precio por ayudante (Q) <span class="ayuda">Para subir, bajar y mover la carga</span></label><input id="aj-precio_ayudante" type="number" min="0" step="1"></div>
             <div class="campo"><label for="aj-cargo_bodega_empresa">Empresas: bodega por paquete por día (Q)</label><input id="aj-cargo_bodega_empresa" type="number" min="0" step="0.5"></div>
             <div class="campo"><label for="aj-min_paquetes_sede">Empresas: mínimo de paquetes a la sede</label><input id="aj-min_paquetes_sede" type="number" min="1" step="1"></div>
+            <div class="campo"><label for="aj-min_pedidos_lote">Empresas: mínimo de pedidos para enviar una carpeta</label><input id="aj-min_pedidos_lote" type="number" min="1" step="1"></div>
+            <div class="campo"><label for="aj-min_pedidos_minorista">Tiendas minoristas: mínimo de pedidos para enviar una carpeta</label><input id="aj-min_pedidos_minorista" type="number" min="1" step="1"></div>
           </div>
           <button class="boton" type="submit">Guardar</button>
         </form>
@@ -697,7 +699,7 @@ null))));
         const recog = r.recogidas_hoy && r.recogidas_hoy.length ? el('div', { class: 'recogidas-hoy' }, el('strong', { text: 'Recogidas fijas de hoy' }),
           el('ul', {}, r.recogidas_hoy.map(x => el('li', {}, el('b', { text: x.hora }), ` ${x.empresa}`, x.listos ? el('span', { class: 'etiqueta-completa', text: `${x.listos} pedidos listos` }) : el('span', { class: 'etiqueta-gris', text: 'sin pedidos confirmados aún' }), ' ', telLink(x.telefono))))) : null;
         poner($('empresas-activas'), recog, r.empresas.length ? el('div', { class: 'empresas-lista' }, r.empresas.map((x) => el('button', { type: 'button', class: 'empresa-tarjeta' + (x.lotes_nuevos ? ' prioridad' : ''), onclick: () => abrirEmpresa(x.id) },
-          el('div', {}, el('strong', { text: x.empresa_nombre || x.nombre }), el('small', { text: `${x.nombre} · ${x.telefono || ''}` })),
+          el('div', {}, el('strong', { text: x.empresa_nombre || x.nombre }), x.tipo_cuenta === 'minorista' ? [' ', el('span', { class: 'etiqueta-gris', text: 'Tienda minorista' })] : null, el('small', { text: `${x.nombre} · ${x.telefono || ''}` })),
           el('div', { class: 'empresa-cuentas' },
             n(x.lotes_nuevos, x.lotes_nuevos === 1 ? 'envío por repartir' : 'envíos por repartir', 'etiqueta-pendiente'),
             n(x.en_ruta, 'en ruta', 'etiqueta-azul'), n(x.en_sede, 'en sede', 'etiqueta-gris'),
@@ -1313,10 +1315,10 @@ null))));
       if (!clientes.length) { poner($('tabla-clientes'), el('tr', {}, el('td', { colspan: 9, style: 'text-align:center;color:var(--suave);padding:2rem', text: 'Todavía no hay clientes.' }))); return; }
       poner($('tabla-clientes'), ...lista.map(c => {
         return el('tr', { class: 'clic', tabindex: 0, onclick: () => revisarCliente(c.id), onkeydown: (ev) => { if (ev.key === 'Enter') revisarCliente(c.id); } },
-          el('td', {}, el('strong', { text: c.nombre }), c.tipo_cuenta === 'empresa' ? [el('br'), el('span', { class: 'etiqueta-azul', text: c.empresa_nombre || 'Empresa' })] : ''),
+          el('td', {}, el('strong', { text: c.nombre }), c.tipo_cuenta === 'empresa' || c.tipo_cuenta === 'minorista' ? [el('br'), el('span', { class: 'etiqueta-azul', text: c.empresa_nombre || 'Empresa' })] : ''),
           el('td', {}, el('a', { href: 'mailto:' + c.email, text: c.email, onclick: (ev) => ev.stopPropagation() }), el('br'), sub(c.email_verificado ? 'Correo confirmado' : 'Correo sin confirmar')),
           el('td', {}, c.telefono ? el('a', { href: 'https://wa.me/502' + c.telefono.replace(/\D/g, '').slice(-8), target: '_blank', rel: 'noopener', text: c.telefono, onclick: (ev) => ev.stopPropagation() }) : '—'),
-          el('td', {}, el('span', { class: c.tipo_cuenta === 'empresa' ? 'etiqueta-azul' : 'etiqueta-gris', text: c.tipo_cuenta === 'empresa' ? 'Empresa' : 'Personal' }),
+          el('td', {}, el('span', { class: c.tipo_cuenta === 'personal' || !c.tipo_cuenta ? 'etiqueta-gris' : 'etiqueta-azul', text: TIPOS_CUENTA[c.tipo_cuenta] || 'Personal' }),
             !c.activo ? [' ', el('span', { class: 'etiqueta-pendiente', text: 'Bloqueada' })] : ''),
           el('td', { text: c.envios }),
           el('td', {}, c.calif_cliente ? el('span', { class: c.calif_cliente < 3 ? 'etiqueta-pendiente' : 'etiqueta-gris', text: `${c.calif_cliente} de 5` }) : '—'),
@@ -1325,9 +1327,10 @@ null))));
           el('td', {}, el('button', { class: 'boton chico borde', type: 'button', text: 'Abrir', onclick: (ev) => { ev.stopPropagation(); revisarCliente(c.id); } })));
       }));
     }
+    const TIPOS_CUENTA = { personal: 'Personal', minorista: 'Tienda minorista', empresa: 'Empresa' };
     function bloqueEmpresa(c) {
       const msg = el('div', { class: 'mensaje', role: 'alert' });
-      const tipo = el('select', { id: 'emp-tipo' }, el('option', { value: 'personal', text: 'Personal' }), el('option', { value: 'empresa', text: 'Empresa' }));
+      const tipo = el('select', { id: 'emp-tipo' }, el('option', { value: 'personal', text: 'Personal' }), el('option', { value: 'minorista', text: 'Tienda minorista (ventas en lives)' }), el('option', { value: 'empresa', text: 'Empresa' }));
       tipo.value = c.tipo_cuenta || 'personal';
       const nombre = el('input', { id: 'emp-nombre', maxlength: 100, value: c.empresa_nombre || '', placeholder: 'Nombre de la empresa' });
       const desc = el('input', { id: 'emp-desc', type: 'number', min: 0, max: 90, step: 1, value: c.descuento_empresa || 0 });
@@ -1339,9 +1342,9 @@ null))));
       const fdir = el('input', { maxlength: 200, value: c.fact_direccion || '', placeholder: 'Ciudad' });
       const mes = el('input', { type: 'month', value: new Date(Date.now() - 6 * 3600_000).toISOString().slice(0, 7), 'aria-label': 'Mes del estado de cuenta' });
       return el('div', { class: 'bloque', style: 'background:var(--gris);border:0;margin:1rem 0' }, el('h3', { text: 'Cuenta de empresa' }),
-        el('p', { class: 'pista', text: 'Las empresas mandan sus envíos en carpetas, pueden tener precio especial y «paga quien recibe».' }), msg,
+        el('p', { class: 'pista', text: 'Las empresas mandan sus envíos en carpetas, pueden tener precio especial y «paga quien recibe». Las tiendas minoristas (gente que vende en lives) también mandan carpetas, pero sin contrato, sin descuento y con un mínimo menor de pedidos.' }), msg,
         el('div', { class: 'fila' }, el('div', { class: 'campo' }, el('label', { for: 'emp-tipo', text: 'Tipo de cuenta' }), tipo),
-          el('div', { class: 'campo' }, el('label', { for: 'emp-nombre', text: 'Empresa' }), nombre), el('div', { class: 'campo' }, el('label', { for: 'emp-desc', text: 'Descuento (%)' }), desc)),
+          el('div', { class: 'campo' }, el('label', { for: 'emp-nombre', text: 'Empresa o tienda' }), nombre), el('div', { class: 'campo' }, el('label', { for: 'emp-desc', text: 'Descuento (%)' }), desc)),
         c.tipo_cuenta === 'empresa' ? [
           el('h4', { style: 'margin:.8rem 0 .3rem', text: 'Recogida fija' }),
           el('p', { class: 'pista', style: 'margin:0 0 .4rem', text: 'Los días que pasamos por sus paquetes. Te sale cada día en Empresas → Empresas activas, y la empresa lo ve en su panel.' }),
@@ -1371,7 +1374,7 @@ null))));
         el('div', { style: 'display:flex;gap:1rem;align-items:center;margin-bottom:.75rem' },
           c.tiene_foto ? el('img', { src: `/api/admin/usuarios/${c.id}/documento/foto`, alt: '', style: 'width:64px;height:64px;border-radius:50%;object-fit:cover' }) : null,
           el('div', {}, el('h2', { style: 'font-size:1.4rem;margin:0', text: c.nombre }),
-            el('span', { class: c.tipo_cuenta === 'empresa' ? 'etiqueta-azul' : 'etiqueta-gris', text: c.tipo_cuenta === 'empresa' ? (c.empresa_nombre || 'Empresa') : 'Cuenta personal' }),
+            el('span', { class: c.tipo_cuenta === 'empresa' || c.tipo_cuenta === 'minorista' ? 'etiqueta-azul' : 'etiqueta-gris', text: c.tipo_cuenta === 'empresa' ? (c.empresa_nombre || 'Empresa') : c.tipo_cuenta === 'minorista' ? `Tienda minorista · ${c.empresa_nombre || ''}` : 'Cuenta personal' }),
             !c.activo ? [' ', el('span', { class: 'etiqueta-pendiente', text: 'Bloqueada' })] : '')),
         el('div', { class: 'datos' },
           dato('Teléfono', c.telefono), dato('Correo', `${c.email} (${c.email_verificado ? 'confirmado' : 'sin confirmar'})`),
@@ -1469,7 +1472,7 @@ null))));
 
     // ---------- Zonas dibujadas en el mapa ----------
     const CAMPOS_AJUSTES = ['cargo_devolucion', 'cargo_bodega_dia', 'cargo_reentrega', 'horas_decidir_fallido', 'cargo_cancelacion', 'pct_piloto_cancelacion', 'sede_direccion',
-      'whatsapp_pagos', 'dias_liquidar', 'dias_reclamo', 'cargo_bodega_empresa', 'min_paquetes_sede', 'km_max_tarifa_fija', 'correo_respaldos', 'precio_ayudante'];
+      'whatsapp_pagos', 'dias_liquidar', 'dias_reclamo', 'cargo_bodega_empresa', 'min_paquetes_sede', 'min_pedidos_lote', 'min_pedidos_minorista', 'km_max_tarifa_fija', 'correo_respaldos', 'precio_ayudante'];
     let mapaZonas = null, capaZonas = [], selectorSede = null;
     const COLORES_ZONA = ['#1c3faa', '#d9480f', '#17824a', '#7b2cbf', '#0e7490', '#b4261c', '#a16207', '#be185d'];
     function pintarMapaZonas(zonas) {
@@ -1527,7 +1530,7 @@ null))));
     });
     guardarAjustes($('form-fallidos'), ['cargo_devolucion', 'cargo_bodega_dia', 'cargo_reentrega', 'horas_decidir_fallido', 'cargo_cancelacion', 'pct_piloto_cancelacion', 'sede_direccion'],
       () => { const p = selectorSede && selectorSede.obtener(); return p ? { sede_lat: p.lat, sede_lng: p.lng } : {}; });
-    guardarAjustes($('form-seguro'), ['whatsapp_pagos', 'dias_liquidar', 'dias_reclamo', 'km_max_tarifa_fija', 'cargo_bodega_empresa', 'min_paquetes_sede', 'precio_ayudante']);
+    guardarAjustes($('form-seguro'), ['whatsapp_pagos', 'dias_liquidar', 'dias_reclamo', 'km_max_tarifa_fija', 'cargo_bodega_empresa', 'min_paquetes_sede', 'min_pedidos_lote', 'min_pedidos_minorista', 'precio_ayudante']);
     guardarAjustes($('form-respaldos'), ['correo_respaldos']);
 
     $('form-zona').addEventListener('submit', async (ev) => {

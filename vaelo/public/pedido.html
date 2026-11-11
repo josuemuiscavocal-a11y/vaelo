@@ -85,6 +85,7 @@
           el('dt', { text: 'Horario' }), el('dd', { text: d.horarios[d.horario] || '—' }),
           el('dt', { text: 'Lugar' }), el('dd', { text: [d.direccion, d.zona].filter(Boolean).join(', ') + (d.referencias ? ` (${d.referencias})` : '') }),
           el('dt', { text: 'Recibe' }), el('dd', { text: `${d.recibe_nombre} · ${d.recibe_telefono}` }),
+          d.cobro > 0 ? [el('dt', { text: 'Tu producto' }), el('dd', { text: `${dinero(d.cobro)} en efectivo al recibir` })] : null,
           el('dt', { text: 'Envío' }), el('dd', { text: d.precio ? `${dinero(d.precio.precio)} en efectivo al recibir` : '—' })));
     }
 
@@ -119,7 +120,7 @@
         try {
           const r = await api(`/api/pedido/${token}/precio`, { body: { zona: zona.value, lat: punto?.lat, lng: punto?.lng } });
           precio.hidden = false;
-          poner(precio, el('span', { text: 'Tu envío cuesta' }), el('strong', { text: dinero(r.precio) }), el('small', { text: r.preferencial ? 'Zona con tarifa preferencial' : 'Fuera de las zonas con tarifa preferencial' }));
+          poner(precio, el('span', { text: 'Tu envío cuesta' }), el('strong', { text: dinero(r.precio) }), el('small', { text: (r.preferencial ? 'Zona con tarifa preferencial' : 'Fuera de las zonas con tarifa preferencial') + (datos.cobro > 0 ? `. Más ${dinero(datos.cobro)} de tu producto: total ${dinero(datos.cobro + r.precio)} al recibir.` : '') }));
         } catch { precio.hidden = true; }
       };
       zona.addEventListener('change', actualizarPrecio);
@@ -187,7 +188,8 @@
           e.piloto ? el('p', { class: 'pista', style: 'margin:0' }, el('strong', { text: e.piloto.nombre }), [e.piloto.vehiculo, e.piloto.color, e.piloto.placa].filter(Boolean).length ? ' · ' + [e.piloto.vehiculo, e.piloto.color, e.piloto.placa].filter(Boolean).join(' · ') : '') : null),
         e.codigo_entrega ? el('div', { class: 'codigo-entrega' }, el('div', {}, el('span', { text: 'Tu código de entrega' }), el('strong', { text: e.codigo_entrega })),
           el('p', { text: 'Dáselo al piloto cuando te entregue. No lo compartas antes.' })) : null,
-        enCurso && e.precio && e.metodo_pago === 'recibe' ? el('p', { class: 'pedido-cobro' }, 'Pagas ', el('strong', { text: dinero(e.precio) }), ' en efectivo al recibir.') : null,
+        enCurso && ((e.precio && e.metodo_pago === 'recibe') || datos.cobro > 0) ? el('p', { class: 'pedido-cobro' }, 'Pagas ', el('strong', { text: dinero((e.metodo_pago === 'recibe' ? e.precio || 0 : 0) + (datos.cobro || 0)) }),
+          ' en efectivo al recibir', datos.cobro > 0 ? ` (${dinero(datos.cobro)} de tu producto${e.metodo_pago === 'recibe' && e.precio ? ` + ${dinero(e.precio)} del envío` : ''})` : '', '.') : null,
         enCurso ? bloqueAvisar() : null,
         resumen(),
         el('a', { class: 'boton borde', href: '/rastreo?guia=' + e.guia, text: 'Ver en el mapa' }));
