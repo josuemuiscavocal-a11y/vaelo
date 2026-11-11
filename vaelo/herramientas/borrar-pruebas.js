@@ -3,8 +3,9 @@
 //   bash /opt/vaelo/vaelo/deploy/actualizar.sh --borrar-pruebas
 // Borra: envíos, pedidos y carpetas de tiendas, rutas, reclamos, cobros, pagos y cuentas de pilotos, cierres del día,
 //        historial, cuentas de clientes, tiendas, empresas y pilotos, con sus fotos y documentos.
-// NO borra: la cuenta de administración, el equipo de oficina, vehículos, tarifas, zonas, ajustes (sede, correo)
-//           ni las promociones generales.
+// NO borra: la cuenta de administración, el equipo de oficina, vehículos, tarifas, zonas, ajustes (sede, correo),
+//           los planes de tiendas, la lista de regalos de influencers ni las promociones generales.
+// También borra: solicitudes de tiendas e influencers, influencers y sus puntos.
 'use strict';
 const fs = require('node:fs');
 const path = require('node:path');
@@ -28,7 +29,7 @@ const antes = {
 };
 
 // Tablas que se conservan. Todas las demás se vacían (así una tabla nueva también se limpia).
-const SE_QUEDAN = new Set(['ajustes', 'zonas_fijas', 'vehiculos', 'sqlite_sequence']);
+const SE_QUEDAN = new Set(['ajustes', 'zonas_fijas', 'vehiculos', 'sqlite_sequence', 'planes', 'influencer_regalos']);
 // Tablas que se conservan solo para el equipo (admin y oficina)
 const SOLO_EQUIPO = { usuarios: 'id', sesiones: 'usuario_id', push_suscripciones: 'usuario_id', tokens_clave: 'usuario_id', tokens_correo: 'usuario_id' };
 
@@ -89,5 +90,5 @@ try {
 
 db.exec('VACUUM');
 console.log(`Listo. Se borraron ${antes.envios} envíos, ${antes.pedidos} pedidos de tiendas, ${antes.cuentas} cuentas (clientes, tiendas, empresas y pilotos) y ${archivos} archivos.`);
-console.log('Se conservaron: administración, oficina, vehículos, tarifas, zonas, ajustes y promociones generales.');
+console.log('Se conservaron: administración, oficina, vehículos, tarifas, zonas, ajustes, planes, regalos de influencers y promociones generales.');
 console.log('Si necesitas recuperar algo, la copia de arriba tiene todo como estaba.');
