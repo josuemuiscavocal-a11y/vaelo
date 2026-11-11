@@ -323,6 +323,7 @@
         if (t === 'ganancias') pintarGanancias(panelGanancias);
         if (t === 'perfil') poner(panelPerfil, cajaRevision(),
           el('button', { class: 'boton-ver-ruta', type: 'button', onclick: () => guiaRapida() }, icono('paquete'), el('span', {}, el('strong', { text: 'Cómo identificar los paquetes' }), el('small', { text: 'Guía rápida de 3 pasos' }))),
+          el('button', { class: 'boton-ver-ruta', type: 'button', onclick: () => guiaWaze() }, icono('ruta'), el('span', {}, el('strong', { text: 'Usa Waze en tus entregas' }), el('small', { text: 'Más fácil y más seguro para llegar' }))),
           formularioPerfil(true, () => { poner($('revision'), cajaRevision()); }), formularioClave());
       };
       poner(app, el('div', { class: 'area-cabecera' }, el('div', {}, el('h1', { text: `Hola, ${yo.nombre.split(' ')[0]}` }),
@@ -334,7 +335,10 @@
       cargarEnvios(true);
       // La primera vez: guía rápida de cómo identificar los paquetes
       let vista = false; try { vista = localStorage.getItem('vaelo_guia_busca') === '1'; } catch { /* sin almacenamiento */ }
-      if (!vista) setTimeout(() => guiaRapida(), 900);
+      // Después de la guía (o directo si ya la vio): la pantalla de Waze, una sola vez
+      let vioWaze = false; try { vioWaze = localStorage.getItem('vaelo_guia_waze') === '1'; } catch { /* sin almacenamiento */ }
+      if (!vista) setTimeout(() => guiaRapida(() => { if (!vioWaze) setTimeout(guiaWaze, 400); }), 900);
+      else if (!vioWaze) setTimeout(guiaWaze, 900);
       temporizador = setInterval(() => cargarEnvios(), 10000);
       setInterval(async () => { try { yo = (await api('/api/piloto/yo')).piloto; pintarConexion(); } catch { /* sigue */ } }, 60000);
     }
@@ -1011,7 +1015,24 @@
     // ---------- Ruta sugerida con varios paquetes ----------
     // Ordena las paradas (recoger antes de entregar) yendo siempre a la más cercana, y arma la ruta para Google Maps
     // ---------- Guía rápida: cómo identificar los paquetes (3 pasos) ----------
-    function guiaRapida() {
+    // Waze: llega por calles reales y avisa del tráfico. El mapa de Vaelo marca el punto, Waze te lleva.
+    function guiaWaze() {
+      const cerrar = () => { try { localStorage.setItem('vaelo_guia_waze', '1'); } catch { /* sin almacenamiento */ } $('dlg-p').close(); };
+      const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+      const tienda = ios ? 'https://apps.apple.com/app/id323229106' : 'https://play.google.com/store/apps/details?id=com.waze';
+      poner($('dlg-p-cuerpo'),
+        el('h2', { style: 'font-size:1.35rem', text: 'Usa Waze en tus entregas' }),
+        el('p', { text: 'El mapa de Vaelo te muestra dónde es cada entrega, pero a veces puede marcar calles que ya no existen o que están cerradas. Waze conoce las calles reales y el tráfico del momento.' }),
+        el('ul', { class: 'lista-simple' },
+          el('li', { text: 'Es más fácil: te dice cuándo y hacia dónde girar, con voz.' }),
+          el('li', { text: 'Es más seguro: no tienes que ir viendo el celular, y te avisa de accidentes y calles cerradas.' }),
+          el('li', { text: 'En cada entrega toca «Ir con Waze» y te lleva directo al punto que marcó el cliente.' })),
+        el('div', { style: 'display:grid;gap:.5rem;margin-top:.8rem' },
+          el('a', { class: 'boton cinta', href: tienda, target: '_blank', rel: 'noopener', text: 'Descargar Waze', onclick: () => setTimeout(cerrar, 300) }),
+          el('button', { class: 'boton borde', type: 'button', text: 'Ya la tengo', onclick: cerrar })));
+      $('dlg-p').showModal();
+    }
+    function guiaRapida(alCerrar) {
       const ej = (valor, tipo, nota) => el('div', { class: 'caja-busca' }, el('span', { class: 'busca-etq', text: 'BUSCA' }),
         el('div', {}, el('strong', { class: 'busca-grande bv-codigo', text: valor }), el('small', { text: nota })));
       const pasos = [
@@ -1024,7 +1045,7 @@
       ];
       let i = 0;
       const cuerpo = el('div');
-      const cerrar = () => { try { localStorage.setItem('vaelo_guia_busca', '1'); } catch { /* sin almacenamiento */ } $('dlg-p').close(); };
+      const cerrar = () => { try { localStorage.setItem('vaelo_guia_busca', '1'); } catch { /* sin almacenamiento */ } $('dlg-p').close(); if (typeof alCerrar === 'function') alCerrar(); };
       const pintar = () => {
         const x = pasos[i];
         poner(cuerpo, el('p', { class: 'guia-paso', text: `Paso ${i + 1} de ${pasos.length}` }), el('h2', { style: 'font-size:1.35rem', text: x.t }), x.v, el('p', { text: x.p }),
