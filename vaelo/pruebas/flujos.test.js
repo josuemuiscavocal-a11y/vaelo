@@ -12,7 +12,7 @@ const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'vaelo-prueba-'));
 process.env.VAELO_DATA = DIR;
 process.env.VAELO_OSRM = 'no';
 const { db } = require('../db');
-const { servidor, hashPassword, asignacionAutomatica, decisionesVencidas, push } = require('../server');
+const { servidor, hashPassword, asignacionAutomatica, decisionesVencidas, push, recordarEfectivo } = require('../server');
 
 let BASE;
 const ZONA1 = { lat: 14.6407, lng: -90.5133 };      // centro de la capital
@@ -1299,4 +1299,45 @@ test('planes de tiendas: precio, mínimo, cobro con comisión, volumen, excepcio
   // Dejar el plan como estaba para no afectar otras pruebas
   assert.equal((await cambiar({})).status, 200);
   assert.equal((await rosa('GET', '/api/empresa/carpetas')).j.minimo, 3);
+});
+
+test('efectivo en la mano del piloto: lo ve en su app con fecha límite y recibe un recordatorio antes de que venza, una sola vez', async () => {
+  const dia = new Date(Date.UTC(2026, 10, 11, 18, 0));   // mediodía en Guatemala
+  db.prepare('UPDATE envios SET liquidado_id = 999 WHERE mensajero_id = ? AND liquidado_id IS NULL').run(pilotoId);   // empieza sin efectivo
+  db.prepare('UPDATE usuarios SET efectivo_aviso = NULL WHERE id = ?').run(pilotoId);
+  assert.equal((await piloto('GET', '/api/piloto/yo')).j.piloto.efectivo, null);
+  assert.equal(recordarEfectivo(dia), 0);
+  // Entrega con cobro del producto: Q35 de envío (paga quien recibe) + Q400 del producto
+  const id = db.prepare('SELECT id FROM envios WHERE mensajero_id = ? ORDER BY id LIMIT 1').get(pilotoId).id;
+  db.prepare("UPDATE envios SET estado = 'entregado', metodo_pago = 'recibe', precio = 35, cargos_extra = 0, cobro_destinatario = 400, sede_llegada = NULL, entregado_en = datetime('now'), piloto_cerro_en = datetime('now'), liquidado_id = NULL WHERE id = ?").run(id);
+  let ef = (await piloto('GET', '/api/piloto/yo')).j.piloto.efectivo;
+  assert.equal(ef.monto, 435); assert.equal(ef.envios, 1); assert.equal(ef.vencido, false); assert.equal(ef.mucho, false); assert.ok(ef.horas > 60 && ef.horas <= 72);
+  assert.match(ef.limite, /^\d{4}-\d{2}-\d{2}$/); assert.match(ef.sede, /Sede Vaelo/);
+  assert.equal(recordarEfectivo(dia), 0, 'faltan casi 3 días y es poco: no molesta');
+  // Trae mucho efectivo: un aviso (una sola vez)
+  ajuste('efectivo_aviso_monto', 400);
+  assert.equal((await piloto('GET', '/api/piloto/yo')).j.piloto.efectivo.mucho, true);
+  assert.equal(recordarEfectivo(dia), 1); assert.equal(recordarEfectivo(dia), 0, 'no repite');
+  assert.equal(recordarEfectivo(new Date(Date.UTC(2026, 10, 12, 8, 0))), 0, 'de noche no avisa');
+  // Falta menos de un día: recordatorio de "mañana vence"
+  db.prepare("UPDATE envios SET piloto_cerro_en = datetime('now', '-50 hours') WHERE id = ?").run(id);
+  db.prepare("UPDATE usuarios SET efectivo_aviso = replace(efectivo_aviso, substr(efectivo_aviso, 1, instr(efectivo_aviso, '|') - 1), (SELECT piloto_cerro_en FROM envios WHERE id = ?)) WHERE id = ?").run(id, pilotoId);
+  ef = (await piloto('GET', '/api/piloto/yo')).j.piloto.efectivo;
+  assert.ok(ef.horas <= 24 && ef.horas > 0);
+  assert.equal(recordarEfectivo(dia), 1); assert.equal(recordarEfectivo(dia), 0);
+  // Vencido: aviso urgente y ya no puede conectarse
+  db.prepare("UPDATE envios SET piloto_cerro_en = datetime('now', '-80 hours') WHERE id = ?").run(id);
+  db.prepare("UPDATE usuarios SET efectivo_aviso = replace(efectivo_aviso, substr(efectivo_aviso, 1, instr(efectivo_aviso, '|') - 1), (SELECT piloto_cerro_en FROM envios WHERE id = ?)) WHERE id = ?").run(id, pilotoId);
+  assert.equal((await piloto('GET', '/api/piloto/yo')).j.piloto.efectivo.vencido, true);
+  assert.equal(recordarEfectivo(dia), 1); assert.equal(recordarEfectivo(dia), 0);
+  assert.equal((await piloto('POST', '/api/piloto/en-linea', { en_linea: true, lat: ZONA1.lat, lng: ZONA1.lng })).status, 403);
+  // Liquida en la sede: desaparece el aviso y la próxima tanda vuelve a avisar
+  const caja = (await admin('GET', '/api/admin/caja')).j.pilotos.find((x) => x.id === pilotoId);
+  assert.equal((await admin('POST', '/api/admin/caja/liquidar', { piloto_id: pilotoId, recibido: caja.efectivo })).status, 200);
+  assert.equal((await piloto('GET', '/api/piloto/yo')).j.piloto.efectivo, null);
+  assert.equal((await piloto('POST', '/api/piloto/en-linea', { en_linea: true, lat: ZONA1.lat, lng: ZONA1.lng })).status, 200);
+  db.prepare("UPDATE envios SET liquidado_id = NULL, piloto_cerro_en = datetime('now') WHERE id = ?").run(id);
+  assert.equal(recordarEfectivo(dia), 1, 'tanda nueva: vuelve a avisar que trae mucho');
+  db.prepare('UPDATE envios SET liquidado_id = 999 WHERE id = ?').run(id);
+  ajuste('efectivo_aviso_monto', 1000);
 });

@@ -1660,3 +1660,9 @@ fieldset { min-width: 0; } .recientes { max-width: 100%; min-width: 0; }
 .condiciones-tienda[open] summary::after { content: "Ocultar"; }
 .condiciones-tienda summary span { color: var(--suave); font-size: .9rem; margin-right: auto; }
 .condiciones-tienda .plan-lineas { margin-top: .9rem; }
+
+/* Piloto: efectivo de Vaelo que trae en la mano */
+.efectivo-piloto { background: #f6f8fd; border: 1.5px solid #cfd8f3; border-left: 5px solid var(--azul); border-radius: 10px; padding: .85rem 1rem; margin-bottom: .9rem; }
+.efectivo-piloto.pronto { background: #fff7d1; border-color: #ecd98a; border-left-color: #d99a00; }
+.efectivo-piloto p { margin: .3rem 0 .6rem; font-size: .95rem; }
+.efectivo-piloto p:last-child { margin-bottom: 0; }

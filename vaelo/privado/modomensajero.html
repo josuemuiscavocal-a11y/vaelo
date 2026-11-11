@@ -11,7 +11,7 @@
   <link rel="manifest" href="/manifest-piloto.webmanifest">
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/vendor/maplibre/maplibre-gl.css?v=4.7.1">
-  <link rel="stylesheet" href="/css/styles.css?v=20261111b">
+  <link rel="stylesheet" href="/css/styles.css?v=20261111c">
   <link rel="stylesheet" href="/css/suave.css?v=20261111a">
 </head>
 <body class="modo-piloto app-piloto">
@@ -449,6 +449,16 @@
       }
       if (yo.deuda) nodos.push(el('div', { class: 'deuda-piloto' }, el('strong', { text: `Debes entregar ${dinero(yo.deuda.monto)} en la sede` }),
         el('p', { style: 'margin:.35rem 0 0', text: `Tienes efectivo de hace más de ${yo.deuda.dias} días. Pasa a la sede a aclarar cuentas: hasta entonces no puedes conectarte, y si no liquidas se suspende tu cuenta.` })));
+      // Efectivo de Vaelo en la mano: cuánto es y hasta cuándo se entrega (antes de que venza el plazo)
+      const ef = yo.efectivo;
+      if (ef && !yo.deuda) {
+        const dia = new Date(ef.limite + 'T12:00:00Z').toLocaleDateString('es-GT', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' });
+        const pronto = ef.horas <= 24;
+        nodos.push(el('div', { class: 'efectivo-piloto' + (pronto || ef.mucho ? ' pronto' : '') },
+          el('strong', { text: `Tienes ${dinero(ef.monto)} de Vaelo en efectivo` }),
+          el('p', { text: `${pronto ? 'Tu plazo vence ' + (ef.horas <= 0 ? 'hoy' : 'mañana') + ': entrégalo' : 'Entrégalo'} en la sede${ef.sede ? ' (' + ef.sede + ')' : ''} a más tardar el ${dia} para seguir recibiendo envíos.${ef.mucho ? ' Ya es bastante: por tu seguridad, pasa a dejarlo cuando termines esta ruta.' : ''}` }),
+          ef.sede_lat ? el('a', { class: 'boton borde chico', href: `https://www.google.com/maps/dir/?api=1&destination=${ef.sede_lat},${ef.sede_lng}`, target: '_blank', rel: 'noopener', text: 'Cómo llegar a la sede' }) : null));
+      }
       poner(caja, ...nodos);
     }
 

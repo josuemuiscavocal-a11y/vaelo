@@ -981,6 +981,43 @@ function deudaVencida(pilotoId) {
   if (neto <= 0) return null;
   return { monto: neto, desde: r.desde, dias };
 }
+// Efectivo de Vaelo que el piloto trae en la mano (envíos cobrados y productos de tiendas) y hasta cuándo puede entregarlo
+function efectivoEnMano(pilotoId) {
+  const aj = getAjustes(), dias = Number(aj.dias_liquidar) || 3;
+  const r = db.prepare(`SELECT COALESCE(SUM(${SQL_EFECTIVO}), 0) AS monto, COUNT(*) AS envios, MIN(e.piloto_cerro_en) AS desde FROM envios e
+    WHERE e.mensajero_id = ? AND e.piloto_cerro_en IS NOT NULL AND e.liquidado_id IS NULL AND ${SQL_EFECTIVO} > 0`).get(pilotoId);
+  if (!(r.monto > 0)) return null;
+  const limiteMs = fechaMs(r.desde) + dias * 86400_000;
+  const tope = Number(aj.efectivo_aviso_monto);
+  return { monto: redondear(r.monto), envios: r.envios, desde: r.desde, dias, limite: new Date(limiteMs - 6 * 3600_000).toISOString().slice(0, 10),
+    horas: Math.round((limiteMs - Date.now()) / 3600_000), vencido: !!deudaVencida(pilotoId), mucho: tope > 0 && r.monto >= tope,
+    sede: aj.sede_direccion || '', sede_lat: Number(aj.sede_lat) || null, sede_lng: Number(aj.sede_lng) || null };
+}
+// Recordatorios al celular del piloto: un día antes del plazo, al vencer, y cuando ya trae mucho efectivo encima.
+// Cada aviso sale una sola vez por cada tanda de efectivo (se vuelve a activar cuando liquida y junta efectivo otra vez).
+function recordarEfectivo(ahora = new Date()) {
+  const hora = (ahora.getUTCHours() + 18) % 24;
+  if (hora < 7 || hora >= 20) return 0;   // solo de día (hora de Guatemala)
+  let enviados = 0;
+  const pilotos = db.prepare(`SELECT DISTINCT e.mensajero_id AS id FROM envios e WHERE e.mensajero_id IS NOT NULL AND e.piloto_cerro_en IS NOT NULL AND e.liquidado_id IS NULL AND ${SQL_EFECTIVO} > 0`).all();
+  for (const { id } of pilotos) {
+    const m = efectivoEnMano(id);
+    if (!m) continue;
+    const u = db.prepare('SELECT efectivo_aviso FROM usuarios WHERE id = ?').get(id);
+    const previos = String(u?.efectivo_aviso || '').startsWith(m.desde + '|') ? u.efectivo_aviso.split('|').slice(1) : [];
+    const tipo = m.vencido ? 'vencido' : m.horas <= 24 ? 'manana' : m.mucho ? 'mucho' : null;
+    if (!tipo || previos.includes(tipo)) continue;
+    db.prepare('UPDATE usuarios SET efectivo_aviso = ? WHERE id = ?').run([m.desde, ...previos, tipo].join('|'), id);
+    const q = `Q${m.monto.toFixed(2)}`, donde = m.sede ? ` (${m.sede})` : '';
+    avisar(id, tipo === 'vencido' ? { titulo: 'Entrega el efectivo de Vaelo', cuerpo: `Tienes ${q} sin entregar y ya pasó el plazo. Pasa a la sede${donde}: hasta entonces no puedes conectarte.`, url: RUTA_PILOTO, etiqueta: 'efectivo', urgente: true }
+      : tipo === 'manana' ? { titulo: 'Mañana vence tu plazo', cuerpo: `Tienes ${q} de Vaelo en efectivo. Entrégalo en la sede${donde} para seguir recibiendo envíos.`, url: RUTA_PILOTO, etiqueta: 'efectivo', urgente: true }
+      : { titulo: 'Llevas bastante efectivo', cuerpo: `Ya traes ${q} de Vaelo. Por tu seguridad, pasa a dejarlo a la sede${donde} cuando termines esta ruta.`, url: RUTA_PILOTO, etiqueta: 'efectivo' });
+    if (tipo === 'vencido') avisarStaff({ titulo: 'Piloto con efectivo fuera de plazo', cuerpo: `${nombreUsuario(id)} tiene ${q} sin entregar.`, url: RUTA_ADMIN, etiqueta: 'efectivo-' + id });
+    enviados++;
+  }
+  return enviados;
+}
+if (require.main === module) setInterval(() => { try { recordarEfectivo(); } catch (err) { console.error('Efectivo:', err.message); } }, 1800_000).unref();
 // Por qué un piloto no puede trabajar (para que el panel diga exactamente qué falta)
 function porQueNoTrabaja(u, r = revisarPiloto(u)) {
   if (u.estado_piloto !== 'aprobado') return 'todavía no está aprobado';
@@ -1007,7 +1044,7 @@ function pilotoSalida(u) {
   try { equipo = JSON.parse(u.equipo || '{}') || {}; } catch { /* vacío */ }
   const r = revisarPiloto(u);
   return { ...out, equipo, docs: docsDe(u), revision: r, puede_trabajar: puedeTrabajar(u, r), en_linea_real: enLineaReal(u),
-    politica_al_dia: politicaAlDia(u), deuda: deudaVencida(u.id), renovacion: u.renovacion_pendiente ? renovacionDe(u) : null };
+    politica_al_dia: politicaAlDia(u), deuda: deudaVencida(u.id), efectivo: efectivoEnMano(u.id), renovacion: u.renovacion_pendiente ? renovacionDe(u) : null };
 }
 
 // Datos del piloto que ve el cliente (solo cuando ya aceptó su envío)
@@ -5749,7 +5786,7 @@ ruta('PUT', '/api/admin/ajustes', ({ req, body }) => {
   }
   if (body.whatsapp_pagos !== undefined) up.run('whatsapp_pagos', String(body.whatsapp_pagos).replace(/\D/g, '').slice(0, 15));
   // Montos de cargos, seguro y tarifa fija
-  const montos = { dias_liquidar: [1, 60], cargo_bodega_empresa: [0, 1000], min_paquetes_sede: [1, 500], min_pedidos_lote: [1, 500], min_pedidos_minorista: [1, 100], dias_reclamo: [1, 60], cargo_devolucion: [0, 1000], cargo_bodega_dia: [0, 1000], cargo_reentrega: [0, 1000], cargo_cancelacion: [0, 1000], pct_piloto_cancelacion: [0, 100],
+  const montos = { dias_liquidar: [1, 60], efectivo_aviso_monto: [0, 100000], cargo_bodega_empresa: [0, 1000], min_paquetes_sede: [1, 500], min_pedidos_lote: [1, 500], min_pedidos_minorista: [1, 100], dias_reclamo: [1, 60], cargo_devolucion: [0, 1000], cargo_bodega_dia: [0, 1000], cargo_reentrega: [0, 1000], cargo_cancelacion: [0, 1000], pct_piloto_cancelacion: [0, 100],
     horas_decidir_fallido: [0.25, 48], seguro_pct: [0, 50], seguro_minimo: [0, 1000], responsabilidad_max: [0, 100000], km_max_tarifa_fija: [1, 200] };
   for (const [k, [min, max]] of Object.entries(montos)) {
     if (body[k] === undefined) continue;
@@ -5920,4 +5957,4 @@ const servidor = http.createServer(async (req, res) => {
 if (require.main === module) {
   servidor.listen(PORT, HOST, () => console.log(`Vaelo funcionando en http://${HOST}:${PORT}`));
 }
-module.exports = { servidor, hashPassword, asignacionAutomatica, decisionesVencidas, push, enviosAtascados, ordenarParadas, estimarLlegadas, avisarVencimientos };
+module.exports = { recordarEfectivo, servidor, hashPassword, asignacionAutomatica, decisionesVencidas, push, enviosAtascados, ordenarParadas, estimarLlegadas, avisarVencimientos };
