@@ -651,13 +651,9 @@
     function tarjetaRuta(lista) {
       const e0 = lista[0];
       const abiertos = lista.filter(x => ['pendiente', 'recogido', 'en_camino'].includes(x.estado));
-      // Marcados con el nombre: si dos clientes se llaman igual, se avisa para revisar también la dirección
-      const llave = (n) => String(n || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-      const veces = {}; lista.forEach(x => { veces[llave(x.destino_nombre)] = (veces[llave(x.destino_nombre)] || 0) + 1; });
-      lista.forEach(x => { x.nombre_repetido = x.marcado === 'nombre' && veces[llave(x.destino_nombre)] > 1; });
       const cab = (extra) => el('div', { class: 'cab' }, el('strong', { class: 'guia' }, `Ruta de ${e0.empresa}`), extra);
       const paradasResumen = () => el('ol', { class: 'paradas-ruta' }, lista.map(x => el('li', { class: ['entregado', 'a_sede', 'en_sede', 'fallido'].includes(x.estado) ? 'hecha' : '' },
-        el('span', { class: 'num', text: String(x.parada || '') }), el('div', {}, x.marcado === 'nombre' ? null : valorBusca(x), el('strong', { text: x.destino_nombre }),
+        el('span', { class: 'num', text: String(x.parada || '') }), el('div', {}, valorBusca(x), el('strong', { text: x.destino_nombre }),
           el('small', { text: `${x.destino_zona} · ${HORARIO_TXT[x.horario] || ''} · ${TAMANO_TXT[x.tamano] || ''}${x.metodo_pago === 'recibe' ? ` · cobra ${dinero(x.precio)}` : ''}` })),
         x.estado !== 'pendiente' ? chipEstado(x.estado) : null)));
       const cobros = lista.filter(x => x.metodo_pago === 'recibe');
@@ -699,8 +695,7 @@
           const c = el('input', { type: 'checkbox', style: 'width:auto', onchange: (ev) => { if (ev.target.checked) marcados.add(x.id); else marcados.delete(x.id); actualizar(); } });
           casillas.set(x.guia, { c, x });
           return el('label', { class: 'casilla paquete-recoger' }, c, el('span', { class: 'busca-fila' }, el('small', { text: 'BUSCA' }), valorBusca(x)),
-            el('span', {}, x.parada ? el('span', { class: 'parada-num', text: 'Parada ' + x.parada }) : null, x.marcado === 'nombre' ? null : el('strong', { text: x.destino_nombre }),
-              x.nombre_repetido ? el('small', { class: 'error-texto', text: `Hay otro con este nombre. Este va a: ${[x.destino_direccion, x.destino_zona].filter(Boolean).join(", ")}` }) : null,
+            el('span', {}, x.parada ? el('span', { class: 'parada-num', text: 'Parada ' + x.parada }) : null, el('strong', { text: x.destino_nombre }),
               el('small', { text: [TAMANO_TXT[x.tamano], x.descripcion].filter(Boolean).join(' · ') })));
         });
         const boton = el('button', { class: 'boton cinta accion-principal', type: 'button', text: 'Ya recogí los paquetes marcados', disabled: true, onclick: async () => {
@@ -974,12 +969,12 @@
       const ej = (valor, tipo, nota) => el('div', { class: 'caja-busca' }, el('span', { class: 'busca-etq', text: 'BUSCA' }),
         el('div', {}, el('strong', { class: 'busca-grande bv-codigo', text: valor }), el('small', { text: nota })));
       const pasos = [
-        { t: 'Cada paquete trae una marca', p: 'Puede ser un código escrito (como TB-03), el nombre del cliente escrito, o una etiqueta impresa.',
-          v: el('div', { class: 'guia-marcas' }, el('span', { class: 'busca-valor bv-codigo', text: 'TB-03' }), el('span', { class: 'busca-valor bv-nombre', text: 'Ana López' }), el('span', { class: 'busca-valor bv-guia' }, el('span', { class: 'bv-tenue', text: 'VA-AQ2H' }), el('span', { class: 'bv-fin', text: '6XSD' }))) },
+        { t: 'Cada paquete trae una marca', p: 'Puede ser una guía impresa, o un código escrito a mano (como TB-03) con el nombre del cliente abajo.',
+          v: el('div', { class: 'guia-marcas' }, el('span', { class: 'busca-valor bv-codigo', text: 'TB-03' }), el('span', { class: 'busca-valor bv-guia' }, el('span', { class: 'bv-tenue', text: 'VA-AQ2H' }), el('span', { class: 'bv-fin', text: '6XSD' }))) },
         { t: 'La app te dice qué buscar', p: 'En cada paquete, al recoger y al entregar, sale este recuadro. Busca en la bolsa o caja lo que dice ahí. Nada más.',
           v: ej('TB-03', 'código', 'escrito en el paquete') },
-        { t: '¿No trae la marca? Márcala tú', p: 'Siempre anda con tu marcador y tu cinta. Si un cliente no marcó su paquete, escribe tú lo que dice el recuadro BUSCA y pégale cinta. Si es de una empresa, pídele que lo marque antes de llevártelo.',
-          v: ej('LP-01', 'código', 'escríbelo con marcador y pégale cinta') },
+        { t: '¿No trae la marca? Márcala tú', p: 'Siempre anda con tu marcador y tu cinta. Si un cliente no marcó su paquete, escribe tú el código del recuadro BUSCA y debajo el nombre de quien recibe, y pégale cinta. Si es de una empresa, pídele que lo marque antes de llevártelo.',
+          v: ej('LP-01', 'código', 'escríbelo con marcador, el nombre abajo, y pégale cinta') },
       ];
       let i = 0;
       const cuerpo = el('div');
@@ -1001,9 +996,9 @@
     // Código corto escrito en el paquete (TB-07): así se sabe cuál es cuál sin etiqueta impresa
     // Cómo viene marcado el paquete (lo eligió la empresa): qué tiene que buscar el piloto
     // Qué buscar en el paquete: una sola regla para el piloto («mira el recuadro BUSCA y busca eso»)
-    const buscaDe = (x) => x.marcado === 'etiqueta' ? { tipo: 'Etiqueta', valor: x.guia } : x.marcado === 'nombre' ? { tipo: 'Nombre', valor: x.destino_nombre }
+    const buscaDe = (x) => x.marcado === 'etiqueta' ? { tipo: 'Etiqueta', valor: x.guia }
       : x.codigo_corto ? { tipo: 'Código', valor: x.codigo_corto } : { tipo: 'Guía', valor: x.guia };
-    const CLASE_BUSCA = { 'Código': 'bv-codigo', 'Nombre': 'bv-nombre', 'Etiqueta': 'bv-guia', 'Guía': 'bv-guia' };
+    const CLASE_BUSCA = { 'Código': 'bv-codigo', 'Etiqueta': 'bv-guia', 'Guía': 'bv-guia' };
     // Guía larga (VA-KS43G6PE): se resaltan los últimos 4, que es lo que se busca rápido en la etiqueta
     const textoBusca = (b) => b.tipo === 'Etiqueta' || b.tipo === 'Guía'
       ? [el('span', { class: 'bv-tenue', text: b.valor.slice(0, -4) }), el('span', { class: 'bv-fin', text: b.valor.slice(-4) })] : [b.valor];
@@ -1011,9 +1006,9 @@
     // Recuadro grande: siempre igual, en el mismo lugar. al: 'recoger' muestra qué hacer si no trae la marca
     function cajaBusca(x, al) {
       const b = buscaDe(x);
-      const ayuda = al === 'recoger' ? (x.pedido_id ? '¿No la trae? Pídele a la empresa que la marque antes de llevártelo.' : '¿No lo trae? Escríbelo tú con tu marcador y pégale cinta.') : '';
+      const ayuda = al === 'recoger' ? (x.pedido_id ? '¿No la trae? Pídele a la empresa que la marque antes de llevártelo.' : '¿No lo trae? Escribe tú el código y el nombre abajo, con tu marcador, y pégale cinta.') : '';
       return el('div', { class: 'caja-busca' }, el('span', { class: 'busca-etq', text: 'BUSCA' }),
-        el('div', {}, el('strong', { class: 'busca-grande ' + CLASE_BUSCA[b.tipo] }, textoBusca(b)), el('small', { text: b.tipo === 'Código' ? 'escrito en el paquete' : b.tipo === 'Nombre' ? 'escrito en el paquete' + (x.nombre_repetido ? ` · hay otro «${b.valor}» en tu ruta: revisa también la dirección` : '') : 'en la etiqueta impresa (fíjate en los últimos 4)' }),
+        el('div', {}, el('strong', { class: 'busca-grande ' + CLASE_BUSCA[b.tipo] }, textoBusca(b)), el('small', { text: b.tipo === 'Código' ? `escrito en el paquete, con «${x.destino_nombre}» abajo` : 'en la etiqueta impresa (fíjate en los últimos 4)' }),
           ayuda ? el('small', { class: 'busca-ayuda', text: ayuda }) : null));
     }
     function botonVerRuta(e, titulo) {

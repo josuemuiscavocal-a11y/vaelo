@@ -4005,7 +4005,7 @@ function leerDiaCarpeta(v) {
   if (dia > sumarDias(hoyGT(), 30)) falla(400, 'Elige un día dentro del próximo mes.');
   return dia;
 }
-const MARCADOS = { etiqueta: 'Guía impresa', codigo: 'Código escrito a mano', nombre: 'Nombre del cliente escrito a mano' };
+const MARCADOS = { etiqueta: 'Guía impresa', codigo: 'Código escrito a mano con el nombre abajo' };
 const marcadoValido = (m) => (MARCADOS[m] ? m : 'codigo');
 function carpetaSalida(c, conPedidos = false) {
   const filas = db.prepare("SELECT * FROM pedidos_empresa WHERE carpeta_id = ? AND estado != 'cancelado' ORDER BY id").all(c.id);

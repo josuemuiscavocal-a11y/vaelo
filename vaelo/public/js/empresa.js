@@ -464,26 +464,20 @@ async function dialogoMover(p, r, c, recargar) {
 // Cómo marca la empresa sus paquetes: así el piloto sabe qué buscar (sin código no se recoge)
 const MARCADO_TXT = {
   etiqueta: ['Guía impresa', 'Imprimes las guías con «Imprimir etiquetas» y pegas cada una en su paquete.', 'Recomendado'],
-  codigo: ['Código escrito', 'Escribes con marcador el código amarillo de cada envío (TB-01, TB-02…).', 'Si no tienes impresora'],
-  nombre: ['Nombre del cliente', 'Escribes con marcador el nombre del cliente en cada paquete.', 'Solo si no hay otra opción'],
+  codigo: ['Código escrito', 'Escribes con marcador, grande, el código amarillo de cada envío (TB-01, TB-02…) y debajo el nombre del cliente.', 'Si no tienes impresora'],
 };
 function bloqueMarcado(c, abierta, pedidos, recargar) {
   const m = c.marcado || 'codigo';
-  // Con nombre: si dos clientes se llaman igual, que lo distingan (si no, el piloto puede confundirlos)
-  const llave = (n) => String(n || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  const cuenta = {}; pedidos.filter((p) => p.estado !== 'cancelado').forEach((p) => { const k = llave(p.recibe_nombre || p.cliente_nombre); cuenta[k] = (cuenta[k] || 0) + 1; });
-  const repetidos = m === 'nombre' ? [...new Set(pedidos.map((p) => p.recibe_nombre || p.cliente_nombre).filter((n) => cuenta[llave(n)] > 1))] : [];
   const ejemplo = m === 'codigo' ? el('span', { class: 'codigo-paquete', text: pedidos.find((p) => p.codigo_corto)?.codigo_corto || 'TB-01' }) : null;
   return el('div', { class: 'bloque-marcado' },
     el('p', { class: 'aviso-codigos' }, ejemplo, el('span', {}, el('strong', { text: 'Cada paquete debe ir marcado. ' }), MARCADO_TXT[m][1], ' Sin marca no se recoge: el piloto no sabría cuál es cuál.')),
     abierta ? el('div', { class: 'marcado-opciones', role: 'radiogroup', 'aria-label': '¿Cómo vas a marcar los paquetes?' },
       el('span', { class: 'etiqueta-campo', text: '¿Cómo vas a marcar los paquetes?' }),
-      el('p', { class: 'marcado-recomienda' }, el('strong', { text: 'Recomendado: usar la guía impresa. ' }), 'Si no tienes impresora, usa «Código escrito»: escribes el código amarillo de cada envío con marcador.'),
+      el('p', { class: 'marcado-recomienda' }, el('strong', { text: 'Recomendado: usar la guía impresa. ' }), 'Si no tienes impresora, usa «Código escrito»: escribes con marcador el código amarillo de cada envío y debajo el nombre del cliente.'),
       Object.entries(MARCADO_TXT).map(([k, [t, , nota]]) => el('button', { type: 'button', class: 'chip marcado-chip' + (k === 'etiqueta' ? ' recomendado' : ''), role: 'radio', 'aria-checked': String(k === m), 'aria-pressed': String(k === m),
         onclick: async () => { if (k === m) return; try { await api(`/api/empresa/carpetas/${c.id}`, { method: 'PUT', body: { marcado: k } }); recargar(); } catch (e) { alert(e.message); } } },
         el('span', { text: t }), el('small', { text: nota }))))
-      : el('p', { class: 'pista', text: 'Marcados con: ' + MARCADO_TXT[m][0].toLowerCase() + '.' }),
-    repetidos.length ? el('div', { class: 'mensaje error', text: `Hay clientes con el mismo nombre (${repetidos.join(', ')}). Escribe también la zona en esos paquetes, o mejor usa «Código escrito» para no confundir al piloto.` }) : null);
+      : el('p', { class: 'pista', text: 'Marcados con: ' + MARCADO_TXT[m][0].toLowerCase() + '.' }));
 }
 // Reportar un problema con un pedido (queja): la oficina lo evalúa y, si fue culpa del piloto, se le descuenta y se compensa
 const TIPOS_RECLAMO_EMP = { danado: 'Llegó dañado', incompleto: 'Llegó incompleto', perdido: 'El paquete se perdió', otro: 'Otro problema (trato, retraso, etc.)' };

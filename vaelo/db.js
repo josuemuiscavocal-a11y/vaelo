@@ -561,6 +561,9 @@ agregarColumnas('carpetas_empresa', [['marcado', "TEXT NOT NULL DEFAULT 'codigo'
 agregarColumnas('lotes_empresa', [['marcado', "TEXT NOT NULL DEFAULT 'codigo'"]]);
 agregarColumnas('envios', [['marcado', 'TEXT']]);
 agregarColumnas('usuarios', [['marcado_paquetes', 'TEXT']]);
+// Ya no existe marcar con el nombre del cliente: lo que estaba así pasa a código escrito (código + nombre abajo)
+for (const t of ['carpetas_empresa', 'lotes_empresa', 'envios']) db.exec(`UPDATE ${t} SET marcado = 'codigo' WHERE marcado = 'nombre'`);
+db.exec("UPDATE usuarios SET marcado_paquetes = 'codigo' WHERE marcado_paquetes = 'nombre'");
 // Promociones por horas (hora de inicio y fin opcionales) y cupones personales de compensación por un reclamo
 agregarColumnas('promociones', [['desde_hora', 'TEXT'], ['hasta_hora', 'TEXT'], ['usuario_id', 'INTEGER'], ['reclamo_id', 'INTEGER']]);
 agregarColumnas('reclamos', [['cupon_monto', 'REAL'], ['cupon_promo_id', 'INTEGER']]);

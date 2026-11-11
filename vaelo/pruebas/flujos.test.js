@@ -895,6 +895,7 @@ test('cómo marca la empresa los paquetes: con etiqueta o nombre no se usa el c�
   const v = (await beto('GET', `/api/empresa/carpetas/${c.id}`)).j.carpeta;
   assert.equal(v.marcado, 'etiqueta'); assert.equal(v.pedidos[0].codigo_corto, null);
   assert.equal((await beto('PUT', `/api/empresa/carpetas/${c.id}`, { marcado: 'otra' })).status, 400);
+  assert.equal((await beto('PUT', `/api/empresa/carpetas/${c.id}`, { marcado: 'nombre' })).status, 400, 'ya no existe marcar solo con el nombre');
   // La siguiente carpeta recuerda lo que eligió
   const c2 = (await beto('POST', '/api/empresa/carpetas', { dia: new Date(Date.now() - 6 * 3600_000 + 4 * 86400_000).toISOString().slice(0, 10) })).j.carpeta;
   assert.equal(c2.marcado, 'etiqueta');
@@ -902,9 +903,9 @@ test('cómo marca la empresa los paquetes: con etiqueta o nombre no se usa el c�
   // Un envío de empresa marcado con nombre: el piloto no ve el código
   const e = db.prepare("SELECT id FROM envios WHERE pedido_id IS NOT NULL AND mensajero_id = ? ORDER BY id DESC LIMIT 1").get(pilotoId);
   if (e) {
-    db.prepare("UPDATE envios SET marcado = 'nombre', estado = 'recogido' WHERE id = ?").run(e.id);
+    db.prepare("UPDATE envios SET marcado = 'etiqueta', estado = 'recogido' WHERE id = ?").run(e.id);
     const x = (await piloto('GET', '/api/piloto/envios')).j.envios.find((y) => y.id === e.id);
-    if (x) { assert.equal(x.codigo_corto, null); assert.match(x.marcado_texto, /Nombre/); }
+    if (x) { assert.equal(x.codigo_corto, null); assert.match(x.marcado_texto, /Guía impresa/); }
     db.prepare("UPDATE envios SET marcado = NULL, estado = 'entregado' WHERE id = ?").run(e.id);
   }
 });
