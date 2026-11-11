@@ -315,7 +315,8 @@
       }
       return el('article', { class: 'envio e-' + e.estado },
         el('div', {},
-          el('div', { class: 'guia' }, e.guia, e.fragil ? el('span', { class: 'etiqueta-pendiente', style: 'margin-left:.4rem', text: 'Frágil' }) : null),
+          el('div', { class: 'guia' }, e.codigo_corto && e.estado !== 'cancelado' ? el('span', { class: 'codigo-paquete', title: 'Escríbelo en el paquete con marcador', text: e.codigo_corto }) : null, e.guia, e.fragil ? el('span', { class: 'etiqueta-pendiente', style: 'margin-left:.4rem', text: 'Frágil' }) : null),
+          e.codigo_corto && e.estado === 'pendiente' ? el('div', { class: 'pista codigo-pista', text: `Escribe ${e.codigo_corto} en el paquete con marcador. Si no tienes, el piloto lo escribe al recoger.` }) : null,
           el('div', { class: 'detalle', text: `${e.vehiculo}, ${e.peso} lb. Para ${e.destino_nombre}, ${e.destino_zona}` }),
           el('div', { class: 'detalle', text: (e.programado_para && e.estado === 'pendiente' ? `Programado: ${fechaProgramada(e.programado_para)}` : fecha(e.creado)) + (e.mensajero_nombre && e.asignacion === 'aceptado' ? `. Piloto: ${e.mensajero_nombre.split(' ')[0]}` : '') })),
         el('div', { class: 'lado' }, chipEstado(e.estado),
@@ -662,7 +663,7 @@
       poner($('dlg-cuerpo'), 
         el('button', { class: 'cerrar no-imprimir', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: cerrarDialogo }),
         el('h2', { class: 'no-imprimir', style: 'font-size:1.3rem', text: 'Guía de envío' }),
-        el('p', { class: 'no-imprimir', style: 'color:var(--suave)', text: 'Imprímela y pégala en el paquete, o anota el número de guía en la caja.' }),
+        el('p', { class: 'no-imprimir', style: 'color:var(--suave)', text: e.codigo_corto ? `Imprímela y pégala en el paquete. Sin impresora, basta con escribir ${e.codigo_corto} en el paquete con marcador.` : 'Imprímela y pégala en el paquete, o anota el número de guía en la caja.' }),
         guiaImprimible(e),
         el('div', { class: 'no-imprimir', style: 'margin-top:1rem;display:flex;gap:.5rem' },
           el('button', { class: 'boton', type: 'button', text: 'Imprimir guía', onclick: () => window.print() }),
@@ -855,9 +856,10 @@
         el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: cerrarDialogo }),
         el('h2', { text: `¡Listo! Pediste ${envios.length} envíos` }),
         el('p', { class: 'pista', text: `Total ${dinero(total)}. Ahora manda a cada persona su enlace: ahí comparte su ubicación y confirma sus datos para que el piloto le lleve el paquete.` }),
+        envios.some(x => x.codigo_corto) ? el('div', { class: 'mensaje aviso', text: 'Escribe en cada paquete su código (el recuadro amarillo) con marcador, así el piloto sabe cuál es cuál. Si no tienes marcador, el piloto los marca al recoger.' }) : null,
         el('ul', { class: 'caja-enlaces' }, envios.map(x => {
           const e = { ...x, metodo_pago: metodo, receptor: { enlace: x.enlace_receptor } };
-          return el('li', {}, el('span', {}, el('strong', { text: x.destino_nombre }), el('small', { text: `${x.guia} · código de entrega ${x.codigo_entrega}` })),
+          return el('li', {}, x.codigo_corto ? el('span', { class: 'codigo-paquete', text: x.codigo_corto }) : null, el('span', {}, el('strong', { text: x.destino_nombre }), el('small', { text: `${x.guia} · código de entrega ${x.codigo_entrega}` })),
             el('a', { class: 'boton cinta chico', href: whatsappReceptor(e), target: '_blank', rel: 'noopener', text: 'Mandar enlace' }));
         })),
         el('button', { class: 'boton', type: 'button', text: 'Ver mis envíos', onclick: () => { cerrarDialogo(); abrirTab('lista'); } }));
@@ -910,7 +912,7 @@
           $('cupon').value = ''; $('cupon-msg').textContent = ''; f.origen_nombre.value = ''; f.origen_direccion.value = '';
           if (quien === 'tercero') f.origen_telefono.value = '';
           mostrarMensaje($('msg-envio'), '');
-          await celebrarPedido(r.guia, r.precio, r.codigo_entrega, r.exige_receptor);
+          await celebrarPedido(r.guia, r.precio, r.codigo_entrega, r.exige_receptor, r.codigo_corto);
           cargarEnvios();
           abrirTab('lista');
           verDetalle(r.id);

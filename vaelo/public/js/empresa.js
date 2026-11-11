@@ -390,6 +390,8 @@ async function vistaCarpeta(caja, yo, id) {
           abierta && pedidos.some((p) => ['pendiente', 'esperando'].includes(p.estado)) ? el('button', { class: 'boton cinta chico', type: 'button', text: `Recordar a los que faltan (${pedidos.filter((p) => ['pendiente', 'esperando'].includes(p.estado)).length})`,
             onclick: () => dialogoRecordar(pedidos.filter((p) => ['pendiente', 'esperando'].includes(p.estado)), r, c) }) : null,
           pedidos.length ? el('button', { class: 'boton borde chico', type: 'button', text: 'Imprimir etiquetas', onclick: () => imprimirEtiquetas(pedidos, r.empresa) }) : null)),
+      pedidos.length ? el('p', { class: 'aviso-codigos' }, el('span', { class: 'codigo-paquete', text: pedidos.find((p) => p.codigo_corto)?.codigo_corto || 'TB-01' }),
+        'Cada paquete debe ir marcado: imprime las etiquetas o escribe con marcador el código amarillo de cada envío en su paquete. Sin código no se recoge.') : null,
       pedidos.length ? el('ul', { class: 'pedidos-lista' }, pedidos.map((p) => filaPedido(p, r, c, recargar)))
         : el('div', { class: 'carpetas-vacio' }, el('p', { text: 'La carpeta está vacía. Toca «Añadir envío» para registrar el primero.' }))));
 }
@@ -425,7 +427,8 @@ function filaPedido(p, r, c, recargar) {
   const menu = opciones.length ? el('details', { class: 'menu-acciones' }, el('summary', { 'aria-label': 'Más opciones', title: 'Más opciones' }, '⋯'), el('div', { class: 'menu-lista' }, opciones)) : null;
   return el('li', { class: 'pedido-fila' },
     el('div', { class: 'pedido-info' },
-      el('div', {}, el('strong', { text: p.cliente_nombre }), ' ', el('span', { class: ESTADO_PEDIDO_CLASE[p.estado] || 'etiqueta-gris', text: p.estado_texto }),
+      el('div', {}, p.codigo_corto && p.estado !== 'cancelado' ? el('span', { class: 'codigo-paquete', title: 'Escribe este código en el paquete con marcador', text: p.codigo_corto }) : null,
+        el('strong', { text: p.cliente_nombre }), ' ', el('span', { class: ESTADO_PEDIDO_CLASE[p.estado] || 'etiqueta-gris', text: p.estado_texto }),
         !p.tiene_foto && editable ? el('span', { class: 'etiqueta-pendiente', style: 'margin-left:.3rem', text: 'Falta foto' }) : null,
         p.avisos ? el('span', { class: 'etiqueta-azul', style: 'margin-left:.3rem', title: 'Tu cliente activó los avisos', text: 'Avisos activos' }) : null),
       el('small', { text: `${p.codigo} · ${p.descripcion} · ${p.tamano_texto}` }),
@@ -691,13 +694,13 @@ function imprimirEtiquetas(pedidos, empresa) {
   const w = window.open('', '_blank');
   if (!w) { alert('Permite las ventanas emergentes para imprimir las etiquetas.'); return; }
   const etiquetas = pedidos.map((p) => `<div class="et"><div class="cab"><b>VAELO</b><span>${esc(empresa)}</span></div>
-    <div class="cuerpo">${qrVaelo.svg(p.codigo, 120)}<div><div class="cod">${esc(p.codigo)}</div><div class="n">${esc(p.recibe_nombre || p.cliente_nombre)}</div>
+    <div class="cuerpo">${qrVaelo.svg(p.codigo, 120)}<div>${p.codigo_corto ? `<div class="corto">${esc(p.codigo_corto)}</div>` : ''}<div class="cod">${esc(p.codigo)}</div><div class="n">${esc(p.recibe_nombre || p.cliente_nombre)}</div>
     <div>${esc([p.zona, p.direccion].filter(Boolean).join(' · '))}</div><div>${esc(p.dia ? diaEmp(p.dia) : 'Fecha por confirmar')}${p.horario_texto ? ' · ' + esc(p.horario_texto) : ''}</div>
     <div class="t">${esc(p.tamano_texto)} · ${esc(p.descripcion)}</div></div></div></div>`).join('');
   w.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Etiquetas Vaelo</title><style>
     body{font-family:Arial,sans-serif;margin:12px}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
     .et{border:2px solid #000;border-radius:8px;break-inside:avoid;overflow:hidden}.cab{display:flex;justify-content:space-between;background:#0e2463;color:#fff;padding:6px 10px;font-size:13px}
-    .cuerpo{display:flex;gap:10px;padding:8px;align-items:center;font-size:12px;line-height:1.35}.cod{font-size:20px;font-weight:bold;letter-spacing:.05em}.n{font-size:15px;font-weight:bold}.t{color:#555}
+    .cuerpo{display:flex;gap:10px;padding:8px;align-items:center;font-size:12px;line-height:1.35}.cod{font-size:20px;font-weight:bold;letter-spacing:.05em}.n{font-size:15px;font-weight:bold}.corto{font-size:30px;font-weight:900;letter-spacing:.06em;border:3px solid #000;border-radius:6px;display:inline-block;padding:0 8px;margin-bottom:4px}.t{color:#555}
     @media print{body{margin:0}.no{display:none}}</style></head><body><p class="no"><button onclick="print()">Imprimir</button></p><div class="grid">${etiquetas}</div></body></html>`);
   w.document.close();
   setTimeout(() => { try { w.focus(); w.print(); } catch { /* el usuario imprime con el botón */ } }, 400);

@@ -444,7 +444,7 @@
         if (!envios.length) { poner(cuerpo, el('tr', {}, el('td', { colspan: 8, style: 'text-align:center;color:var(--suave);padding:2rem', text: 'No hay envíos con este filtro.' }))); return; }
         poner(cuerpo, ...envios.map(e => el('tr', { class: 'clic' + (pendientes.has(e.id) ? ' nuevo' : ''), tabindex: 0,
           onclick: () => abrirEnvio(e.id), onkeydown: (ev) => { if (ev.key === 'Enter') abrirEnvio(e.id); } },
-          el('td', {}, el('strong', { text: e.guia }), pendientes.has(e.id) ? el('span', { class: 'marca-nuevo', text: pendientes.get(e.id).rechazo ? 'Rechazado' : 'Nuevo' }) : null, e.fragil ? el('span', { class: 'etiqueta-pendiente', style: 'margin-left:.3rem', text: 'Frágil' }) : null),
+          el('td', {}, e.codigo_corto ? el('span', { class: 'codigo-paquete', title: 'Código escrito en el paquete', text: e.codigo_corto }) : null, el('strong', { text: e.guia }), pendientes.has(e.id) ? el('span', { class: 'marca-nuevo', text: pendientes.get(e.id).rechazo ? 'Rechazado' : 'Nuevo' }) : null, e.fragil ? el('span', { class: 'etiqueta-pendiente', style: 'margin-left:.3rem', text: 'Frágil' }) : null),
           el('td', { text: fecha(e.creado) }),
           el('td', {}, e.cliente_nombre, el('br'), sub(e.cliente_telefono)),
           el('td', {}, e.destino_nombre, el('br'), sub(e.destino_zona)),
@@ -951,7 +951,7 @@ null))));
       poner($('dlg-cuerpo'), 
         el('button', { class: 'cerrar no-imprimir', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: () => $('dlg').close() }),
         el('div', { class: 'no-imprimir' },
-          el('h2', { style: 'font-size:1.4rem;margin-bottom:.3rem' }, e.guia, e.flete ? el('span', { class: 'etiqueta-flete', style: 'margin-left:.5rem;vertical-align:middle', text: 'Flete' }) : null, e.fragil ? el('span', { class: 'etiqueta-pendiente', style: 'margin-left:.5rem;vertical-align:middle', text: 'Frágil' }) : null), chipEstado(e.estado),
+          el('h2', { style: 'font-size:1.4rem;margin-bottom:.3rem' }, e.codigo_corto ? el('span', { class: 'codigo-paquete', title: 'Código escrito en el paquete', text: e.codigo_corto }) : null, e.guia, e.flete ? el('span', { class: 'etiqueta-flete', style: 'margin-left:.5rem;vertical-align:middle', text: 'Flete' }) : null, e.fragil ? el('span', { class: 'etiqueta-pendiente', style: 'margin-left:.5rem;vertical-align:middle', text: 'Frágil' }) : null), chipEstado(e.estado),
           el('div', { style: 'margin-top:1rem' }, cajaMapa),
           el('div', { class: 'datos' },
             dato('Cliente', e.flete ? `${e.flete_cliente || 'Por completar'} (por WhatsApp) ` : `${e.cliente_nombre} `, telLink(e.flete ? e.flete_telefono : e.cliente_telefono)),

@@ -191,6 +191,7 @@ const codigoBarras = () => el('div', { class: 'codigo-barras', 'aria-hidden': 't
 function guiaImprimible(e) {
   return el('div', { class: 'guia-imprimible' },
     el('div', { class: 'franja' }, el('img', { src: '/img/logo-negro.png', alt: 'Vaelo', height: 24 }), el('span', { text: `${e.vehiculo || ''} · ${e.peso} lb` })),
+    e.codigo_corto ? el('div', { class: 'guia-codigo-corto' }, el('span', { text: 'Código del paquete' }), el('strong', { text: e.codigo_corto })) : null,
     el('div', { class: 'numero', text: e.guia }),
     e.fragil ? el('div', { class: 'guia-fragil', text: 'FRÁGIL · MANEJAR CON CUIDADO' }) : null,
     codigoBarras(),
@@ -627,7 +628,7 @@ function campoDocumento({ titulo, tiene, ver, subir, pdf, ayuda, camara, soloVer
 // ---------- Animación al confirmar un pedido ----------
 // Pantalla de "¡Pedido recibido!": se dibuja un círculo con palomita, un paquete avanza por la ruta y aparece la guía.
 // Sigue sola a los 3.5 segundos o al tocar el botón.
-function celebrarPedido(guia, precio, codigo, exigeReceptor) {
+function celebrarPedido(guia, precio, codigo, exigeReceptor, codigoCorto) {
   return new Promise((listo) => {
     const svg = `<svg class="celebra-check" viewBox="0 0 120 120" aria-hidden="true">
       <circle class="celebra-circulo" cx="60" cy="60" r="52" fill="none" stroke-width="7"/>
@@ -641,6 +642,8 @@ function celebrarPedido(guia, precio, codigo, exigeReceptor) {
     caja.append(el('h2', { text: '¡Pedido recibido!' }),
       el('p', {}, 'Tu número de guía es ', el('strong', { class: 'celebra-guia', text: guia })),
       precio != null ? el('p', { class: 'celebra-precio', text: `Total ${dinero(precio)}` }) : '',
+      codigoCorto ? el('div', { class: 'codigo-paquete-aviso' }, el('span', { text: 'Escribe en el paquete' }), el('strong', { text: codigoCorto }),
+        el('small', { text: 'Con marcador, grande. Si no tienes, el piloto lo escribe al recoger.' })) : '',
       codigo ? el('p', { class: 'celebra-codigo' }, 'Código de entrega ', el('strong', { text: codigo }), el('br'), el('small', { text: 'Quien recibe lo verá en su enlace. El piloto se lo pedirá para entregar.' })) : '',
       el('div', { class: 'celebra-ruta-lugar' }),
       el('p', { class: 'celebra-pista', text: exigeReceptor ? 'Ahora envía el enlace a quien recibe. Cuando comparta su ubicación, buscamos al piloto más cercano.' : 'Estamos buscando al piloto más cercano.' }),
@@ -648,7 +651,7 @@ function celebrarPedido(guia, precio, codigo, exigeReceptor) {
     caja.querySelector('.celebra-ruta-lugar').outerHTML = ruta;
     capa.append(caja);
     document.body.append(capa);
-    const reloj = setTimeout(cerrar, exigeReceptor ? 6000 : 3500);
+    const reloj = setTimeout(cerrar, exigeReceptor || codigoCorto ? 7000 : 3500);
     if (navigator.vibrate) navigator.vibrate(60);
   });
 }

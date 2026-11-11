@@ -553,6 +553,9 @@ agregarColumnas('usuarios', [['permisos', 'TEXT']]);
 // Quien recibe también califica al piloto (de 1 a 5 estrellas)
 agregarColumnas('envios', [['calif_receptor', 'INTEGER'], ['calif_receptor_comentario', 'TEXT']]);
 // Empresas: recogida fija (días de la semana 0-6 separados por coma y hora) y datos para facturar
+// Código corto para escribir a mano en el paquete (TB-07): sin impresora, el piloto sabe cuál es cuál
+agregarColumnas('envios', [['codigo_corto', 'TEXT']]);
+agregarColumnas('pedidos_empresa', [['codigo_corto', 'TEXT'], ['codigo_dia', 'TEXT']]);
 // Promociones por horas (hora de inicio y fin opcionales) y cupones personales de compensación por un reclamo
 agregarColumnas('promociones', [['desde_hora', 'TEXT'], ['hasta_hora', 'TEXT'], ['usuario_id', 'INTEGER'], ['reclamo_id', 'INTEGER']]);
 agregarColumnas('reclamos', [['cupon_monto', 'REAL'], ['cupon_promo_id', 'INTEGER']]);

@@ -350,6 +350,8 @@ const SQL_ENVIO = `
 
 function envioSalida(e) {
   const out = { ...e };
+  // Envíos de antes (sin código corto) que siguen en curso: se les asigna al mostrarlos
+  if (!out.codigo_corto && ['pendiente', 'recogido', 'en_camino'].includes(e.estado) && !e.flete) out.codigo_corto = codigoCortoEnvio(e.id);
   // La ubicación del mensajero solo se muestra mientras lleva el paquete y si es reciente (2 horas)
   const reciente = e.mensajero_ubic_fecha && (Date.now() - new Date(e.mensajero_ubic_fecha.replace(' ', 'T') + 'Z').getTime()) < 2 * 3600_000;
   if (!['recogido', 'en_camino', 'pendiente'].includes(e.estado) || !reciente) {
@@ -1966,12 +1968,13 @@ function insertarEnvio(u, body, d, c, desc, programado, grupo = null) {
   // Foto del paquete que tomó el cliente: muestra qué lleva desde antes de recogerlo
   if (body.foto_paquete) guardarArchivoEnvio(Number(r.lastInsertRowid), 'paquete', body.foto_paquete);
   const id = Number(r.lastInsertRowid);
+  const codigoCorto = codigoCortoEnvio(id);
   if (body._extras && body._extras.length) guardarExtras(id, body._extras);
   // Los cargos pendientes del cliente (cancelación, devolución, sede) se cobran junto con este envío
   const extra = sumarCargosPendientes(u.id, id);
   const nota = programado ? 'Solicitud recibida (programada)' : 'Solicitud recibida';
   db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(id, 'pendiente', nota + (desc.promocion ? `. Descuento: ${desc.promocion}` : ''));
-  return { id, guia, precio: desc.precio, descuento: desc.descuento, cargos_extra: extra, codigo_entrega: codigo, enlace_receptor: '/recibe/' + token,
+  return { id, guia, codigo_corto: codigoCorto, precio: desc.precio, descuento: desc.descuento, cargos_extra: extra, codigo_entrega: codigo, enlace_receptor: '/recibe/' + token,
     enlace_entrega: tokenEntrega ? '/entrega/' + tokenEntrega : null, exige_receptor: exigeReceptor(), precio_por_confirmar: !!c.por_confirmar };
 }
 function guardarDireccion(usuarioId, nombre, datos) {
@@ -2829,6 +2832,7 @@ function reenviarDesdeSede(e, quien) {
       `Nueva entrega del envío ${e.guia} desde la sede`, e.fragil, e.codigo_entrega, token, e.receptor_nombre, e.receptor_confirmado_en, e.receptor_lat, e.receptor_lng, e.receptor_ubic_fecha, e.receptor_omitido,
       gananciaPiloto(cargoRe), e.id, e.valor_declarado, e.seguro);
     const nuevo = Number(r.lastInsertRowid);
+    db.prepare('UPDATE envios SET codigo_corto = ? WHERE id = ?').run(e.codigo_corto || null, nuevo);   // el paquete ya trae su código escrito
     db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(nuevo, 'pendiente', `Nueva entrega del envío ${e.guia} desde la sede`);
     cambiarEstado(e.id, 'reenviado', `Sale de la sede con la guía ${guia} (${quien})`);
     db.exec('COMMIT');
@@ -3461,7 +3465,7 @@ const pedidoCompleto = (p) => !!(p.dia && p.horario && p.lat != null && p.direcc
 function estadoPedido(p) { return p.estado === 'pendiente' && p.enlace_enviado_en ? 'esperando' : p.estado === 'confirmado' && p.lote_id ? 'en_vaelo' : p.estado; }
 // Lo que ve la empresa de un pedido (sin dinero)
 function pedidoSalida(p, conDinero = false) {
-  const out = { id: p.id, codigo: p.codigo, descripcion: p.descripcion, tamano: p.tamano, tamano_texto: TAMANOS[p.tamano]?.nombre || p.tamano,
+  const out = { id: p.id, codigo: p.codigo, codigo_corto: p.estado === 'cancelado' ? p.codigo_corto : codigoCortoPedido(p), descripcion: p.descripcion, tamano: p.tamano, tamano_texto: TAMANOS[p.tamano]?.nombre || p.tamano,
     cliente_nombre: p.cliente_nombre, cliente_telefono: p.cliente_telefono, dia: p.dia, horario: p.horario, horario_texto: HORARIOS[p.horario] || '',
     direccion: p.direccion, zona: p.zona, lat: p.lat, lng: p.lng, referencias: p.referencias, recibe_nombre: p.recibe_nombre, recibe_telefono: p.recibe_telefono,
     metodo_pago: p.metodo_pago, estado: estadoPedido(p), estado_texto: ESTADOS_PEDIDO[estadoPedido(p)], tiene_foto: !!p.foto, enlace: '/pedido/' + p.token,
@@ -3525,6 +3529,48 @@ function guardarFotoPedido(p, dataUrl) {
   if (p.foto && !db.prepare('SELECT 1 FROM envios WHERE foto_paquete = ?').get(p.foto)) fs.rm(path.join(DOCS_DIR, path.basename(p.foto)), () => {});
   db.prepare("UPDATE pedidos_empresa SET foto = ?, actualizado = datetime('now') WHERE id = ?").run(nombre, p.id);
 }
+// ---------- Código corto del paquete (se escribe a mano con marcador: TB-07) ----------
+// Iniciales de la empresa o del cliente + número del día. Es único entre los paquetes de ese remitente ese día,
+// que es lo que el piloto lleva junto en su ruta.
+function prefijoCodigo(nombre) {
+  const w = String(nombre || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9 ]/g, ' ').split(/\s+/).filter(Boolean);
+  if (!w.length) return 'VA';
+  return w.length > 1 ? w[0][0] + w[1][0] : w[0].slice(0, 2).padEnd(2, 'X');
+}
+const numeroCodigo = (c) => Number(String(c || '').split('-')[1]) || 0;
+function codigoCortoPedido(p) {
+  if (!p) return null;
+  const dia = p.dia || '';
+  if (p.codigo_corto && (p.envio_id || (p.codigo_dia || '') === dia)) return p.codigo_corto;
+  const otros = db.prepare('SELECT codigo_corto FROM pedidos_empresa WHERE usuario_id = ? AND COALESCE(codigo_dia, \'\') = ? AND codigo_corto IS NOT NULL AND id != ? AND estado != \'cancelado\'').all(p.usuario_id, dia, p.id).map((x) => x.codigo_corto);
+  let codigo = p.codigo_corto;
+  if (!codigo || otros.includes(codigo)) {   // si se movió de día y su código ya existe en el día nuevo, se le da otro
+    const u = db.prepare('SELECT nombre, empresa_nombre FROM usuarios WHERE id = ?').get(p.usuario_id) || {};
+    const n = Math.max(0, ...otros.map(numeroCodigo)) + 1;
+    codigo = `${prefijoCodigo(u.empresa_nombre || u.nombre)}-${String(n).padStart(2, '0')}`;
+  }
+  db.prepare('UPDATE pedidos_empresa SET codigo_corto = ?, codigo_dia = ? WHERE id = ?').run(codigo, dia, p.id);
+  return codigo;
+}
+// Envío de un cliente: sus iniciales y el número de ese día (LP-01, LP-02…)
+function codigoCortoEnvio(envioId) {
+  const e = db.prepare('SELECT id, usuario_id, pedido_id, codigo_corto, creado FROM envios WHERE id = ?').get(envioId);
+  if (!e || e.codigo_corto) return e?.codigo_corto || null;
+  if (e.pedido_id) {
+    const p = db.prepare('SELECT * FROM pedidos_empresa WHERE id = ?').get(e.pedido_id);
+    const c = codigoCortoPedido(p);
+    db.prepare('UPDATE envios SET codigo_corto = ? WHERE id = ?').run(c, e.id);
+    return c;
+  }
+  const u = db.prepare('SELECT nombre, empresa_nombre FROM usuarios WHERE id = ?').get(e.usuario_id) || {};
+  const pref = prefijoCodigo(u.empresa_nombre || u.nombre);
+  const usados = db.prepare(`SELECT codigo_corto FROM envios WHERE usuario_id = ? AND pedido_id IS NULL AND codigo_corto IS NOT NULL
+    AND date(creado, '-6 hours') = date(?, '-6 hours')`).all(e.usuario_id, e.creado).map((x) => x.codigo_corto);
+  const c = `${pref}-${String(Math.max(0, ...usados.map(numeroCodigo)) + 1).padStart(2, '0')}`;
+  db.prepare('UPDATE envios SET codigo_corto = ? WHERE id = ?').run(c, e.id);
+  return c;
+}
+
 function crearPedido(u, b) {
   const tamano = TAMANOS[b.tamano] ? b.tamano : falla(400, 'Elige el tamaño del paquete.');
   const descripcion = texto(b.descripcion, 200);
@@ -4501,6 +4547,7 @@ ruta('POST', '/api/admin/lotes-empresa/:id/confirmar', ({ req, params, body }) =
           p.foto, p.id, l.id, grupo ? i + 1 : null, p.tamano, p.horario, grupo, pagaEmpresa && metodoEmpresa === 'efectivo' ? precioTotal : null,
           piloto ? piloto.id : null, piloto ? 'por_aceptar' : null, piloto ? 'oficina' : null, p.lat, p.lng);
         const id = Number(res.lastInsertRowid);
+        db.prepare('UPDATE envios SET codigo_corto = ? WHERE id = ?').run(codigoCortoPedido(p), id);
         db.prepare("UPDATE pedidos_empresa SET estado = 'enviado', envio_id = ?, actualizado = datetime('now') WHERE id = ?").run(id, p.id);
         db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(id, 'pendiente', `Pedido de ${emp.empresa_nombre || emp.nombre}${grupo ? `, parada ${i + 1} de ${ordenados.length}` : ''}${piloto ? `. Asignado a ${piloto.nombre.split(' ')[0]}, esperando que acepte` : ''} (${quien.nombre.split(' ')[0]})`);
         creados.push({ id, ruta: ri, piloto });
@@ -4930,9 +4977,9 @@ ruta('GET', '/api/admin/envios', ({ req, query }) => {
   if (estado === 'empresas') cond.push('e.pedido_id IS NOT NULL');
   else if (!q) cond.push('e.pedido_id IS NULL');
   if (q) {
-    cond.push('(e.guia LIKE ? OR e.destino_nombre LIKE ? OR u.nombre LIKE ? OR e.destino_telefono LIKE ? OR u.telefono LIKE ?)');
+    cond.push('(e.guia LIKE ? OR e.destino_nombre LIKE ? OR u.nombre LIKE ? OR e.destino_telefono LIKE ? OR u.telefono LIKE ? OR e.codigo_corto = ?)');
     const like = `%${q}%`;
-    args.push(like, like, like, like, like);
+    args.push(like, like, like, like, like, q.toUpperCase());
   }
   const where = cond.length ? `WHERE ${cond.join(' AND ')}` : '';
   return { envios: db.prepare(`${SQL_ENVIO} ${where} ORDER BY e.id DESC LIMIT 300`).all(...args).map((e) => {

@@ -862,3 +862,23 @@ test('descuentos a fondo: límite de usos total y por cliente, horas, programada
   assert.equal((await admin('POST', '/api/admin/promociones', { nombre: 'Mal', tipo: 'monto', valor: 5, desde: dia(ahora), desde_hora: '25:00', hasta: dia(mas(24)), codigo: 'MAL2' })).status, 400);
   db.prepare("UPDATE promociones SET activa = 0 WHERE codigo IN ('DOSUSOS','UNOXCLI','MASTARDE','PAUSA','MIN40','BIENVENIDA','VEINTE','GRATIS1','YAPASO')").run();
 });
+
+test('código corto para escribir en el paquete: por remitente y por día, sin repetirse', async () => {
+  const lucia = cliente();
+  db.prepare("INSERT OR IGNORE INTO usuarios (nombre,email,telefono,password_hash,rol,email_verificado,verificacion) VALUES ('Marta López Ruiz','codigos@prueba.com','55998877',?,'cliente',1,'verificado')").run(await hashPassword('clave-codigo-123'));
+  await lucia('POST', '/api/login', { email: 'codigos@prueba.com', password: 'clave-codigo-123' });
+  const base = { vehiculo_id: 1, peso: 1, origen_zona: 'Zona 1', destino_zona: 'Zona 1', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng, metodo_pago: 'efectivo', destino_telefono: '55554444', foto_paquete: FOTO };
+  const a = await lucia('POST', '/api/envios', { ...base, destino_nombre: 'Uno' });
+  assert.equal(a.status, 201, JSON.stringify(a.j)); assert.equal(a.j.codigo_corto, 'ML-01');
+  const caja = await lucia('POST', '/api/envios/caja', { vehiculo_id: 1, metodo_pago: 'efectivo', origen_quien: 'cliente', origen_zona: 'Zona 1', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng,
+    envios: [{ peso: 1, destino_nombre: 'Dos', destino_telefono: '55554444', destino_zona: 'Zona 1', foto_paquete: FOTO }, { peso: 1, destino_nombre: 'Tres', destino_telefono: '55554445', destino_zona: 'Zona 1', foto_paquete: FOTO }] });
+  assert.equal(caja.status, 201, JSON.stringify(caja.j));
+  assert.deepEqual(caja.j.envios.map((x) => x.codigo_corto), ['ML-02', 'ML-03']);
+  // El piloto y la administración lo ven; se puede buscar por el código
+  const lista = (await admin('GET', '/api/admin/envios?q=ml-02')).j.envios;
+  assert.ok(lista.some((x) => x.codigo_corto === 'ML-02'));
+  // Pedidos de empresa: iniciales de la empresa y número del día, y el envío conserva el código
+  const ped = db.prepare("SELECT p.*, e.codigo_corto AS c_envio FROM pedidos_empresa p JOIN envios e ON e.id = p.envio_id ORDER BY p.id DESC LIMIT 1").get();
+  if (ped) { assert.match(ped.c_envio || '', /^[A-Z0-9]{2}-\d{2}$/); }
+  for (const x of [a.j.id, ...caja.j.envios.map((y) => y.id)]) db.prepare("UPDATE envios SET estado = 'cancelado' WHERE id = ?").run(x);
+});

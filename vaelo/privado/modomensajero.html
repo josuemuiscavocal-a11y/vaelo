@@ -648,7 +648,7 @@
       const abiertos = lista.filter(x => ['pendiente', 'recogido', 'en_camino'].includes(x.estado));
       const cab = (extra) => el('div', { class: 'cab' }, el('strong', { class: 'guia' }, `Ruta de ${e0.empresa}`), extra);
       const paradasResumen = () => el('ol', { class: 'paradas-ruta' }, lista.map(x => el('li', { class: ['entregado', 'a_sede', 'en_sede', 'fallido'].includes(x.estado) ? 'hecha' : '' },
-        el('span', { class: 'num', text: String(x.parada || '') }), el('div', {}, el('strong', { text: x.destino_nombre }),
+        el('span', { class: 'num', text: String(x.parada || '') }), el('div', {}, chipCodigo(x), el('strong', { text: x.destino_nombre }),
           el('small', { text: `${x.destino_zona} · ${HORARIO_TXT[x.horario] || ''} · ${TAMANO_TXT[x.tamano] || ''}${x.metodo_pago === 'recibe' ? ` · cobra ${dinero(x.precio)}` : ''}` })),
         x.estado !== 'pendiente' ? chipEstado(x.estado) : null)));
       const cobros = lista.filter(x => x.metodo_pago === 'recibe');
@@ -689,7 +689,7 @@
         const filas = porRecoger.map(x => {
           const c = el('input', { type: 'checkbox', style: 'width:auto', onchange: (ev) => { if (ev.target.checked) marcados.add(x.id); else marcados.delete(x.id); actualizar(); } });
           casillas.set(x.guia, { c, x });
-          return el('label', { class: 'casilla paquete-recoger' }, c, el('span', {}, el('strong', { text: x.guia }), ` · ${x.destino_nombre} · ${TAMANO_TXT[x.tamano] || ''}`, x.descripcion ? el('small', { text: x.descripcion }) : null));
+          return el('label', { class: 'casilla paquete-recoger' }, c, chipCodigo(x, true), el('span', {}, el('strong', { text: x.destino_nombre }), ` · ${TAMANO_TXT[x.tamano] || ''}`, el('small', { text: [x.guia, x.descripcion].filter(Boolean).join(' · ') })));
         });
         const boton = el('button', { class: 'boton cinta accion-principal', type: 'button', text: 'Ya recogí los paquetes marcados', disabled: true, onclick: async () => {
           boton.disabled = true; boton.textContent = 'Guardando…'; ocupado++;
@@ -719,7 +719,8 @@
           bloquePersona(e0, { titulo: 'Recoges en', nombre: e0.origen_quien === 'sede' ? 'Sede de Vaelo' : e0.empresa, telefono: e0.origen_telefono, chip: null,
             zona: e0.origen_zona, referencias: e0.origen_direccion, punto: 'origen', accion: 'Ir a recoger' }),
           notaCobro,
-          el('div', { class: 'recoger-lista' }, el('div', { class: 'recoger-cab' }, el('p', {}, 'Revisa cada paquete con su etiqueta: ', contador), todos), ...filas),
+          el('div', { class: 'mensaje aviso' }, el('strong', { text: 'Cada paquete debe traer escrito su código (el recuadro amarillo). ' }), 'Si a alguno le falta, pídele a la empresa que lo marque antes de llevártelo. Así no se te confunden en la ruta.'),
+          el('div', { class: 'recoger-lista' }, el('div', { class: 'recoger-cab' }, el('p', {}, 'Revisa cada paquete con su código: ', contador), todos), ...filas),
           el('div', { style: 'display:grid;gap:.5rem' }, escanear, boton));
       }
       // 3) Entregas en orden: la siguiente abierta completa y el resto como lista
@@ -736,7 +737,7 @@
       return el('div', { class: 'ruta-en-curso' },
         el('article', { class: 'entrega-tarjeta ruta' }, cab(el('span', { class: 'estado en_camino', text: abiertos.length ? `${lista.length - abiertos.length} de ${lista.length} hechas` : 'Ruta terminada' })),
           actual ? el('div', { class: 'ruta-progreso' }, el('div', { class: 'barra-progreso' }, el('span', { style: `width:${Math.round(((lista.length - abiertos.length) / lista.length) * 100)}%` })),
-            el('p', {}, el('strong', { text: `Ahora: parada ${actual.parada} · ${actual.destino_nombre}` }), siguiente ? el('small', { text: `Después: parada ${siguiente.parada} · ${siguiente.destino_nombre} (${siguiente.destino_zona})` }) : el('small', { text: 'Es la última entrega' }))) : null,
+            el('p', {}, el('strong', {}, `Ahora: parada ${actual.parada} · `, chipCodigo(actual), actual.destino_nombre), siguiente ? el('small', { text: `Después: parada ${siguiente.parada}${siguiente.codigo_corto ? ' (' + siguiente.codigo_corto + ')' : ''} · ${siguiente.destino_nombre} · ${siguiente.destino_zona}` }) : el('small', { text: 'Es la última entrega' }))) : null,
           cajaEfectivo,
           !abiertos.length ? el('p', { class: 'pista', text: cobrado > 0 ? 'Ruta terminada. Entrega este efectivo en la oficina o como te indiquen; también queda en tu pestaña Ganancias.' : 'Ruta terminada. ¡Buen trabajo!' }) : null,
           abiertos.length ? botonVerRuta(abiertos[0], `Lo que falta de la ruta de ${e0.empresa}`) : null,
@@ -760,7 +761,7 @@
       if (e.asignacion === 'por_aceptar') {
         const km = kmHasta(e.origen_lat, e.origen_lng);
         return el('article', { class: 'entrega-tarjeta por-aceptar' },
-          el('div', { class: 'cab' }, el('strong', { class: 'guia', text: 'Nuevo envío ' + e.guia }), el('span', { class: 'estado pendiente', text: 'Por aceptar' })),
+          el('div', { class: 'cab' }, el('strong', { class: 'guia' }, chipCodigo(e), 'Nuevo envío ' + e.guia), el('span', { class: 'estado pendiente', text: 'Por aceptar' })),
           e.grupo_total > 1 ? el('div', { class: 'mensaje aviso', text: `Viaje con ${e.grupo_total} entregas desde el mismo punto. Al aceptar, aceptas todas.` }) : '',
           e.calif_cliente ? el('div', { class: 'estrellas-piloto' }, icono('estrella'), `Cliente calificado con ${e.calif_cliente} de 5 por otros pilotos`) : '',
           e.programado_para ? el('div', { class: 'mensaje aviso', text: 'Recoger el ' + fechaProgramada(e.programado_para) }) : '',
@@ -824,7 +825,8 @@
         zona: e.destino_zona, referencias: [e.destino_direccion, e.horario ? HORARIO_TXT[e.horario] : ''].filter(Boolean).join(' · '), punto: 'destino', accion: 'Dejar el pedido',
         extra: e.pedido_id ? botonWhatsCliente(e) : r.omitido && !r.confirmado ? el('div', { class: 'pista', text: 'Sin ubicación: ' + r.omitido }) : null });
       return el('article', { class: 'entrega-tarjeta' + (!cerrado ? ' activa' : '') },
-        el('div', { class: 'cab' }, el('strong', { class: 'guia' }, e.guia, e.flete ? el('span', { class: 'etiqueta-flete', style: 'margin-left:.4rem', text: 'Flete' }) : null), chipEstado(e.estado)),
+        el('div', { class: 'cab' }, el('strong', { class: 'guia' }, chipCodigo(e, true), e.guia, e.flete ? el('span', { class: 'etiqueta-flete', style: 'margin-left:.4rem', text: 'Flete' }) : null), chipEstado(e.estado)),
+        recoger && e.codigo_corto && !e.pedido_id ? el('div', { class: 'mensaje aviso' }, 'Al recoger, revisa que el paquete diga ', el('strong', { text: e.codigo_corto }), '. Si no lo trae, escríbelo tú con tu marcador.') : null,
         e.programado_para && recoger ? el('div', { class: 'mensaje aviso', text: 'Recoger el ' + fechaProgramada(e.programado_para) }) : '',
         e.ayudantes && !cerrado ? el('p', { class: 'flete-ayud-piloto', text: `Van ${e.ayudantes} ayudante${e.ayudantes === 1 ? '' : 's'} contigo para subir y bajar la carga` }) : null,
         fragil,
@@ -955,6 +957,8 @@
     // ---------- Ruta sugerida con varios paquetes ----------
     // Ordena las paradas (recoger antes de entregar) yendo siempre a la más cercana, y arma la ruta para Google Maps
     // ---------- Ver ruta antes de aceptar: todo el recorrido dibujado por calles, con km y minutos ----------
+    // Código corto escrito en el paquete (TB-07): así se sabe cuál es cuál sin etiqueta impresa
+    const chipCodigo = (x, grande) => x && x.codigo_corto ? el('span', { class: 'codigo-paquete' + (grande ? ' grande' : ''), title: 'Código escrito en el paquete', text: x.codigo_corto }) : null;
     function botonVerRuta(e, titulo) {
       return el('button', { class: 'boton-ver-ruta', type: 'button', onclick: () => verRuta(e, titulo) },
         icono('ruta'), el('span', {}, el('strong', { text: 'Ver ruta' }), el('small', { text: 'Todo el recorrido en el mapa, con kilómetros y tiempo' })));
@@ -1067,7 +1071,8 @@
       });
       poner($('dlg-p-cuerpo'), 
         el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: cerrar }),
-        el('h2', { style: 'font-size:1.4rem', text: 'Entregar ' + e.guia }), msg,
+        el('h2', { style: 'font-size:1.4rem' }, chipCodigo(e, true), 'Entregar ' + e.guia),
+        e.codigo_corto ? el('p', { class: 'pista', text: `Revisa que el paquete que entregas diga ${e.codigo_corto}.` }) : null, msg,
         Number(e.cobro_destinatario) > 0 ? el('div', { class: 'cobro', text: `Antes de entregar, cobra ${dinero(e.cobro_destinatario)}` }) : '',
         el('div', { class: 'campo' }, el('label', { for: 'en-codigo', text: 'Código de entrega (te lo da quien recibe)' }), codigo),
         el('div', { class: 'campo' }, el('label', { for: 'en-recibio', text: '¿Quién recibió?' }), recibio),

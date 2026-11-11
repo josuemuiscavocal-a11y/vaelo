@@ -1459,3 +1459,15 @@ fieldset { min-width: 0; } .recientes { max-width: 100%; min-width: 0; }
 .enlace-guia { background: none; border: 0; padding: 0; font: inherit; font-weight: 700; color: var(--azul); text-decoration: underline; cursor: pointer; }
 .etiqueta-ok { background: #e3f4ea; color: #1f6b3d; border-radius: 999px; padding: .15rem .55rem; font-size: .78rem; font-weight: 700; }
 .queja-cab > span { white-space: nowrap; flex: none; }
+/* Código corto del paquete (se escribe a mano con marcador) */
+.codigo-paquete { display: inline-flex; align-items: center; justify-content: center; background: #ffd23f; color: #1d1d1d; font-weight: 800; letter-spacing: .04em; border-radius: 8px; padding: .12rem .5rem; margin-right: .45rem; font-variant-numeric: tabular-nums; border: 2px solid #1d1d1d; line-height: 1.3; white-space: nowrap; }
+.codigo-paquete.grande { font-size: 1.35rem; padding: .2rem .7rem; }
+.codigo-pista { font-size: .82rem; margin-top: .2rem; }
+.codigo-paquete-aviso { display: flex; flex-direction: column; align-items: center; gap: .15rem; background: #fff6d6; border: 2px dashed #e0b100; border-radius: 12px; padding: .6rem; margin: .6rem 0; }
+.codigo-paquete-aviso span { font-size: .8rem; color: #5b6478; }
+.codigo-paquete-aviso strong { font-size: 2rem; letter-spacing: .06em; }
+.codigo-paquete-aviso small { color: #5b6478; text-align: center; }
+.guia-codigo-corto { display: flex; align-items: center; justify-content: space-between; border: 3px solid #000; border-radius: 6px; padding: .2rem .6rem; margin: .3rem 0; }
+.guia-codigo-corto span { font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; }
+.guia-codigo-corto strong { font-size: 2.2rem; letter-spacing: .06em; }
+.aviso-codigos { display: flex; align-items: center; gap: .3rem; background: #fff6d6; border-radius: 10px; padding: .55rem .75rem; font-size: .9rem; margin: .2rem 0 .8rem; }
