@@ -25,7 +25,13 @@
         <label class="opcion"><input type="radio" name="uso" value="personal" checked><span>Mandar mis paquetes<small>Envíos sueltos para ti o tu familia</small></span></label>
         <label class="opcion"><input type="radio" name="uso" value="tienda"><span>Vendo en lives o redes<small>Mandas todos los pedidos de tu live juntos y cobramos al entregar</small></span></label>
       </fieldset>
-      <div class="campo" id="campo-tienda" hidden><label for="tienda">Nombre de tu tienda</label><input id="tienda" maxlength="60" placeholder="Ej. Moda Luna GT"></div>
+      <div id="campo-tienda" hidden>
+        <p class="aviso-solicitud">Las cuentas de tienda se revisan para darte el mejor servicio y tu plan con descuentos. Mientras tanto ya puedes preparar tus pedidos.</p>
+        <div class="campo"><label for="tienda">Nombre de tu tienda</label><input id="tienda" maxlength="60" placeholder="Ej. Moda Luna GT"></div>
+        <div class="campo"><label for="tienda_red">Página de tu live o red social <span class="ayuda">Opcional</span></label><input id="tienda_red" maxlength="200" placeholder="Ej. facebook.com/modalunagt"></div>
+        <div class="campo"><label for="tienda_zona">¿En qué zona vendes más?</label><select id="tienda_zona"><option value="">Elige…</option></select></div>
+        <div class="campo"><label for="tienda_semana">¿Cuántos pedidos mandas por semana, más o menos?</label><input id="tienda_semana" type="number" min="0" max="5000" inputmode="numeric" placeholder="Ej. 15"></div>
+      </div>
       <div class="campo"><label for="nombre">Nombre completo</label><input id="nombre" autocomplete="name" required maxlength="100"></div>
       <div class="campo"><label for="telefono">Teléfono o WhatsApp</label><input id="telefono" type="tel" autocomplete="tel" placeholder="0000-0000" required maxlength="30"></div>
       <div class="campo"><label for="email">Correo</label><input id="email" type="email" autocomplete="email" required maxlength="150"></div>
@@ -42,6 +48,7 @@
     const form = document.getElementById('form');
     // ¿Personal o tienda? Desde el inicio (/registro?tienda=1) ya viene elegida la tienda
     const pintarUso = () => { const t = form.querySelector('input[name=uso]:checked').value === 'tienda'; document.getElementById('campo-tienda').hidden = !t; };
+    api('/api/config').then((c) => { const s = document.getElementById('tienda_zona'); for (const z of [...(c.zonas || []), 'Otra zona o municipio', 'En varias zonas']) s.append(el('option', { value: z === 'En varias zonas' ? 'Otra zona o municipio' : z, text: z })); }).catch(() => {});
     form.querySelectorAll('input[name=uso]').forEach((x) => x.addEventListener('change', pintarUso));
     if (new URLSearchParams(location.search).get('tienda')) { form.querySelector('input[name=uso][value=tienda]').checked = true; pintarUso(); }
     const volverR = new URLSearchParams(location.search).get('volver') || '';
@@ -55,6 +62,7 @@
           nombre: form.nombre.value, telefono: form.telefono.value,
           email: form.email.value, password: form.password.value, acepto_terminos: form.terminos.checked,
           tienda: form.querySelector('input[name=uso]:checked').value === 'tienda' ? (form.tienda.value || '').trim() || ' ' : undefined,
+          tienda_red: form.tienda_red.value, tienda_zona: form.tienda_zona.value, tienda_semana: form.tienda_semana.value,
         } });
         const volver = new URLSearchParams(location.search).get('volver') || '';
         location.href = /^\/[a-z-]*$/.test(volver) ? volver : form.querySelector('input[name=uso]:checked').value === 'tienda' ? '/tienda' : '/enviar';

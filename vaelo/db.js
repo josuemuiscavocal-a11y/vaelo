@@ -665,4 +665,7 @@ agregarColumnas('envios', [['ganancia_acordada', 'REAL'], ['tarifa_foco', 'INTEG
 // Cuenta minorista por solicitud: pendiente | aprobada | rechazada (vacío = tiendas de antes, ya aprobadas)
 agregarColumnas('usuarios', [['tienda_estado', 'TEXT'], ['tienda_red', 'TEXT'], ['tienda_zona', 'TEXT'], ['tienda_semana', 'INTEGER'], ['tienda_solicitud_en', 'TEXT'], ['tienda_nota', 'TEXT'],
   ['condiciones_vistas', 'TEXT']]);
+// La tienda ya le cobró el envío a su cliente: el piloto no lo cobra y Vaelo se lo descuenta a la tienda
+agregarColumnas('pedidos_empresa', [['envio_pagado', 'INTEGER NOT NULL DEFAULT 0']]);
+db.prepare("INSERT OR IGNORE INTO ajustes (clave, valor) VALUES ('dias_saldo_tienda', '7')").run();
 module.exports = { db, DB_PATH, DATA_DIR };

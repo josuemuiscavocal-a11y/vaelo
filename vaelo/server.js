@@ -2553,8 +2553,9 @@ ruta('GET', '/api/admin/caja', ({ req }) => {
     FROM usuarios u WHERE u.rol = 'mensajero' ORDER BY u.nombre`).all().filter((p) => p.efectivo > 0 || p.ganancia > 0);
   const detalle = (id) => db.prepare(`SELECT e.id, e.guia, e.entregado_en, e.precio, e.metodo_pago, e.cobro_destinatario, ${SQL_EFECTIVO} AS efectivo
     FROM envios e WHERE e.mensajero_id = ? AND e.piloto_cerro_en IS NOT NULL AND e.liquidado_id IS NULL AND ${SQL_EFECTIVO} > 0 ORDER BY e.id`).all(id);
-  const cobros = db.prepare(`SELECT u.id, u.nombre, u.telefono, u.empresa_nombre, COUNT(*) AS envios, SUM(e.cobro_destinatario - e.comision_cobro) AS monto, SUM(e.comision_cobro) AS comision
-    FROM envios e JOIN usuarios u ON u.id = e.usuario_id WHERE e.estado = 'entregado' AND e.cobro_destinatario > 0 AND e.cobro_pagado_en IS NULL
+  const cobros = db.prepare(`SELECT u.id, u.nombre, u.telefono, u.empresa_nombre, COUNT(*) AS envios, SUM(${SQL_NETO_TIENDA}) AS monto, SUM(e.comision_cobro) AS comision,
+      SUM(CASE WHEN e.metodo_pago = 'tienda' THEN e.precio ELSE 0 END) AS envios_tienda
+    FROM envios e JOIN usuarios u ON u.id = e.usuario_id WHERE ${SQL_CUENTA_TIENDA} AND e.cobro_pagado_en IS NULL
     GROUP BY u.id ORDER BY monto DESC`).all();
   const credito = db.prepare(`SELECT u.id, u.nombre, u.empresa_nombre, COUNT(*) AS envios, SUM(e.precio + e.cargos_extra) AS monto, MIN(e.creado) AS desde
     FROM envios e JOIN usuarios u ON u.id = e.usuario_id WHERE e.metodo_pago = 'credito' AND ${SQL_VIAJE_HECHO} AND e.credito_pagado_en IS NULL
@@ -2608,7 +2609,7 @@ ruta('POST', '/api/admin/caja/pagar-piloto', ({ req, body }) => {
 });
 ruta('POST', '/api/admin/caja/pagar-cobros', ({ req, body }) => {
   requiereRol(req, 'admin');
-  const r = db.prepare("UPDATE envios SET cobro_pagado_en = datetime('now') WHERE usuario_id = ? AND estado = 'entregado' AND cobro_destinatario > 0 AND cobro_pagado_en IS NULL").run(numero(body.cliente_id));
+  const r = db.prepare(`UPDATE envios AS e SET cobro_pagado_en = datetime('now') WHERE e.usuario_id = ? AND ${SQL_CUENTA_TIENDA} AND e.cobro_pagado_en IS NULL`).run(numero(body.cliente_id));
   return { ok: true, envios: Number(r.changes) };
 });
 ruta('POST', '/api/admin/caja/cobrar-credito', ({ req, body }) => {
@@ -4020,7 +4021,9 @@ function evaluarFoco(cond, pedidos) {
     else if (n < f.min_mixto) { texto = `${n} de ${total} pedidos son de ${f.zona}. Como hay pedidos en otras zonas, se necesitan al menos ${f.min_mixto} en ${f.zona}.`; falta = `Te ${f.min_mixto - n === 1 ? 'falta 1 pedido' : `faltan ${f.min_mixto - n} pedidos`} en ${f.zona}.`; }
     else texto = `${n} de ${total} pedidos son de ${f.zona}: deben ser ${mayoria} de la carpeta.`;
   }
-  const elegibles = aplica ? [...enFoco, ...(f.modo === 'vecinas' ? enVecinas : [])].map((x) => x.id) : [];
+  // Los que ya pagaron por transferencia cuentan para calificar, pero conservan el precio que pagaron
+  const yaPagado = new Set(pedidos.filter((p) => p.metodo_pago === 'transferencia').map((p) => p.id));
+  const elegibles = aplica ? [...enFoco, ...(f.modo === 'vecinas' ? enVecinas : [])].map((x) => x.id).filter((id) => !yaPagado.has(id)) : [];
   return { aplica, zona: f.zona, modo: f.modo, vecinas: f.vecinas, precio: f.precio, ganancia: f.ganancia, total, en_foco: n, en_vecinas: enVecinas.length,
     otras: total - n - enVecinas.length, elegibles, con_descuento: elegibles.length, texto, falta };
 }
@@ -4060,7 +4063,7 @@ function pedidoSalida(p, conDinero = false) {
   const out = { id: p.id, codigo: p.codigo, codigo_corto: p.estado === 'cancelado' ? p.codigo_corto : codigoCortoPedido(p), descripcion: p.descripcion, tamano: p.tamano, tamano_texto: TAMANOS[p.tamano]?.nombre || p.tamano,
     cliente_nombre: p.cliente_nombre, cliente_telefono: p.cliente_telefono, dia: p.dia, horario: p.horario, horario_texto: HORARIOS[p.horario] || '',
     direccion: p.direccion, zona: p.zona, lat: p.lat, lng: p.lng, referencias: p.referencias, recibe_nombre: p.recibe_nombre, recibe_telefono: p.recibe_telefono,
-    metodo_pago: p.metodo_pago, cobro: Number(p.cobro) || 0, estado: estadoPedido(p), estado_texto: ESTADOS_PEDIDO[estadoPedido(p)], tiene_foto: !!p.foto, enlace: '/pedido/' + p.token,
+    metodo_pago: p.metodo_pago, cobro: Number(p.cobro) || 0, envio_pagado: !!p.envio_pagado, estado: estadoPedido(p), estado_texto: ESTADOS_PEDIDO[estadoPedido(p)], tiene_foto: !!p.foto, enlace: '/pedido/' + p.token,
     confirmado_por: p.confirmado_por, confirmado_en: p.confirmado_en, enlace_enviado_en: p.enlace_enviado_en, lote_id: p.lote_id, creado: p.creado,
     transferencia_ok: !!p.transferencia_ok, avisos: db.prepare('SELECT COUNT(*) AS n FROM push_pedidos WHERE pedido_id = ?').get(p.id).n };
   if (conDinero) out.precio = precioPedido(p).precio;
@@ -4202,8 +4205,8 @@ function crearPedido(u, b) {
   if (cliente_nombre.length < 2) falla(400, 'Escribe el nombre de tu cliente.');
   if (digitos(cliente_telefono).length < 8) falla(400, 'Escribe el WhatsApp de tu cliente (8 dígitos).');
   const cobro = revisarCobroPlan(u, leerCobroPedido(b.cobro));
-  const r = db.prepare('INSERT INTO pedidos_empresa (usuario_id, codigo, token, descripcion, tamano, cliente_nombre, cliente_telefono, cobro) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-    .run(u.id, nuevaGuia(), crypto.randomBytes(16).toString('hex'), descripcion, tamano, cliente_nombre, cliente_telefono, cobro);
+  const r = db.prepare('INSERT INTO pedidos_empresa (usuario_id, codigo, token, descripcion, tamano, cliente_nombre, cliente_telefono, cobro, envio_pagado) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(u.id, nuevaGuia(), crypto.randomBytes(16).toString('hex'), descripcion, tamano, cliente_nombre, cliente_telefono, cobro, b.envio_pagado === true ? 1 : 0);
   return db.prepare('SELECT * FROM pedidos_empresa WHERE id = ?').get(Number(r.lastInsertRowid));
 }
 // Si ya tiene todos los datos de entrega, queda confirmado
@@ -4489,6 +4492,7 @@ ruta('PUT', '/api/empresa/pedidos/:id', ({ req, params, body }) => {
   if (body.descripcion !== undefined) { datos.descripcion = texto(body.descripcion, 200); if (datos.descripcion.length < 2) falla(400, 'Escribe qué es el paquete.'); }
   if (body.tamano !== undefined) datos.tamano = TAMANOS[body.tamano] ? body.tamano : falla(400, 'Elige el tamaño.');
   if (body.cobro !== undefined) datos.cobro = revisarCobroPlan(u, leerCobroPedido(body.cobro));
+  if (body.envio_pagado !== undefined) datos.envio_pagado = body.envio_pagado === true ? 1 : 0;
   if (body.cliente_nombre !== undefined) { datos.cliente_nombre = texto(body.cliente_nombre, 100); if (datos.cliente_nombre.length < 2) falla(400, 'Escribe el nombre de tu cliente.'); }
   if (body.cliente_telefono !== undefined) { datos.cliente_telefono = texto(body.cliente_telefono, 30); if (digitos(datos.cliente_telefono).length < 8) falla(400, 'Revisa el WhatsApp de tu cliente.'); }
   const cp = carpetaDe(p);
@@ -4689,12 +4693,22 @@ function carpetaSalida(c, conPedidos = false) {
   return out;
 }
 // Lo que el piloto cobró por los productos de la tienda: lo que Vaelo todavía le tiene que entregar y lo ya entregado
+// Cuentas con la tienda: lo cobrado de sus productos (menos la comisión) menos los envíos que ella ya le cobró a sus clientes.
+// Si da negativo, la tienda le debe a Vaelo (saldo).
+const SQL_NETO_TIENDA = "(e.cobro_destinatario - e.comision_cobro - CASE WHEN e.metodo_pago = 'tienda' THEN e.precio ELSE 0 END)";
+const SQL_CUENTA_TIENDA = "e.estado = 'entregado' AND (e.cobro_destinatario > 0 OR e.metodo_pago = 'tienda')";
 function cobrosProducto(uid) {
-  const f = db.prepare(`SELECT COALESCE(SUM(CASE WHEN cobro_pagado_en IS NULL THEN cobro_destinatario - comision_cobro END), 0) AS pendiente, COUNT(CASE WHEN cobro_pagado_en IS NULL THEN 1 END) AS envios,
-    COALESCE(SUM(CASE WHEN cobro_pagado_en IS NULL THEN comision_cobro END), 0) AS comision,
-    COALESCE(SUM(CASE WHEN cobro_pagado_en >= datetime('now', '-30 days') THEN cobro_destinatario - comision_cobro END), 0) AS pagado_30, MAX(cobro_pagado_en) AS ultimo_pago
-    FROM envios WHERE usuario_id = ? AND estado = 'entregado' AND cobro_destinatario > 0`).get(uid);
-  return { pendiente: redondear(f.pendiente), comision: redondear(f.comision), envios: f.envios, pagado_30: redondear(f.pagado_30), ultimo_pago: f.ultimo_pago };
+  const f = db.prepare(`SELECT COALESCE(SUM(CASE WHEN e.cobro_pagado_en IS NULL THEN ${SQL_NETO_TIENDA} END), 0) AS neto, COUNT(CASE WHEN e.cobro_pagado_en IS NULL AND e.cobro_destinatario > 0 THEN 1 END) AS envios,
+    COALESCE(SUM(CASE WHEN e.cobro_pagado_en IS NULL THEN e.comision_cobro END), 0) AS comision,
+    COALESCE(SUM(CASE WHEN e.cobro_pagado_en IS NULL AND e.metodo_pago = 'tienda' THEN e.precio END), 0) AS envios_tienda, COUNT(CASE WHEN e.cobro_pagado_en IS NULL AND e.metodo_pago = 'tienda' THEN 1 END) AS n_tienda,
+    MIN(CASE WHEN e.cobro_pagado_en IS NULL AND e.metodo_pago = 'tienda' THEN e.entregado_en END) AS saldo_desde,
+    COALESCE(SUM(CASE WHEN e.cobro_pagado_en >= datetime('now', '-30 days') THEN ${SQL_NETO_TIENDA} END), 0) AS pagado_30, MAX(e.cobro_pagado_en) AS ultimo_pago
+    FROM envios e WHERE e.usuario_id = ? AND ${SQL_CUENTA_TIENDA}`).get(uid);
+  const neto = redondear(f.neto), saldo = neto < 0 ? redondear(-neto) : 0;
+  const dias = ajNum('dias_saldo_tienda', 7);
+  const limite = saldo > 0 && f.saldo_desde ? new Date(fechaMs(f.saldo_desde) + dias * 86400_000 - 6 * 3600_000).toISOString().slice(0, 10) : null;
+  return { pendiente: Math.max(0, neto), saldo, comision: redondear(f.comision), envios: f.envios, envios_tienda: redondear(f.envios_tienda), n_envios_tienda: f.n_tienda,
+    saldo_limite: limite, saldo_vencido: !!limite && limite < hoyGT(), pagado_30: Math.max(0, redondear(f.pagado_30)), ultimo_pago: f.ultimo_pago };
 }
 const datosPanelEmpresa = (u) => ({ minorista: u.tipo_cuenta === 'minorista', condiciones: condicionesTienda(u), minimo: minimoLote(u), punto: puntoEmpresa(u), punto_pendiente: puntoPendiente(u), cobros_producto: cobrosProducto(u.id), tamanos: TAMANOS, horarios: HORARIOS, modos: MODOS_LOTE, empresa: u.empresa_nombre || u.nombre,
   whatsapp: getAjustes().whatsapp || '', sede: getAjustes().sede_direccion || '', zonas: [...zonasFijas().map((z) => z.nombre), OTRA_ZONA], hoy: hoyGT() });
@@ -4809,6 +4823,8 @@ ruta('POST', '/api/empresa/carpetas/:id/enviar', ({ req, params, body }) => {
   const u = requiereEmpresa(req);
   if (u.tienda_estado === 'pendiente') falla(403, 'Tu tienda está en revisión. Puedes preparar tu carpeta y tus clientes pueden confirmar: en cuanto Vaelo la apruebe, la envías.');
   if (u.tienda_estado === 'rechazada') falla(403, 'Tu solicitud de tienda no fue aprobada. Escríbenos por WhatsApp para revisarla.');
+  const cuentas = cobrosProducto(u.id);
+  if (cuentas.saldo_vencido) falla(403, `Tienes un saldo de Q${cuentas.saldo.toFixed(2)} por envíos que tus clientes te pagaron a ti. Págalo por transferencia y avísanos para poder enviar esta carpeta.`);
   const c = carpetaDeEmpresa(u, params.id);
   carpetaAbierta(c);
   if (c.dia < hoyGT()) falla(400, 'El día de esta carpeta ya pasó. Cámbialo y pide a tus clientes que confirmen de nuevo.');
@@ -4836,7 +4852,7 @@ ruta('GET', '/api/pedido/:token', ({ params }) => {
   const aj = getAjustes();
   const out = { codigo: p.codigo, empresa: nombreEmpresa(p.usuario_id), descripcion: p.descripcion, tamano: TAMANOS[p.tamano]?.nombre, cliente_nombre: p.cliente_nombre,
     estado: estadoPedido(p), dia: p.dia, horario: p.horario, direccion: p.direccion, zona: p.zona, lat: p.lat, lng: p.lng, referencias: p.referencias,
-    recibe_nombre: p.recibe_nombre || p.cliente_nombre, recibe_telefono: p.recibe_telefono || p.cliente_telefono, metodo_pago: p.metodo_pago, cobro: Number(p.cobro) || 0,
+    recibe_nombre: p.recibe_nombre || p.cliente_nombre, recibe_telefono: p.recibe_telefono || p.cliente_telefono, metodo_pago: p.metodo_pago, cobro: Number(p.cobro) || 0, envio_pagado: !!p.envio_pagado,
     editable: ['pendiente', 'confirmado', 'vencido', 'no_puede'].includes(p.estado) && !p.lote_id, en_lote: !!p.lote_id,
     dia_fijo: p.carpeta_id ? carpetaDe(p)?.dia || null : null, no_puede_nota: p.no_puede_nota,
     precio: p.lat != null || p.zona ? precioPedido(p) : null, tarifa_zona: preciosDe(condicionesDe(p.usuario_id)).zona, tarifa_fuera: preciosDe(condicionesDe(p.usuario_id)).fuera,
@@ -5250,7 +5266,8 @@ ruta('POST', '/api/admin/lotes-empresa/:id/confirmar', ({ req, params, body }) =
         // El piloto gana lo de un envío normal aunque la tienda tenga descuento; en zona foco gana lo acordado en el plan
         const enFoco = !!(pr && pr.foco && focoLote);
         const acordada = pagaEmpresa ? null : enFoco ? focoLote.ganancia : gananciaPiloto(precioGeneralPedido(p));
-        const metodo = pagaEmpresa ? metodoEmpresa : p.metodo_pago === 'transferencia' ? 'transferencia' : 'recibe';
+        // envio_pagado: la tienda ya le cobró el envío a su cliente (el piloto no lo cobra; se le descuenta a la tienda)
+        const metodo = pagaEmpresa ? metodoEmpresa : p.envio_pagado ? 'tienda' : p.metodo_pago === 'transferencia' ? 'transferencia' : 'recibe';
         const pagoEstado = metodo === 'transferencia' ? 'verificado' : null;
         const piloto = pilotos[ri];
         const res = db.prepare(`INSERT INTO envios (guia, usuario_id, vehiculo_id, peso, descripcion, origen_direccion, origen_zona, origen_telefono, origen_lat, origen_lng, origen_quien, origen_nombre, origen_ubic_fecha,
@@ -5983,7 +6000,7 @@ ruta('PUT', '/api/admin/ajustes', ({ req, body }) => {
   }
   if (body.whatsapp_pagos !== undefined) up.run('whatsapp_pagos', String(body.whatsapp_pagos).replace(/\D/g, '').slice(0, 15));
   // Montos de cargos, seguro y tarifa fija
-  const montos = { dias_liquidar: [1, 60], efectivo_aviso_monto: [0, 100000], hora_cierre_efectivo: [12, 23], cargo_bodega_empresa: [0, 1000], min_paquetes_sede: [1, 500], min_pedidos_lote: [1, 500], min_pedidos_minorista: [1, 100], dias_reclamo: [1, 60], cargo_devolucion: [0, 1000], cargo_bodega_dia: [0, 1000], cargo_reentrega: [0, 1000], cargo_cancelacion: [0, 1000], pct_piloto_cancelacion: [0, 100],
+  const montos = { dias_liquidar: [1, 60], efectivo_aviso_monto: [0, 100000], hora_cierre_efectivo: [12, 23], dias_saldo_tienda: [1, 60], cargo_bodega_empresa: [0, 1000], min_paquetes_sede: [1, 500], min_pedidos_lote: [1, 500], min_pedidos_minorista: [1, 100], dias_reclamo: [1, 60], cargo_devolucion: [0, 1000], cargo_bodega_dia: [0, 1000], cargo_reentrega: [0, 1000], cargo_cancelacion: [0, 1000], pct_piloto_cancelacion: [0, 100],
     horas_decidir_fallido: [0.25, 48], seguro_pct: [0, 50], seguro_minimo: [0, 1000], responsabilidad_max: [0, 100000], km_max_tarifa_fija: [1, 200] };
   for (const [k, [min, max]] of Object.entries(montos)) {
     if (body[k] === undefined) continue;

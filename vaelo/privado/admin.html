@@ -355,6 +355,7 @@
             <div class="campo"><label for="aj-dias_liquidar">Días para que el piloto entregue el efectivo <span class="ayuda">Después no puede conectarse</span></label><input id="aj-dias_liquidar" type="number" min="1" max="60" step="1"></div>
             <div class="campo"><label for="aj-efectivo_aviso_monto">Avisar al piloto cuando traiga este efectivo (Q) <span class="ayuda">Le sugiere pasar a la sede. 0: sin aviso</span></label><input id="aj-efectivo_aviso_monto" type="number" min="0" max="100000" step="1"></div>
             <div class="campo"><label for="aj-hora_cierre_efectivo">Hora en que cierra Vaelo (0 a 23) <span class="ayuda">22 = 10 de la noche. Las últimas 3 horas la alerta de efectivo es roja</span></label><input id="aj-hora_cierre_efectivo" type="number" min="12" max="23" step="1"></div>
+            <div class="campo"><label for="aj-dias_saldo_tienda">Días para que una tienda pague su saldo <span class="ayuda">Envíos que sus clientes le pagaron a ella. Después no puede enviar carpetas</span></label><input id="aj-dias_saldo_tienda" type="number" min="1" max="60" step="1"></div>
             <div class="campo"><label for="aj-dias_reclamo">Días para reportar un problema</label><input id="aj-dias_reclamo" type="number" min="1" max="60" step="1"></div>
             <div class="campo"><label for="aj-km_max_tarifa_fija">Km máximos con tarifa fija <span class="ayuda">Solo si no hay zonas dibujadas</span></label><input id="aj-km_max_tarifa_fija" type="number" min="1" max="200" step="1"></div>
           </div>
@@ -913,8 +914,45 @@ null))));
     async function cargarPlanes() {
       const zona = $('zona-planes');
       let r;
-      try { r = await api('/api/admin/planes'); } catch (e) { mostrarMensaje($('msg-planes'), e.message); return; }
+      let sol = { solicitudes: [] };
+      try { [r, sol] = await Promise.all([api('/api/admin/planes'), api('/api/admin/tiendas/solicitudes').catch(() => ({ solicitudes: [] }))]); } catch (e) { mostrarMensaje($('msg-planes'), e.message); return; }
       zonasPlan = r.zonas || [];
+      // Solicitudes de tiendas minoristas: el panel recomienda si darle zona foco según lo que contó
+      const tarjetaSolicitud = (t) => {
+        const plan = el('select', { 'aria-label': 'Plan' }, r.planes.map((p) => el('option', { value: p.id, text: p.nombre })));
+        const minor = r.planes.find((p) => p.clave === 'minorista'); if (minor) plan.value = String(minor.id);
+        const darFoco = el('input', { type: 'checkbox', checked: !!t.recomendacion.foco });
+        const zonaFoco = el('select', { 'aria-label': 'Zona foco' }, zonasPlan.map((z) => el('option', { value: z, text: z })));
+        if (t.recomendacion.zona && zonasPlan.includes(t.recomendacion.zona)) zonaFoco.value = t.recomendacion.zona;
+        const nota = el('input', { maxlength: 300, placeholder: 'Motivo (se lo mostramos a la tienda)' });
+        const msg = el('div', { class: 'mensaje', role: 'alert' });
+        return el('article', { class: 'solicitud-tarjeta' },
+          el('div', { class: 'plan-cabeza' }, el('div', {}, el('h3', { text: t.tienda }), sub(`${t.nombre} · ${t.telefono}${t.email ? ' · ' + t.email : ''}`)),
+            el('span', { class: 'etiqueta-pendiente', text: 'En revisión' })),
+          el('p', { class: 'pista', style: 'margin:0' }, `Vende más en: ${t.zona || 'no dijo'} · Pedidos por semana: ${t.semana ?? 'no dijo'}`, t.red ? [' · ', el('a', { href: /^https?:/.test(t.red) ? t.red : 'https://' + t.red, target: '_blank', rel: 'noopener noreferrer', text: 'Ver su página' })] : null,
+            t.carpetas ? ` · Ya tiene ${t.carpetas} pedido(s) confirmado(s) esperando` : '', t.correo_confirmado ? '' : ' · Correo sin confirmar'),
+          el('p', { class: 'recomienda' + (t.recomendacion.foco ? ' si' : '') }, el('strong', { text: 'Recomendación: ' }), t.recomendacion.texto),
+          r.puede_editar ? [
+            el('div', { class: 'fila' }, el('div', { class: 'campo' }, el('label', { text: 'Plan' }), plan),
+              el('div', { class: 'campo' }, el('label', { class: 'opcion-chica' }, darFoco, 'Darle zona foco'), zonaFoco)),
+            el('p', { class: 'pista', text: 'El precio y la ganancia del piloto en zona foco salen de su plan (puedes cambiarlos después en sus condiciones).' }),
+            msg,
+            el('div', { class: 'navegar' },
+              el('button', { class: 'boton', type: 'button', text: 'Aprobar tienda', onclick: async (ev) => {
+                ev.target.disabled = true;
+                try { await api(`/api/admin/tiendas/${t.id}/aprobar`, { body: { plan_id: Number(plan.value), foco_zona: darFoco.checked ? zonaFoco.value : '' } }); window.avisoHecho?.('Tienda aprobada', t.tienda); cargarPlanes(); }
+                catch (e) { mostrarMensaje(msg, e.message); ev.target.disabled = false; }
+              } }),
+              el('div', { class: 'campo', style: 'margin:0;flex:1;min-width:200px' }, nota),
+              el('button', { class: 'boton peligro', type: 'button', text: 'Rechazar', onclick: async (ev) => {
+                if (!confirm(`¿Rechazar la tienda «${t.tienda}»?`)) return;
+                ev.target.disabled = true;
+                try { await api(`/api/admin/tiendas/${t.id}/rechazar`, { body: { nota: nota.value } }); cargarPlanes(); } catch (e) { mostrarMensaje(msg, e.message); ev.target.disabled = false; }
+              } }))] : null);
+      };
+      const bloqueSolicitudes = sol.solicitudes.length ? el('div', { class: 'bloque aviso-ascenso' }, el('h2', { text: `Solicitudes de tiendas (${sol.solicitudes.length})` }),
+        el('p', { class: 'bloque-nota', text: 'Mientras las revisas, cada tienda ya puede preparar sus carpetas; solo enviar a Vaelo espera tu aprobación.' }),
+        el('div', { class: 'planes-grid' }, sol.solicitudes.map(tarjetaSolicitud))) : null;
       const tarjeta = (p) => el('article', { class: 'plan-tarjeta' },
         el('div', { class: 'plan-cabeza' }, el('div', {}, el('h3', { text: p.nombre }), p.descripcion ? sub(p.descripcion) : null),
           el('span', { class: 'etiqueta-azul', text: `${p.tiendas} ${p.tiendas === 1 ? 'tienda' : 'tiendas'}` })),
@@ -925,7 +963,7 @@ null))));
             if (!confirm(`¿Borrar el plan «${p.nombre}»?${p.tiendas ? ` Sus ${p.tiendas} tienda(s) vuelven al plan de su tipo de cuenta.` : ''}`)) return;
             try { await api('/api/admin/planes/' + p.id, { method: 'DELETE' }); cargarPlanes(); } catch (e) { mostrarMensaje($('msg-planes'), e.message); }
           } }) : null) : null);
-      poner(zona,
+      poner(zona, bloqueSolicitudes,
         r.sugerencias.length ? el('div', { class: 'bloque aviso-ascenso' }, el('h2', { text: 'Tiendas listas para subir de plan' }),
           r.sugerencias.map((s) => el('div', { class: 'caja-fila' }, el('div', {}, el('strong', { text: s.nombre }), el('br'), sub(`${s.entregas} entregas este mes · plan ${s.plan} (aviso desde ${s.desde})`)),
             el('button', { class: 'boton chico', type: 'button', text: 'Ver condiciones', onclick: () => abrirCondiciones(s.id) })))) : null,
@@ -1742,7 +1780,7 @@ null))));
 
     // ---------- Zonas dibujadas en el mapa ----------
     const CAMPOS_AJUSTES = ['cargo_devolucion', 'cargo_bodega_dia', 'cargo_reentrega', 'horas_decidir_fallido', 'cargo_cancelacion', 'pct_piloto_cancelacion', 'sede_direccion',
-      'whatsapp_pagos', 'dias_liquidar', 'efectivo_aviso_monto', 'hora_cierre_efectivo', 'dias_reclamo', 'cargo_bodega_empresa', 'min_paquetes_sede', 'min_pedidos_lote', 'min_pedidos_minorista', 'km_max_tarifa_fija', 'correo_respaldos', 'precio_ayudante'];
+      'whatsapp_pagos', 'dias_liquidar', 'efectivo_aviso_monto', 'hora_cierre_efectivo', 'dias_saldo_tienda', 'dias_reclamo', 'cargo_bodega_empresa', 'min_paquetes_sede', 'min_pedidos_lote', 'min_pedidos_minorista', 'km_max_tarifa_fija', 'correo_respaldos', 'precio_ayudante'];
     let mapaZonas = null, capaZonas = [], selectorSede = null;
     const COLORES_ZONA = ['#1c3faa', '#d9480f', '#17824a', '#7b2cbf', '#0e7490', '#b4261c', '#a16207', '#be185d'];
     function pintarMapaZonas(zonas) {
@@ -1800,7 +1838,7 @@ null))));
     });
     guardarAjustes($('form-fallidos'), ['cargo_devolucion', 'cargo_bodega_dia', 'cargo_reentrega', 'horas_decidir_fallido', 'cargo_cancelacion', 'pct_piloto_cancelacion', 'sede_direccion'],
       () => { const p = selectorSede && selectorSede.obtener(); return p ? { sede_lat: p.lat, sede_lng: p.lng } : {}; });
-    guardarAjustes($('form-seguro'), ['whatsapp_pagos', 'dias_liquidar', 'efectivo_aviso_monto', 'hora_cierre_efectivo', 'dias_reclamo', 'km_max_tarifa_fija', 'cargo_bodega_empresa', 'min_paquetes_sede', 'min_pedidos_lote', 'min_pedidos_minorista', 'precio_ayudante']);
+    guardarAjustes($('form-seguro'), ['whatsapp_pagos', 'dias_liquidar', 'efectivo_aviso_monto', 'hora_cierre_efectivo', 'dias_saldo_tienda', 'dias_reclamo', 'km_max_tarifa_fija', 'cargo_bodega_empresa', 'min_paquetes_sede', 'min_pedidos_lote', 'min_pedidos_minorista', 'precio_ayudante']);
     guardarAjustes($('form-respaldos'), ['correo_respaldos']);
 
     $('form-zona').addEventListener('submit', async (ev) => {
@@ -1986,7 +2024,15 @@ null))));
           if (!confirm(pregunta(x))) return;
           try { await api(ruta, { body: { cliente_id: x.id } }); cargarCaja(); } catch (e) { mostrarMensaje($('msg-caja'), e.message); }
         } }))) : [vacio('Nada pendiente.')];
-      poner($('caja-cobros'), ...lista(c.cobros, 'Marcar pagado', '/api/admin/caja/pagar-cobros', x => `¿Ya le entregaste ${dinero(x.monto)} a ${x.empresa_nombre || x.nombre}?`));
+      // Si la tienda cobró envíos a sus clientes, se le descuentan; si da negativo, la tienda le debe a Vaelo
+      poner($('caja-cobros'), ...(c.cobros.length ? c.cobros.map(x => el('div', { class: 'caja-fila' },
+        el('div', {}, el('strong', { text: x.empresa_nombre || x.nombre }), el('br'),
+          sub(`${x.envios} envíos${x.telefono ? ' · ' + x.telefono : ''}${x.comision > 0 ? ' · ya descontada la comisión de ' + dinero(x.comision) : ''}${x.envios_tienda > 0 ? ' · ya descontados ' + dinero(x.envios_tienda) + ' de envíos que la tienda cobró' : ''}`)),
+        el('strong', { class: 'caja-monto', text: x.monto >= 0 ? dinero(x.monto) : 'Debe ' + dinero(-x.monto) }),
+        el('button', { class: 'boton chico', type: 'button', text: x.monto >= 0 ? 'Marcar pagado' : 'La tienda ya pagó', onclick: async () => {
+          if (!confirm(x.monto >= 0 ? `¿Ya le entregaste ${dinero(x.monto)} a ${x.empresa_nombre || x.nombre}?` : `¿${x.empresa_nombre || x.nombre} ya pagó su saldo de ${dinero(-x.monto)}?`)) return;
+          try { await api('/api/admin/caja/pagar-cobros', { body: { cliente_id: x.id } }); cargarCaja(); } catch (e) { mostrarMensaje($('msg-caja'), e.message); }
+        } }))) : [vacio('Nada pendiente.')]));
       poner($('caja-historial'), c.historial.length ? el('div', { class: 'tabla-envoltura' }, el('table', {},
         el('thead', {}, el('tr', {}, ['Fecha', 'Movimiento', 'Piloto', 'Monto', 'Nota'].map(t => el('th', { text: t })))),
         el('tbody', {}, c.historial.map(h => el('tr', {}, el('td', { text: fecha(h.creado) }),

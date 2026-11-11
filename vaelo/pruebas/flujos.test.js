@@ -1501,3 +1501,97 @@ test('zona foco: cada carpeta se revisa sola, baja el precio solo a lo que calif
   }
 });
 const jsonPropias = (id) => JSON.parse(db.prepare('SELECT condiciones_propias FROM usuarios WHERE id = ?').get(id).condiciones_propias || '{}');
+
+test('envío que la tienda ya cobró: el piloto no lo cobra, se descuenta de lo que Vaelo le debe y si no alcanza queda saldo; solicitud en revisión no envía', async () => {
+  db.exec('UPDATE zonas_fijas SET poligono = NULL');
+  const hoy = new Date(Date.now() - 6 * 3600_000).toISOString().slice(0, 10);
+  // Solicitud: en revisión prepara, pero no envía
+  const pend = cliente();
+  assert.equal((await pend('POST', '/api/registro', { nombre: 'Kati', email: 'kati.lives@prueba.com', telefono: '55558877', password: 'clave-de-prueba-123', acepto_terminos: true, tienda: 'Kati Shop',
+    tienda_red: 'tiktok.com/@kati', tienda_zona: 'Zona 99', tienda_semana: 10 }, { 'x-real-ip': '10.11.1.1' })).status, 400, 'zona que no existe');
+  assert.equal((await pend('POST', '/api/registro', { nombre: 'Kati', email: 'kati.lives@prueba.com', telefono: '55558877', password: 'clave-de-prueba-123', acepto_terminos: true, tienda: 'Kati Shop',
+    tienda_red: 'tiktok.com/@kati', tienda_zona: 'Zona 6', tienda_semana: 10 }, { 'x-real-ip': '10.11.1.1' })).status, 201);
+  const katiId = db.prepare("SELECT id FROM usuarios WHERE email = 'kati.lives@prueba.com'").get().id;
+  const sol = (await admin('GET', '/api/admin/tiendas/solicitudes')).j.solicitudes.find((x) => x.id === katiId);
+  assert.equal(sol.zona, 'Zona 6'); assert.equal(sol.semana, 10); assert.equal(sol.red, 'tiktok.com/@kati'); assert.ok(sol.recomendacion.texto.length > 10);
+  let panel = (await pend('GET', '/api/empresa/carpetas')).j;
+  assert.equal(panel.condiciones.estado, 'pendiente');
+  const ck = (await pend('POST', '/api/empresa/carpetas', { dia: hoy })).j.carpeta.id;
+  for (let i = 0; i < 3; i++) await pend('POST', `/api/empresa/carpetas/${ck}/pedidos`, { descripcion: 'Gorra ' + i, tamano: 'pequeno', cliente_nombre: 'Cli ' + i, cliente_telefono: '5577000' + i, foto: FOTO, llenar: true,
+    dia: hoy, horario: 'cualquiera', direccion: '5a calle 3-20 casa azul', zona: 'Zona 1', lat: 14.63, lng: -90.52, recibe_nombre: 'Cli', recibe_telefono: '5577000' + i, metodo_pago: 'efectivo' });
+  const bloq = await pend('POST', `/api/empresa/carpetas/${ck}/enviar`, { modo: 'una_moto', recogida: 'sede' });
+  assert.equal(bloq.status, 403); assert.match(bloq.j.error, /en revisión/);
+  // La oficina aprueba con zona foco; el aviso de descuentos queda pendiente de ver
+  assert.equal((await admin('POST', `/api/admin/tiendas/${katiId}/aprobar`, { foco_zona: 'Zona 6' })).status, 200);
+  assert.equal(jsonPropias(katiId).foco_zona, 'Zona 6');
+  panel = (await pend('GET', '/api/empresa/carpetas')).j;
+  assert.equal(panel.condiciones.estado, 'aprobada'); assert.equal(panel.condiciones.vista, false);
+  assert.equal((await pend('POST', '/api/empresa/condiciones/visto', { firma: panel.condiciones.firma })).status, 200);
+  assert.equal((await pend('GET', '/api/empresa/carpetas')).j.condiciones.vista, true);
+  // Cambia su plan → el aviso vuelve a aparecer
+  const minor = db.prepare("SELECT id FROM planes WHERE clave = 'minorista'").get().id;
+  assert.equal((await admin('PUT', `/api/admin/empresas/${katiId}/condiciones`, { plan_id: minor, propias: { foco_zona: 'Zona 6', precio_zona: 33 } })).status, 200);
+  assert.equal((await pend('GET', '/api/empresa/carpetas')).j.condiciones.vista, false);
+  assert.equal((await admin('PUT', `/api/admin/empresas/${katiId}/condiciones`, { plan_id: minor, propias: {} })).status, 200);
+  // Rechazo de otra solicitud
+  const otra = cliente();
+  assert.equal((await otra('POST', '/api/registro', { nombre: 'Rocío', email: 'rocio.lives@prueba.com', telefono: '55558878', password: 'clave-de-prueba-123', acepto_terminos: true, tienda: 'Rocío Store' }, { 'x-real-ip': '10.11.1.2' })).status, 201);
+  const rocioId = db.prepare("SELECT id FROM usuarios WHERE email = 'rocio.lives@prueba.com'").get().id;
+  assert.equal((await admin('POST', `/api/admin/tiendas/${rocioId}/rechazar`, { nota: 'No encontramos tu página' })).status, 200);
+  const rech = (await otra('GET', '/api/empresa/carpetas')).j.condiciones;
+  assert.equal(rech.estado, 'rechazada'); assert.equal(rech.nota, 'No encontramos tu página');
+
+  // Envío ya pagado a la tienda
+  const kati = pend;
+  const c = (await kati('POST', '/api/empresa/carpetas', { dia: hoy, nombre: 'Pagados' })).j.carpeta.id;
+  const ids = [];
+  for (const [i, extra] of [[0, { envio_pagado: true }], [1, { envio_pagado: true }], [2, { cobro: 100 }]]) {
+    const r = await kati('POST', `/api/empresa/carpetas/${c}/pedidos`, { descripcion: 'Vestido ' + i, tamano: 'pequeno', cliente_nombre: 'Compra ' + i, cliente_telefono: '5577100' + i, foto: FOTO, llenar: true,
+      dia: hoy, horario: 'cualquiera', direccion: '5a calle 3-20 casa azul', zona: 'Zona 1', lat: 14.63, lng: -90.52, recibe_nombre: 'Compra', recibe_telefono: '5577100' + i, metodo_pago: 'efectivo', ...extra });
+    assert.equal(r.status, 201, JSON.stringify(r.j)); ids.push(r.j.pedido.id);
+  }
+  assert.equal((await kati('GET', '/api/empresa/carpetas')).j.abiertas.find((x) => x.id === c).total, 3);
+  const tok = db.prepare('SELECT token FROM pedidos_empresa WHERE id = ?').get(ids[0]).token;
+  assert.equal((await cliente()('GET', '/api/pedido/' + tok)).j.envio_pagado, true);
+  // Se puede quitar y volver a poner
+  assert.equal((await kati('PUT', `/api/empresa/pedidos/${ids[1]}`, { envio_pagado: false })).status, 200);
+  assert.equal(db.prepare('SELECT envio_pagado FROM pedidos_empresa WHERE id = ?').get(ids[1]).envio_pagado, 0);
+  assert.equal((await kati('PUT', `/api/empresa/pedidos/${ids[1]}`, { envio_pagado: true })).status, 200);
+  const env = await kati('POST', `/api/empresa/carpetas/${c}/enviar`, { modo: 'una_moto', recogida: 'sede' });
+  assert.equal(env.status, 201, JSON.stringify(env.j));
+  assert.equal((await admin('POST', `/api/admin/lotes-empresa/${env.j.lote}/recibido`, {})).status, 200);
+  const calc = await admin('POST', `/api/admin/lotes-empresa/${env.j.lote}/calcular`, { modo: 'una_moto', motos: 1 });
+  assert.equal((await admin('POST', `/api/admin/lotes-empresa/${env.j.lote}/confirmar`, { modo: 'una_moto', rutas: calc.j.rutas.map((x) => ({ pedidos: x.pedidos, piloto_id: null })) })).status, 200);
+  const e = ids.map((id) => db.prepare('SELECT * FROM envios WHERE pedido_id = ?').get(id));
+  assert.equal(e[0].metodo_pago, 'tienda'); assert.equal(e[1].metodo_pago, 'tienda'); assert.equal(e[2].metodo_pago, 'recibe');
+  assert.equal(e[0].ganancia_acordada, 30, 'el piloto gana igual');
+  // El piloto cobra solo el producto de la tercera; nada en las dos pagadas
+  db.prepare(`UPDATE envios SET mensajero_id = ?, estado = 'entregado', entregado_en = datetime('now'), piloto_cerro_en = datetime('now'), liquidado_id = NULL WHERE id IN (${e.map(() => '?').join(',')})`).run(pilotoId, ...e.map((x) => x.id));
+  const efectivo = db.prepare(`SELECT ${SQL_EFECTIVO_PRUEBA} AS ef FROM envios e WHERE e.id = ?`);
+  assert.equal(efectivo.get(e[0].id).ef, 0); assert.equal(efectivo.get(e[2].id).ef, 135);
+  // Cuentas: Vaelo le debe Q100 del producto, menos Q70 de los dos envíos que ella cobró → Q30
+  let cp = (await kati('GET', '/api/empresa/carpetas')).j.cobros_producto;
+  assert.equal(cp.pendiente, 30); assert.equal(cp.saldo, 0); assert.equal(cp.envios_tienda, 70);
+  let caja = (await admin('GET', '/api/admin/caja')).j.cobros.find((x) => x.id === katiId);
+  assert.equal(caja.monto, 30); assert.equal(caja.envios_tienda, 70);
+  // Sin producto que descontar: queda saldo a favor de Vaelo, y vencido no puede enviar
+  db.prepare("UPDATE envios SET cobro_destinatario = 0 WHERE id = ?").run(e[2].id);
+  cp = (await kati('GET', '/api/empresa/carpetas')).j.cobros_producto;
+  assert.equal(cp.pendiente, 0); assert.equal(cp.saldo, 70); assert.equal(cp.saldo_vencido, false); assert.match(cp.saldo_limite, /^\d{4}-\d{2}-\d{2}$/);
+  caja = (await admin('GET', '/api/admin/caja')).j.cobros.find((x) => x.id === katiId);
+  assert.equal(caja.monto, -70);
+  db.prepare("UPDATE envios SET entregado_en = datetime('now', '-9 days') WHERE id = ?").run(e[0].id);
+  assert.equal((await kati('GET', '/api/empresa/carpetas')).j.cobros_producto.saldo_vencido, true);
+  const c2 = (await kati('POST', '/api/empresa/carpetas', { dia: hoy, nombre: 'Otra' })).j.carpeta.id;
+  for (let i = 0; i < 3; i++) await kati('POST', `/api/empresa/carpetas/${c2}/pedidos`, { descripcion: 'Falda ' + i, tamano: 'pequeno', cliente_nombre: 'Otra ' + i, cliente_telefono: '5577200' + i, foto: FOTO, llenar: true,
+    dia: hoy, horario: 'cualquiera', direccion: '5a calle 3-20 casa azul', zona: 'Zona 1', lat: 14.63, lng: -90.52, recibe_nombre: 'Otra', recibe_telefono: '5577200' + i, metodo_pago: 'efectivo' });
+  const bloqueada = await kati('POST', `/api/empresa/carpetas/${c2}/enviar`, { modo: 'una_moto', recogida: 'sede' });
+  assert.equal(bloqueada.status, 403); assert.match(bloqueada.j.error, /saldo de Q70\.00/);
+  // Paga: la oficina lo marca y ya puede enviar
+  assert.equal((await admin('POST', '/api/admin/caja/pagar-cobros', { cliente_id: katiId })).status, 200);
+  assert.equal((await kati('GET', '/api/empresa/carpetas')).j.cobros_producto.saldo, 0);
+  assert.equal((await kati('POST', `/api/empresa/carpetas/${c2}/enviar`, { modo: 'una_moto', recogida: 'sede' })).status, 201);
+});
+const SQL_EFECTIVO_PRUEBA = `(CASE WHEN e.estado != 'cancelado' AND e.metodo_pago = 'efectivo' THEN e.precio + e.cargos_extra ELSE 0 END
+  + CASE WHEN e.estado = 'entregado' AND e.sede_llegada IS NULL AND e.metodo_pago = 'recibe' THEN e.precio ELSE 0 END
+  + CASE WHEN e.estado = 'entregado' AND e.sede_llegada IS NULL THEN e.cobro_destinatario ELSE 0 END)`;

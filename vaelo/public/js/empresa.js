@@ -331,16 +331,45 @@ async function panelPedidos(caja, yo, abrirId) {
       el('li', {}, el('strong', { text: 'Tus clientes confirman' }), el('span', { text: 'su horario, dónde lo reciben y quién lo recibe.' })),
       el('li', {}, el('strong', { text: `Con ${r.minimo} confirmados, envíala a Vaelo` }), el('span', { text: 'y nosotros armamos las rutas.' }))));
   const cp = r.cobros_producto;
+  const cajaSaldo = cp && cp.saldo > 0 ? el('section', { class: 'bloque cobros-tienda saldo-tienda' + (cp.saldo_vencido ? ' vencido' : '') },
+    el('div', {}, el('span', { text: 'Saldo por pagar a Vaelo' }), el('strong', { text: dinero(cp.saldo) }),
+      el('small', { text: `Son ${cp.n_envios_tienda} envío(s) que tus clientes te pagaron a ti (${dinero(cp.envios_tienda)}), menos lo que Vaelo te debía por tus productos. ${cp.saldo_vencido ? 'Ya venció: págalo por transferencia y avísanos para poder enviar tu próxima carpeta.' : `Págalo por transferencia antes del ${fecha(cp.saldo_limite + ' 12:00:00', false)}.`}` })),
+    r.whatsapp ? el('a', { class: 'boton cinta chico', href: `https://wa.me/${String(r.whatsapp).replace(/\D/g, '').replace(/^(\d{8})$/, '502$1')}?text=${encodeURIComponent(`Hola Vaelo, soy de ${r.empresa || 'mi tienda'}. Quiero pagar mi saldo de ${dinero(cp.saldo)}.`)}`, target: '_blank', rel: 'noopener', text: 'Avisar que ya pagué' }) : null) : null;
   const cajaCobros = cp && (cp.pendiente > 0 || cp.pagado_30 > 0) ? el('section', { class: 'bloque cobros-tienda' },
     el('div', {}, el('span', { text: 'Dinero de tus productos que Vaelo te tiene' }), el('strong', { text: dinero(cp.pendiente) }),
-      el('small', { text: cp.pendiente > 0 ? `De ${cp.envios} entrega(s) ya cobrada(s)${cp.comision > 0 ? `, ya descontada la comisión de ${dinero(cp.comision)}` : ''}. Vaelo te lo entrega y aquí queda marcado.` : 'Estás al día: ya te entregamos todo.' })),
+      el('small', { text: cp.pendiente > 0 ? `De ${cp.envios} entrega(s) ya cobrada(s)${cp.comision > 0 ? `, ya descontada la comisión de ${dinero(cp.comision)}` : ''}${cp.envios_tienda > 0 ? ` y ${dinero(cp.envios_tienda)} de envíos que tus clientes te pagaron a ti` : ''}. Vaelo te lo entrega y aquí queda marcado.` : 'Estás al día: ya te entregamos todo.' })),
     cp.pagado_30 > 0 ? el('div', {}, el('span', { text: 'Ya te entregamos (30 días)' }), el('strong', { text: dinero(cp.pagado_30) }), cp.ultimo_pago ? el('small', { text: 'Último: ' + fecha(cp.ultimo_pago, false) }) : null) : null) : null;
-  poner(caja, bloqueAppTiendas(), bloqueServicios(r.minorista ? 'minorista' : 'empresa', !(r.abiertas.length + r.enviadas.length)), cajaCobros, bloquePunto(r, () => panelPedidos(caja, yo)),
+  poner(caja, bloqueRevision(r.condiciones), bloqueAppTiendas(), bloqueServicios(r.minorista ? 'minorista' : 'empresa', !(r.abiertas.length + r.enviadas.length)), cajaSaldo, cajaCobros, bloquePunto(r, () => panelPedidos(caja, yo)),
     el('section', { class: 'bloque' },
       el('div', { class: 'cab-bloque' }, el('div', {}, el('h2', { text: 'Tus carpetas de envíos' }), el('p', { class: 'pista', text: 'Una carpeta por día de entrega.' })), nueva),
       r.abiertas.length ? el('div', { class: 'carpetas' }, r.abiertas.map(tarjeta)) : vacio),
     r.enviadas.length ? el('section', { class: 'bloque' }, el('h2', { text: 'Enviadas a Vaelo' }), el('div', { class: 'carpetas' }, r.enviadas.map(tarjeta))) : null,
     bloqueCondiciones(r.condiciones));
+  // Cómo funcionan sus descuentos: la primera vez y cada vez que la oficina le cambia el plan
+  if (r.condiciones && r.condiciones.estado === 'aprobada' && !r.condiciones.vista) avisoDescuentos(r.condiciones);
+}
+// Tienda en revisión: puede preparar todo, pero no enviar hasta que Vaelo la apruebe
+function bloqueRevision(c) {
+  if (!c || c.estado === 'aprobada') return null;
+  if (c.estado === 'rechazada') return el('section', { class: 'bloque tienda-revision' }, el('h2', { text: 'Tu solicitud de tienda no fue aprobada' }),
+    el('p', { text: (c.nota ? c.nota + ' ' : '') + 'Escríbenos por WhatsApp y la revisamos juntos.' }));
+  return el('section', { class: 'bloque tienda-revision' }, el('h2', { text: 'Estamos revisando tu tienda' }),
+    el('p', { text: 'Revisamos cada tienda para darte el mejor servicio y tu plan con descuentos. Mientras tanto ya puedes crear tus carpetas, apuntar tus pedidos y mandarle el enlace a tus clientes. Cuando la aprobemos te avisamos y ya puedes enviar tu carpeta a Vaelo.' }));
+}
+function avisoDescuentos(c, alCerrar) {
+  const dlg = el('dialog', { class: 'aviso-descuentos' });
+  const cerrar = async () => { try { await api('/api/empresa/condiciones/visto', { body: { firma: c.firma } }); c.vista = true; } catch { /* se vuelve a mostrar la próxima vez */ } dlg.close(); dlg.remove(); if (alCerrar) alCerrar(); };
+  poner(dlg, el('div', { class: 'dialogo' },
+    el('h2', { text: c.vista ? 'Cómo funcionan tus descuentos' : 'Así funcionan tus descuentos' }),
+    el('p', { class: 'pista', text: c.plan ? `Tu plan: ${c.plan}. Esto es lo que Vaelo te da:` : 'Esto es lo que Vaelo te da:' }),
+    el('dl', { class: 'plan-lineas' }, c.lineas.flatMap((l) => [el('dt', { text: l.titulo }), el('dd', { text: l.texto })])),
+    c.foco ? el('div', { class: 'foco-estado aplica' }, el('strong', { text: 'Antes de cobrarle el envío a tu cliente, mándale su enlace' }),
+      el('p', { text: `El descuento de zona foco depende de dónde reciben tus clientes: lo sabemos cuando cada uno confirma su ubicación. Mientras armas tu carpeta te mostramos si ya tiene descuento. Así le cobras el precio correcto: con descuento (${dinero(c.foco.precio)}) si tu carpeta califica, o el normal si no.` })) : null,
+    el('div', { class: 'foco-estado' }, el('strong', { text: 'Si tu cliente ya te pagó el envío' }),
+      el('p', { text: 'Márcalo en su pedido con «Mi cliente ya me pagó el envío». El piloto no se lo cobra y Vaelo te descuenta ese envío de lo que te entrega por tus productos. Si no alcanza, te queda un saldo para pagarnos por transferencia.' })),
+    el('button', { class: 'boton', type: 'button', text: 'Entendido', onclick: cerrar })));
+  dlg.addEventListener('cancel', (ev) => { ev.preventDefault(); cerrar(); });
+  document.body.append(dlg); dlg.showModal();
 }
 // Lo que Vaelo le da a esta tienda (su plan), en palabras sencillas
 function bloqueCondiciones(c) {
@@ -348,7 +377,8 @@ function bloqueCondiciones(c) {
   return el('details', { class: 'bloque condiciones-tienda' },
     el('summary', {}, el('strong', { text: 'Tus condiciones con Vaelo' }), el('span', { text: c.plan ? `Plan ${c.plan}` : '' })),
     el('dl', { class: 'plan-lineas' }, c.lineas.flatMap((l) => [el('dt', { text: l.titulo }), el('dd', { text: l.texto })])),
-    c.vence ? el('p', { class: 'pista', text: `Tienes condiciones especiales hasta el ${fecha(c.vence + ' 12:00:00', false)}.` }) : null);
+    c.vence ? el('p', { class: 'pista', text: `Tienes condiciones especiales hasta el ${fecha(c.vence + ' 12:00:00', false)}.` }) : null,
+    el('button', { class: 'boton borde chico', type: 'button', text: 'Cómo funcionan mis descuentos', onclick: () => avisoDescuentos(c) }));
 }
 // Punto de recogida: donde el piloto pasa por los paquetes
 function bloquePunto(r, alCambiar) {
@@ -571,6 +601,10 @@ function filaPedido(p, r, c, recargar) {
     el('button', { type: 'button', text: 'Copiar enlace', onclick: async (ev) => { mandar(); try { await navigator.clipboard.writeText(enlace); ev.target.textContent = 'Enlace copiado'; } catch { prompt('Enlace:', enlace); } } }),
     el('button', { type: 'button', text: p.estado === 'confirmado' ? 'Editar datos de entrega' : 'Llenar yo los datos', onclick: () => dialogoLlenar(p, r, c, recargar) }),
     p.tiene_foto ? el('label', { class: 'doc-boton' }, 'Cambiar foto', fotoInput) : null,
+    el('button', { type: 'button', text: p.envio_pagado ? 'Mi cliente no me ha pagado el envío' : 'Mi cliente ya me pagó el envío', onclick: async () => {
+      if (!p.envio_pagado && !confirm(`¿${p.cliente_nombre} ya te pagó el envío? El piloto no se lo cobra y Vaelo te descuenta ese envío de lo que te entrega por tus productos.`)) return;
+      try { await api(`/api/empresa/pedidos/${p.id}`, { method: 'PUT', body: { envio_pagado: !p.envio_pagado } }); recargar(); } catch (e) { alert(e.message); }
+    } }),
     el('button', { type: 'button', text: p.cobro > 0 ? 'Cambiar lo que se cobra' : 'Cobrar el producto al entregar', onclick: async () => {
       const v = prompt(`¿Cuánto cobra el piloto a ${p.cliente_nombre} por tu producto? (Q, sin contar el envío; 0 si ya te pagó)`, p.cobro || '');
       if (v === null) return;
@@ -595,6 +629,7 @@ function filaPedido(p, r, c, recargar) {
         el('strong', { text: p.cliente_nombre }), ' ', e ? el('span', { class: e.estado === 'entregado' ? 'etiqueta-completa' : ['fallido', 'a_sede', 'en_sede', 'devuelto', 'cancelado'].includes(e.estado) ? 'etiqueta-pendiente' : 'etiqueta-azul', text: ESTADO_ENVIO_EMP[e.estado] || p.estado_texto })
           : el('span', { class: ESTADO_PEDIDO_CLASE[p.estado] || 'etiqueta-gris', text: p.estado_texto }),
         !p.tiene_foto && editable ? el('span', { class: 'etiqueta-pendiente', style: 'margin-left:.3rem', text: 'Falta foto' }) : null,
+        p.envio_pagado ? el('span', { class: 'etiqueta-azul', style: 'margin-left:.3rem', title: 'Tu cliente ya te pagó el envío: el piloto no se lo cobra', text: 'Envío ya pagado' }) : null,
         p.avisos ? el('span', { class: 'etiqueta-azul', style: 'margin-left:.3rem', title: 'Tu cliente activó los avisos', text: 'Avisos activos' }) : null),
       el('small', { text: `${p.codigo} · ${p.descripcion} · ${p.tamano_texto}${p.cobro > 0 ? ` · cobrar ${dinero(p.cobro)}` : ''}` }),
       p.estado === 'confirmado' || p.lote_id ? el('small', { text: `${p.horario_texto}${p.zona ? ' · ' + p.zona : ''}${p.direccion ? ' · ' + p.direccion : ''}` }) : null,
@@ -715,6 +750,11 @@ function dialogoNuevoEnvio(c, r, recargar) {
   const nombre = el('input', { id: 'np-nombre', maxlength: 100, autocomplete: 'off' });
   const tel = el('input', { id: 'np-tel', type: 'tel', maxlength: 30, placeholder: '5555 5555' });
   const cobro = el('input', { id: 'np-cobro', type: 'number', min: 0, max: 50000, step: '0.01', inputmode: 'decimal', placeholder: 'Ej. 150' });
+  const pagadoChk = el('input', { type: 'checkbox', id: 'np-pagado', style: 'width:auto' });
+  const pagado = el('div', { class: 'campo' }, el('label', { class: 'casilla', for: 'np-pagado' }, pagadoChk, el('span', { text: 'Mi cliente ya me pagó el envío' })),
+    el('small', { class: 'pista', text: r.condiciones && r.condiciones.foco
+      ? 'Antes de cobrarle el envío, mándale su enlace: cuando confirme sabrás su zona y si tu carpeta tiene descuento de zona foco. Si ya te pagó, Vaelo te descuenta este envío de lo que te entrega.'
+      : 'El piloto no se lo cobra y Vaelo te descuenta este envío de lo que te entrega por tus productos.' }));
   const foto = el('input', { id: 'np-foto', type: 'file', accept: 'image/*', capture: 'environment' });
   const vistaFoto = el('img', { alt: '', hidden: true });
   const vacio = el('span', { class: 'foto-paquete-vacio' }, el('strong', { text: 'Foto del paquete' }), el('small', { text: 'Tócala para tomarla' }));
@@ -745,6 +785,7 @@ function dialogoNuevoEnvio(c, r, recargar) {
     el('div', { class: 'campo' }, el('label', { for: 'np-desc', text: '¿Qué compró?' }), desc),
     el('div', { class: 'campo', hidden: r.condiciones && r.condiciones.cobro_permitido === false }, el('label', { for: 'np-cobro' }, '¿Cuánto le cobramos por el producto? (Q)', el('span', { class: 'ayuda', text: r.condiciones && r.condiciones.cobro_tope ? ` Opcional, hasta ${dinero(r.condiciones.cobro_tope)}` : ' Opcional' })), cobro,
       el('small', { class: 'pista', text: 'Sin contar el envío. Déjalo vacío si ya te pagó. El piloto lo cobra y Vaelo te entrega ese dinero.' })),
+    pagado,
     el('div', { class: 'campo' }, el('label', { text: 'Tamaño' }), tamanos),
     el('div', { class: 'campo' }, el('label', { for: 'np-foto' }, 'Foto del paquete', el('span', { class: 'ayuda', text: ' Puedes tomarla después, al empacar' })),
       el('div', { class: 'foto-paquete foto-paquete-chica' }, el('label', { class: 'foto-paquete-boton', for: 'np-foto' }, vistaFoto, vacio, foto))),
@@ -755,13 +796,13 @@ function dialogoNuevoEnvio(c, r, recargar) {
     // WhatsApp se abre ya: si se abre después de esperar al servidor, el navegador lo bloquea
     const ventana = !llenar ? window.open('about:blank', '_blank') : null;
     try {
-      const body = { descripcion: desc.value, tamano, cliente_nombre: nombre.value, cliente_telefono: tel.value, cobro: cobro.value };
+      const body = { descripcion: desc.value, tamano, cliente_nombre: nombre.value, cliente_telefono: tel.value, cobro: cobro.value, envio_pagado: pagadoChk.checked };
       if (foto.files[0]) body.foto = await prepararArchivo(foto.files[0], false);
       if (llenar) Object.assign(body, datosEntrega.leer(), { llenar: true });
       const p = (await api(`/api/empresa/carpetas/${c.id}/pedidos`, { body })).pedido;
       if (ventana) { ventana.location.href = `https://wa.me/${waNum(p.cliente_telefono)}?text=${encodeURIComponent(textoEnlace(p, r, c.dia))}`; api(`/api/empresa/pedidos/${p.id}/enlace`, { body: {} }).catch(() => {}); }
       if (otroChk.checked) {
-        desc.value = ''; nombre.value = ''; tel.value = ''; cobro.value = ''; foto.value = ''; vistaFoto.hidden = true; vacio.hidden = false;
+        desc.value = ''; nombre.value = ''; tel.value = ''; cobro.value = ''; pagadoChk.checked = false; foto.value = ''; vistaFoto.hidden = true; vacio.hidden = false;
         mostrarMensaje(msg, `Listo: ${p.cliente_nombre} quedó en la carpeta. Añade el siguiente.`, 'exito'); nombre.focus(); guardar.disabled = false; dlg.dataset.cambios = '1';
       } else { dlg.close(); recargar(); }
       window.avisoHecho?.('Pedido añadido', p.cliente_nombre);

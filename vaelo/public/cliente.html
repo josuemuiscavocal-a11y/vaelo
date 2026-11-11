@@ -659,17 +659,24 @@
         return;
       }
       const tienda = el('input', { id: 'nombre-tienda', maxlength: 60, placeholder: 'Ej. Moda Luna GT' });
+      const red = el('input', { id: 'red-tienda', maxlength: 200, placeholder: 'Ej. facebook.com/modalunagt' });
+      const zonaT = el('select', { id: 'zona-tienda' }, el('option', { value: '', text: 'Elige…' }));
+      api('/api/config').then((c) => { for (const z of c.zonas || []) zonaT.append(el('option', { value: z, text: z })); zonaT.append(el('option', { value: 'Otra zona o municipio', text: 'Otra zona o en varias zonas' })); }).catch(() => {});
+      const semana = el('input', { id: 'semana-tienda', type: 'number', min: 0, max: 5000, inputmode: 'numeric', placeholder: 'Ej. 15' });
       caja.replaceChildren(el('h2', { text: '¿Vendes en lives o por redes?' }),
-        el('p', { class: 'pista', text: 'Activa tu tienda gratis. Sin contrato y sin papeles: sigue siendo tu misma cuenta, pero con una pestaña «Mi tienda» para mandar todos los pedidos de tu live juntos.' }),
+        el('p', { class: 'pista', text: 'Pide tu tienda gratis. Sin contrato y sin papeles: sigue siendo tu misma cuenta, pero con una pestaña «Mi tienda» para mandar todos los pedidos de tu live juntos. Revisamos cada solicitud para darte tu plan con descuentos; mientras tanto ya puedes preparar tus pedidos.' }),
         el('ul', { class: 'lista-simple' },
           el('li', { text: 'Apuntas cada pedido en una carpeta del día y le mandas el enlace a tu cliente por WhatsApp.' }),
           el('li', { text: 'Tu cliente confirma su dirección y su horario. Tú no tienes que pedirle nada más.' }),
           el('li', { text: 'Con los confirmados que pide la carpeta, la envías a Vaelo: recogemos todo junto y armamos la ruta.' }),
           el('li', { text: 'Cada cliente paga su envío al recibir. Si cobras contra entrega, el piloto te trae tu dinero.' })), msg,
         el('div', { class: 'campo' }, el('label', { for: 'nombre-tienda', text: 'Nombre de tu tienda' }), tienda),
-        el('button', { class: 'boton', type: 'button', text: 'Activar mi tienda', onclick: async (ev) => {
+        el('div', { class: 'campo' }, el('label', { for: 'red-tienda' }, 'Página de tu live o red social', el('span', { class: 'ayuda', text: ' Opcional' })), red),
+        el('div', { class: 'campo' }, el('label', { for: 'zona-tienda', text: '¿En qué zona vendes más?' }), zonaT),
+        el('div', { class: 'campo' }, el('label', { for: 'semana-tienda', text: '¿Cuántos pedidos mandas por semana, más o menos?' }), semana),
+        el('button', { class: 'boton', type: 'button', text: 'Pedir mi tienda', onclick: async (ev) => {
           ev.target.disabled = true;
-          try { await api('/api/cuenta/minorista', { body: { tienda: tienda.value } }); await cargarCuenta(); abrirTab('empresa'); }
+          try { await api('/api/cuenta/minorista', { body: { tienda: tienda.value, tienda_red: red.value, tienda_zona: zonaT.value, tienda_semana: semana.value } }); await cargarCuenta(); abrirTab('empresa'); }
           catch (e) { mostrarMensaje(msg, e.message); ev.target.disabled = false; }
         } }));
     }
