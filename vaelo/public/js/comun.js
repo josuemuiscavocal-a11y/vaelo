@@ -92,6 +92,10 @@ async function api(ruta, opciones = {}) {
     init.method = opciones.method || 'POST';
     init.headers['Content-Type'] = 'application/json';
     init.body = JSON.stringify(opciones.body);
+  } else if (init.method !== 'GET' && init.method !== 'HEAD') {
+    // El servidor solo acepta cambios en formato JSON (protección contra otros sitios): borrar sin datos también lo lleva
+    init.headers['Content-Type'] = 'application/json';
+    init.body = '{}';
   }
   let res;
   try { res = await fetch(ruta, init); }

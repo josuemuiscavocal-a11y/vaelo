@@ -197,6 +197,20 @@ const waNum = (t) => { let n = String(t || '').replace(/\D/g, ''); if (n.length 
 const ESTADO_PEDIDO_CLASE = { pendiente: 'etiqueta-gris', esperando: 'etiqueta-azul', confirmado: 'etiqueta-completa', en_vaelo: 'etiqueta-azul', enviado: 'etiqueta-gris', vencido: 'etiqueta-pendiente', no_puede: 'etiqueta-pendiente' };
 const ESTADO_ENVIO_EMP = { pendiente: 'Por recoger', recogido: 'Recogido', en_camino: 'En camino', entregado: 'Entregado', fallido: 'No se entregó', a_sede: 'Va a la sede', en_sede: 'En la sede de Vaelo', devuelto: 'Devuelto', reenviado: 'Reenviado', cancelado: 'Cancelado' };
 
+// Confirmación con dos botones claros (en lugar del aviso del navegador). Devuelve true si eligió eliminar.
+function confirmarEliminar({ titulo, texto, aviso, si = 'Sí, eliminar', no = 'Cancelar' }) {
+  return new Promise((listo) => {
+    const dlg = el('dialog', { class: 'dialogo confirmar-peligro' });
+    const cerrar = (v) => { listo(v); dlg.close(); };
+    dlg.append(...[el('h2', { text: titulo }), aviso ? el('div', { class: 'mensaje aviso', text: aviso }) : null, texto ? el('p', { text: texto }) : null,
+      el('div', { class: 'botones-confirmar' },
+        el('button', { class: 'boton borde', type: 'button', text: no, onclick: () => cerrar(false) }),
+        el('button', { class: 'boton peligro', type: 'button', text: si, onclick: () => cerrar(true) }))].filter(Boolean));
+    dlg.addEventListener('cancel', () => listo(false));
+    dlg.addEventListener('close', () => dlg.remove());
+    document.body.append(dlg); dlg.showModal();
+  });
+}
 // App "Vaelo Tiendas": se instala desde /tienda y abre directo en la tienda (sin entrar a Google cada vez)
 function bloqueAppTiendas() {
   if (typeof yaInstalada === 'function' && yaInstalada()) return null;
@@ -243,7 +257,7 @@ async function panelEmpresa(caja, op = {}, minorista = null) {
   const pest = el('div', { class: 'pestanas', role: 'tablist' });
   const pintarPest = () => poner(pest, ...[['pedidos', 'Carpetas de envíos'], ['analitica', 'Analítica'], conBono ? ['ganancias', 'Tus ganancias'] : null].filter(Boolean).map(([k, t]) =>
     el('button', { type: 'button', role: 'tab', 'aria-selected': String(vista === k), text: t, onclick: () => { vista = k; pintarPest(); abrir(); } })));
-  const abrir = () => (vista === 'pedidos' ? panelPedidos(cuerpo, yo) : vista === 'ganancias' ? panelGanancias(cuerpo) : panelAnalitica(cuerpo));
+  const abrir = () => (vista === 'pedidos' ? panelPedidos(cuerpo, yo) : vista === 'ganancias' ? panelGanancias(cuerpo) : panelAnalitica(cuerpo, !!minorista));
   poner(caja, 
     el('div', { class: 'empresa-cabecera' }, el('div', {}, el('span', { class: 'etiqueta-completa', text: minorista ? 'Tienda minorista' : 'Contrato firmado' }), el('h2', { text: yo.empresa_nombre || yo.nombre }),
       el('p', { class: 'pista', text: minorista
@@ -479,10 +493,15 @@ async function vistaCarpeta(caja, yo, id) {
     el('div', { class: 'carpeta-titulo' }, el('div', {}, el('h2', { text: c.nombre }), el('p', { class: 'pista', text: `Entrega: ${diaEmp(c.dia)}` })),
       abierta ? el('div', { class: 'navegar' },
         el('button', { class: 'boton borde chico', type: 'button', text: 'Cambiar día o nombre', onclick: () => dialogoCarpeta(c, r, recargar) }),
-        el('button', { class: 'boton-icono', type: 'button', title: 'Eliminar carpeta', 'aria-label': 'Eliminar carpeta', onclick: async () => {
-          if (!confirm(`¿Eliminar la carpeta «${c.nombre}» y sus ${c.total} envíos?`)) return;
+        el('button', { class: 'boton borde chico peligro-texto', type: 'button', text: 'Eliminar carpeta', onclick: async () => {
+          const ok = await confirmarEliminar(c.confirmados > 0 ? {
+            titulo: '¿Eliminar esta carpeta?',
+            aviso: c.confirmados === 1 ? 'Un pedido ya fue confirmado por tu cliente.' : `${c.confirmados} pedidos ya fueron confirmados por tus clientes.`,
+            texto: `Si eliminas «${c.nombre}» puedes perder a ${c.confirmados === 1 ? 'ese cliente y el registro de su pedido' : 'esos clientes y el registro de sus pedidos'}. Volverás a hacer todo de nuevo: ${c.confirmados === 1 ? 'crear el pedido y mandarle' : 'crear los pedidos y mandarles'} otro enlace.` }
+            : { titulo: '¿Eliminar esta carpeta?', texto: c.total ? `Se eliminan «${c.nombre}» y sus ${c.total} envío(s). Ninguno estaba confirmado todavía.` : `La carpeta «${c.nombre}» está vacía.` });
+          if (!ok) return;
           await api(`/api/empresa/carpetas/${c.id}`, { method: 'DELETE' }).catch((e) => alert(e.message)); volver();
-        } }, '×')) : null));
+        } })) : null));
   const estadoCaja = abierta
     ? el('section', { class: 'bloque carpeta-estado' + (listo ? ' lista' : '') },
       el('div', {}, el('strong', { class: 'carpeta-cifra', text: `${c.confirmados}` }), el('span', { text: ` de ${c.minimo} confirmados` }), progresoCarpeta(c),
@@ -494,10 +513,10 @@ async function vistaCarpeta(caja, yo, id) {
     : el('section', { class: 'bloque carpeta-estado' }, el('div', {},
       el('strong', { text: { nuevo: 'Vaelo la está preparando', en_ruta: 'En reparto', terminado: 'Terminada', cancelado: 'Cancelada' }[c.lote?.estado] || 'Enviada a Vaelo' }),
       c.lote ? el('small', { text: `${c.lote.modo_texto} · ${c.lote.entregados} de ${c.total} entregados${c.lote.en_camino ? ` · ${c.lote.en_camino} en camino` : ''}${c.lote.en_sede ? ` · ${c.lote.en_sede} en la sede de Vaelo` : ''}` }) : null),
-      el('a', { class: 'boton borde chico', href: `/api/empresa/excel?dia=${c.dia}`, text: 'Excel del día' }));
+      r.minorista ? null : el('a', { class: 'boton borde chico', href: `/api/empresa/excel?dia=${c.dia}`, text: 'Excel del día' }));
   poner(caja, cabecera, estadoCaja, abierta && !r.punto ? bloquePunto(r, recargar) : null,
     abierta ? el('div', { class: 'carpeta-acciones' }, anadir,
-      el('div', { class: 'navegar' }, el('label', { class: 'boton borde chico doc-boton' }, 'Subir Excel', archivo), el('a', { class: 'boton borde chico', href: '/api/empresa/pedidos/plantilla', text: 'Plantilla' }))) : null,
+      r.minorista ? null : el('div', { class: 'navegar' }, el('label', { class: 'boton borde chico doc-boton' }, 'Subir Excel', archivo), el('a', { class: 'boton borde chico', href: '/api/empresa/pedidos/plantilla', text: 'Plantilla' }))) : null,
     msgArchivo,
     el('section', { class: 'bloque' },
       el('div', { class: 'cab-bloque' }, el('h2', { text: `Envíos (${pedidos.length})` }),
@@ -536,7 +555,10 @@ function filaPedido(p, r, c, recargar) {
     } }),
     el('button', { type: 'button', text: 'Mover a otra carpeta', onclick: () => dialogoMover(p, r, c, recargar) }),
     el('button', { type: 'button', class: 'peligro-texto', text: 'Quitar de la carpeta', onclick: async () => {
-      if (!confirm(`¿Quitar el envío de ${p.cliente_nombre}?`)) return;
+      const ok = await confirmarEliminar(p.estado === 'confirmado' ? { titulo: `¿Quitar el pedido de ${p.cliente_nombre}?`, aviso: 'Este pedido ya fue confirmado por tu cliente.',
+        texto: 'Si lo quitas puedes perder a este cliente y el registro de su pedido. Volverás a hacer todo de nuevo: crear el pedido y mandarle otro enlace.', si: 'Sí, quitar' }
+        : { titulo: `¿Quitar el pedido de ${p.cliente_nombre}?`, si: 'Sí, quitar' });
+      if (!ok) return;
       await api(`/api/empresa/pedidos/${p.id}`, { method: 'DELETE' }).catch((x) => alert(x.message)); recargar();
     } })] : [];
   // Pedido ya en manos de Vaelo o entregado: se puede reportar un problema (llegó dañado, incompleto, se perdió)
@@ -850,13 +872,13 @@ function imprimirEtiquetas(pedidos, empresa) {
 }
 
 // ---------- Analítica (sin dinero) ----------
-async function panelAnalitica(caja) {
+async function panelAnalitica(caja, minorista = false) {
   let rango = 30;
   const zonaCifras = el('div'), zonaGraficas = el('div', { class: 'graficas-empresa' });
   const chips = el('div', { class: 'filtros' });
   const pintarChips = () => poner(chips, ...[[7, '7 días'], [30, '30 días'], [90, '90 días']].map(([d, t]) =>
     el('button', { class: 'chip', type: 'button', 'aria-pressed': String(d === rango), text: t, onclick: () => { rango = d; pintarChips(); cargar(); } })),
-    el('a', { class: 'boton borde chico', style: 'margin-left:auto', href: `/api/empresa/excel?dia=${hoyEmp()}`, text: 'Descargar Excel de hoy' }));
+    minorista ? null : el('a', { class: 'boton borde chico', style: 'margin-left:auto', href: `/api/empresa/excel?dia=${hoyEmp()}`, text: 'Descargar Excel de hoy' }));
   async function cargar() {
     const hoy = new Date(Date.now() - 6 * 3600e3);
     const desde = new Date(hoy - (rango - 1) * 86400e3).toISOString().slice(0, 10);

@@ -4190,7 +4190,7 @@ function cobrosProducto(uid) {
     FROM envios WHERE usuario_id = ? AND estado = 'entregado' AND cobro_destinatario > 0`).get(uid);
   return { pendiente: redondear(f.pendiente), envios: f.envios, pagado_30: redondear(f.pagado_30), ultimo_pago: f.ultimo_pago };
 }
-const datosPanelEmpresa = (u) => ({ minimo: minimoLote(u), punto: puntoEmpresa(u), punto_pendiente: puntoPendiente(u), cobros_producto: cobrosProducto(u.id), tamanos: TAMANOS, horarios: HORARIOS, modos: MODOS_LOTE, empresa: u.empresa_nombre || u.nombre,
+const datosPanelEmpresa = (u) => ({ minorista: u.tipo_cuenta === 'minorista', minimo: minimoLote(u), punto: puntoEmpresa(u), punto_pendiente: puntoPendiente(u), cobros_producto: cobrosProducto(u.id), tamanos: TAMANOS, horarios: HORARIOS, modos: MODOS_LOTE, empresa: u.empresa_nombre || u.nombre,
   whatsapp: getAjustes().whatsapp || '', sede: getAjustes().sede_direccion || '', zonas: [...zonasFijas().map((z) => z.nombre), OTRA_ZONA], hoy: hoyGT() });
 ruta('GET', '/api/empresa/carpetas', ({ req }) => {
   const u = requiereEmpresa(req);

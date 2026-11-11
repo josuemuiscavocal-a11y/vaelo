@@ -1589,3 +1589,11 @@ fieldset { min-width: 0; } .recientes { max-width: 100%; min-width: 0; }
   .cuenta-negocio .empresa-cabecera .pista { font-size: .9rem; }
 }
 .servicios-tienda li > svg, .servicios-tienda li > .icono { width: 36px; height: 36px; padding: 8px; border-radius: 10px; background: #eef2ff; color: var(--azul); box-sizing: border-box; }
+
+/* Confirmar antes de eliminar: dos botones claros */
+.confirmar-peligro { max-width: 440px; }
+.confirmar-peligro h2 { font-size: 1.3rem; margin: 0 0 .7rem; }
+.confirmar-peligro p { color: var(--suave); line-height: 1.5; }
+.botones-confirmar { display: flex; gap: .6rem; margin-top: 1.1rem; }
+.botones-confirmar .boton { flex: 1; min-height: 48px; }
+.confirmar-peligro .boton.peligro { background: var(--alerta, #b42318); color: #fff; border-color: var(--alerta, #b42318); }
