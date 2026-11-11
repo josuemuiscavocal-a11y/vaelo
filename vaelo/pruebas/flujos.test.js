@@ -1114,3 +1114,23 @@ test('zonas desde el mapa: arma la forma con sus tramos, la simplifica y llena l
     db.prepare('UPDATE zonas_fijas SET poligono = NULL').run();
   }
 });
+
+test('zonas dibujadas a mano: la franja entre dos vecinas (unos metros) cuenta como zona; lejos de todas, no', async () => {
+  const antes = db.prepare('SELECT id, poligono FROM zonas_fijas').all();
+  try {
+    // Dos zonas vecinas con una franja de unos 11 m entre ellas (0.0001° de longitud)
+    const a = [[-90.5200, 14.6300], [-90.5100, 14.6300], [-90.5100, 14.6400], [-90.5200, 14.6400]];
+    const b = [[-90.5099, 14.6300], [-90.5000, 14.6300], [-90.5000, 14.6400], [-90.5099, 14.6400]];
+    const z = db.prepare('SELECT id, nombre FROM zonas_fijas WHERE activa = 1 ORDER BY id LIMIT 2').all();
+    db.prepare('UPDATE zonas_fijas SET poligono = NULL').run();
+    db.prepare('UPDATE zonas_fijas SET poligono = ? WHERE id = ?').run(JSON.stringify(a), z[0].id);
+    db.prepare('UPDATE zonas_fijas SET poligono = ? WHERE id = ?').run(JSON.stringify(b), z[1].id);
+    const zona = async (lat, lng) => (await admin('GET', `/api/zona?lat=${lat}&lng=${lng}`)).j.zona;
+    assert.equal(await zona(14.635, -90.515), z[0].nombre, 'dentro de la primera');
+    assert.ok([z[0].nombre, z[1].nombre].includes(await zona(14.635, -90.50995)), 'la franja de 11 m entre las dos tiene zona');
+    assert.equal(await zona(14.635, -90.5202), z[0].nombre, 'a unos 20 m del borde todavía cuenta');
+    assert.equal(await zona(14.635, -90.5215), null, 'a unos 160 m ya es fuera de zona');
+  } finally {
+    for (const x of antes) db.prepare('UPDATE zonas_fijas SET poligono = ? WHERE id = ?').run(x.poligono, x.id);
+  }
+});

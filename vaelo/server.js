@@ -162,14 +162,36 @@ function dentroDe(p, puntos) {   // puntos: [[lng, lat], ...]
   }
   return dentro;
 }
-const zonaDePunto = (p) => zonasConForma().find((z) => dentroDe(p, z.puntos))?.nombre || null;
+// Las zonas se dibujan a mano y sus bordes no coinciden exacto: entre dos vecinas quedan franjas de unos metros.
+// Un punto a menos de MARGEN_ZONA metros del borde de una zona cuenta como dentro (así la calle límite no cobra fuera de zona).
+const MARGEN_ZONA = 30;
+function metrosAlBorde(p, puntos) {
+  const kx = 111320 * Math.cos((p.lat * Math.PI) / 180), ky = 110540;
+  let min = Infinity;
+  for (let i = 0, j = puntos.length - 1; i < puntos.length; j = i++) {
+    const ax = (puntos[j][0] - p.lng) * kx, ay = (puntos[j][1] - p.lat) * ky, bx = (puntos[i][0] - p.lng) * kx, by = (puntos[i][1] - p.lat) * ky;
+    const dx = bx - ax, dy = by - ay, l2 = dx * dx + dy * dy;
+    const t = l2 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / l2)) : 0;
+    min = Math.min(min, Math.hypot(ax + t * dx, ay + t * dy));
+  }
+  return min;
+}
+function zonaDeFormas(p, formas) {
+  if (!p || p.lat == null || p.lng == null) return null;
+  const dentro = formas.find((z) => dentroDe(p, z.puntos));
+  if (dentro) return dentro.nombre;
+  let mejor = null, dist = MARGEN_ZONA;
+  for (const z of formas) { const d = metrosAlBorde(p, z.puntos); if (d <= dist) { dist = d; mejor = z.nombre; } }
+  return mejor;
+}
+const zonaDePunto = (p) => zonaDeFormas(p, zonasConForma());
 const kmMaxFija = () => Number(getAjustes().km_max_tarifa_fija) || 15;
 // ¿Se puede cobrar tarifa fija? (null en un punto = todavía no se conoce)
 function aplicaTarifaFija(oz, dz, origen, destino, km) {
   if (oz === OTRA_ZONA || dz === OTRA_ZONA) return false;
   const formas = zonasConForma();
   if (formas.length) {
-    for (const p of [origen, destino]) if (p && !formas.some((z) => dentroDe(p, z.puntos))) return false;
+    for (const p of [origen, destino]) if (p && !zonaDeFormas(p, formas)) return false;
     return true;
   }
   return km == null || km <= kmMaxFija();
@@ -2236,7 +2258,7 @@ function corregirZonas(id) {
   if (!formas.length) return;
   const e = db.prepare('SELECT id, estado, origen_zona, destino_zona, origen_lat, origen_lng, destino_lat, destino_lng FROM envios WHERE id = ?').get(id);
   if (!e || !ESTADOS_ACTIVOS.includes(e.estado)) return;
-  const real = (lat, lng) => formas.find((z) => dentroDe({ lat, lng }, z.puntos))?.nombre || OTRA_ZONA;
+  const real = (lat, lng) => zonaDeFormas({ lat, lng }, formas) || OTRA_ZONA;
   const cambios = [];
   if (e.estado === 'pendiente' && e.origen_lat != null) {
     const z = real(e.origen_lat, e.origen_lng);
@@ -3565,7 +3587,7 @@ function precioPedido(p) {
   const moto = vehiculoMoto();
   const conZona = !!p.zona && p.zona !== OTRA_ZONA && zonasFijas().some((z) => z.nombre === p.zona);
   const formas = zonasConForma();
-  const dentro = conZona && (!formas.length || p.lat == null || formas.some((z) => dentroDe({ lat: p.lat, lng: p.lng }, z.puntos)));
+  const dentro = conZona && (!formas.length || p.lat == null || !!zonaDeFormas({ lat: p.lat, lng: p.lng }, formas));
   return { precio: redondear(dentro ? (moto ? moto.tarifa_zona : 35) : (moto ? tarifaFuera(moto) : 45)), preferencial: dentro };
 }
 const pedidoCompleto = (p) => !!(p.dia && p.horario && p.lat != null && p.direccion && p.zona && p.recibe_nombre && p.recibe_telefono && p.metodo_pago);
@@ -4735,7 +4757,7 @@ ruta('POST', '/api/admin/lotes-empresa/:id/confirmar', ({ req, params, body }) =
   const creados = [];
   // Con las zonas dibujadas, el piloto ve la zona real del punto marcado (no la que escribió el cliente)
   const formasZona = zonasConForma();
-  const zonaReal = (p) => (formasZona.length && p.lat != null ? (formasZona.find((z) => dentroDe({ lat: p.lat, lng: p.lng }, z.puntos))?.nombre || OTRA_ZONA) : p.zona);
+  const zonaReal = (p) => (formasZona.length && p.lat != null ? (zonaDeFormas({ lat: p.lat, lng: p.lng }, formasZona) || OTRA_ZONA) : p.zona);
   db.exec('BEGIN');
   try {
     rutas.forEach((r, ri) => {

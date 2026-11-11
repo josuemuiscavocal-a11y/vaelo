@@ -166,7 +166,11 @@
       const sel = selectorPunto(mapaCaja, { letra: 'B', clase: 'entrega', conMiUbicacion: true,
         alCambiar: async (p) => {
           punto = p;
-          try { const z = await api(`/api/zona?lat=${p.lat}&lng=${p.lng}`); if (z.zona && [...zona.options].some((o) => o.value === z.zona)) zona.value = z.zona; } catch { /* sin zona */ }
+          try {
+            const z = await api(`/api/zona?lat=${p.lat}&lng=${p.lng}`);
+            if (z.zona && [...zona.options].some((o) => o.value === z.zona)) zona.value = z.zona;
+            else if (!z.zona && z.hay_formas) zona.value = [...zona.options].at(-1).value;   // fuera de las zonas: "Otra zona o municipio"
+          } catch { /* sin zona */ }
           actualizarPrecio();
         },
         alDireccion: (t, usar) => { if (usar || !direccion.value) direccion.value = t; } });
