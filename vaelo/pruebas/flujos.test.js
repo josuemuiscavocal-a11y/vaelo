@@ -1080,3 +1080,34 @@ test('sesiones separadas: la tienda, el panel y el piloto abiertos en el mismo n
   assert.equal((await yo('/mi-cuenta')).email, 'lupe@prueba.com');
   assert.equal((await yo('/modomensajero')).email, 'carlos@prueba.com');
 });
+
+test('zonas desde el mapa: arma la forma con sus tramos, la simplifica y llena las zonas que se llaman igual', async () => {
+  const datos = fs.readFileSync(path.join(__dirname, 'datos', 'overpass-zonas.json'), 'utf8');
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url, op) => (String(url).includes('overpass') ? new Response(datos, { status: 200, headers: { 'Content-Type': 'application/json' } }) : original(url, op));
+  try {
+    db.prepare('UPDATE zonas_fijas SET poligono = NULL').run();
+    const r = await admin('POST', '/api/admin/zonas/importar', {});
+    assert.equal(r.status, 200, JSON.stringify(r.j));
+    assert.ok(r.j.llenadas.includes('Zona 1') && r.j.llenadas.includes('Zona 6'), JSON.stringify(r.j));
+    assert.ok(r.j.sin_forma.includes('Zona 16'), 'Zona 16 no viene en el mapa de prueba');
+    assert.ok(r.j.disponibles_zonas.includes('Zona 19')); assert.ok(r.j.disponibles_municipios.includes('Mixco'));
+    // La forma queda bien armada: un punto adentro sí, uno afuera no
+    const z1 = JSON.parse(db.prepare("SELECT poligono FROM zonas_fijas WHERE nombre = 'Zona 1'").get().poligono);
+    assert.ok(z1.length >= 4 && z1.length <= 200);
+    const zona = async (lat, lng) => (await admin('GET', `/api/zona?lat=${lat}&lng=${lng}`)).j.zona;
+    assert.equal(await zona(14.637, -90.512), 'Zona 1'); assert.equal(await zona(14.652, -90.497), 'Zona 6'); assert.equal(await zona(14.70, -90.40), null);
+    // Agregar Mixco: su forma real (muchos puntos) se arma de 3 tramos y queda en 200 puntos o menos
+    const m = await admin('POST', '/api/admin/zonas/importar', { agregar: ['Mixco'] });
+    assert.ok(m.j.llenadas.includes('Mixco'), JSON.stringify(m.j));
+    const mixco = JSON.parse(db.prepare("SELECT poligono FROM zonas_fijas WHERE nombre = 'Mixco'").get().poligono);
+    assert.ok(mixco.length >= 20 && mixco.length <= 200, 'puntos de Mixco: ' + mixco.length);
+    assert.equal(await zona(14.6330, -90.6064), 'Mixco', 'el centro de Mixco cae dentro de su forma');
+    // Las que ya tienen forma no se tocan si no se pide
+    assert.ok((await admin('POST', '/api/admin/zonas/importar', {})).j.conservadas.includes('Zona 1'));
+  } finally {
+    globalThis.fetch = original;
+    db.prepare("DELETE FROM zonas_fijas WHERE nombre = 'Mixco'").run();
+    db.prepare('UPDATE zonas_fijas SET poligono = NULL').run();
+  }
+});

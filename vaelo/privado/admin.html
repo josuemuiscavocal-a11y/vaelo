@@ -280,6 +280,11 @@
         <div class="bloque">
           <h2>Zonas con tarifa fija</h2>
           <p class="bloque-nota">Dibuja cada zona en el mapa. Con zonas dibujadas, la tarifa fija solo se cobra cuando la recogida y la entrega reales caen dentro de alguna; si no, se cobra la tarifa de fuera de zonas. Sin ninguna dibujada, la zona preferencial vale hasta el máximo de km de abajo.</p>
+          <div class="importar-zonas">
+            <div><strong>No las dibujes a mano</strong><small>Traemos los límites de las zonas de la capital y de los municipios desde el mapa (OpenStreetMap) y llenamos las zonas de tu lista que se llamen igual.</small></div>
+            <button class="boton" type="button" id="boton-importar-zonas">Traer las formas desde el mapa</button>
+          </div>
+          <div id="resultado-importar"></div>
           <div class="mapa" id="mapa-zonas"></div>
           <div class="tabla-envoltura" style="margin:1rem 0">
             <table>
@@ -1469,6 +1474,36 @@ null))));
       $('auto-asignar').checked = t.ajustes.auto_asignar === '1'; $('exigir-receptor').checked = t.ajustes.exigir_receptor !== '0'; $('segundos-aceptar').value = t.ajustes.segundos_aceptar || 60;
       $('comision-tipo').value = t.ajustes.comision_tipo || 'porcentaje'; $('comision-valor').value = t.ajustes.comision_valor ?? 70; pintarAyudaComision();
     }
+
+    // ---------- Traer las formas de las zonas desde OpenStreetMap ----------
+    async function importarZonas(agregar = [], boton = $('boton-importar-zonas')) {
+      const antes = boton.textContent; boton.disabled = true; boton.textContent = 'Trayendo las zonas… (puede tardar un minuto)';
+      try {
+        const x = await api('/api/admin/zonas/importar', { body: { agregar } });
+        const lista = (t, l) => l.length ? el('p', {}, el('strong', { text: t }), ' ' + l.join(', ')) : null;
+        const elegir = (titulo, nombres) => {
+          if (!nombres.length) return null;
+          const marcas = nombres.map((n) => el('label', { class: 'dia-chip' }, el('input', { type: 'checkbox', value: n }), el('span', { text: n })));
+          return el('div', { style: 'margin-top:.6rem' }, el('p', { style: 'margin:.2rem 0' }, el('strong', { text: titulo })),
+            el('div', { style: 'display:flex;gap:.35rem;flex-wrap:wrap;margin-bottom:.5rem' }, ...marcas),
+            el('button', { class: 'boton borde chico', type: 'button', text: 'Agregar las marcadas a mi lista', onclick: (ev) => {
+              const sel = marcas.map((m) => m.querySelector('input')).filter((i) => i.checked).map((i) => i.value);
+              if (!sel.length) { alert('Marca las que quieres agregar.'); return; }
+              importarZonas(sel, ev.currentTarget);
+            } }));
+        };
+        poner($('resultado-importar'), el('div', { class: 'mensaje exito' },
+          x.llenadas.length ? el('p', {}, el('strong', { text: 'Listas: ' }), x.llenadas.join(', ') + '.') : el('p', { text: 'No se llenó ninguna zona nueva.' }),
+          lista('Ya tenían forma (no se tocaron):', x.conservadas),
+          lista('No están en el mapa con ese nombre (dibújalas a mano):', x.sin_forma),
+          el('p', { class: 'pista', text: 'Las zonas que agregues tendrán la tarifa fija. Agrega solo las que cubres.' }),
+          elegir('Otras zonas de la capital que puedes agregar:', x.disponibles_zonas),
+          elegir('Municipios que puedes agregar:', x.disponibles_municipios)));
+        cargarTarifas();
+      } catch (e) { mostrarMensaje($('msg-tarifas'), e.message); }
+      finally { boton.disabled = false; boton.textContent = antes; }
+    }
+    $('boton-importar-zonas').addEventListener('click', () => importarZonas());
 
     // ---------- Zonas dibujadas en el mapa ----------
     const CAMPOS_AJUSTES = ['cargo_devolucion', 'cargo_bodega_dia', 'cargo_reentrega', 'horas_decidir_fallido', 'cargo_cancelacion', 'pct_piloto_cancelacion', 'sede_direccion',

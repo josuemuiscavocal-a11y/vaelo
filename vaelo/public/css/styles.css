@@ -1627,3 +1627,9 @@ fieldset { min-width: 0; } .recientes { max-width: 100%; min-width: 0; }
 [data-falta-foto].resaltar { outline: 3px solid var(--azul, #1c3faa); outline-offset: 3px; animation: latido 1s ease-in-out 2; }
 @keyframes latido { 50% { transform: scale(1.06); } }
 @media (prefers-reduced-motion: reduce) { [data-falta-foto].resaltar { animation: none; } }
+
+/* Panel: traer las zonas desde el mapa */
+.importar-zonas { display: flex; gap: 1rem; align-items: center; justify-content: space-between; flex-wrap: wrap; background: #eef2ff; border: 1px solid #cdd6f6; border-radius: 12px; padding: .9rem 1rem; margin: .4rem 0 1rem; }
+.importar-zonas > div { display: grid; gap: .2rem; flex: 1 1 320px; }
+.importar-zonas small { color: var(--suave); }
+#resultado-importar .mensaje p { margin: .25rem 0; }

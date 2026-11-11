@@ -5315,6 +5315,121 @@ ruta('PUT', '/api/admin/zonas/:id', ({ req, params, body }) => {
   return { ok: true };
 });
 
+// ---------- Traer las formas de las zonas desde OpenStreetMap ----------
+// El servidor descarga los límites de las zonas de la Ciudad de Guatemala y de los municipios del departamento,
+// arma cada forma con sus tramos, la simplifica (máximo 200 puntos) y llena las zonas que tengan el mismo nombre.
+const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
+const CONSULTA_ZONAS = `[out:json][timeout:120];
+area(id:3600067992)->.ciudad;
+area(id:3600214704)->.depto;
+(
+  rel(area.ciudad)["boundary"="administrative"]["name"~"^Zona [0-9]+$"];
+  rel(area.depto)["boundary"="administrative"]["admin_level"="6"];
+);
+out geom;`;
+async function descargarZonasOsm() {
+  if (process.env.VAELO_OVERPASS_ARCHIVO) return JSON.parse(fs.readFileSync(process.env.VAELO_OVERPASS_ARCHIVO, 'utf8')).elements;   // solo para pruebas sin internet
+  let ultimoError = null;
+  for (const url of OVERPASS) {
+    try {
+      const r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(CONSULTA_ZONAS), signal: AbortSignal.timeout(150000),
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': 'Vaelo-Mensajeria/1.0' } });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return (await r.json()).elements || [];
+    } catch (e) { ultimoError = e; }
+  }
+  throw ultimoError || new Error('sin respuesta');
+}
+// Une los tramos (ways) "outer" de una relación en anillos cerrados y devuelve el más grande, como [[lng, lat], ...]
+function anilloDeRelacion(rel) {
+  const clave = (p) => p[0].toFixed(7) + ',' + p[1].toFixed(7);
+  let tramos = (rel.members || []).filter((m) => m.type === 'way' && (m.role === 'outer' || m.role === '') && Array.isArray(m.geometry) && m.geometry.length > 1)
+    .map((m) => m.geometry.map((g) => [g.lon, g.lat]));
+  const anillos = [];
+  while (tramos.length) {
+    let actual = tramos.shift();
+    for (let vueltas = 0; vueltas < 5000 && clave(actual[0]) !== clave(actual[actual.length - 1]); vueltas++) {
+      const fin = clave(actual[actual.length - 1]), ini = clave(actual[0]);
+      const i = tramos.findIndex((t) => [fin, ini].includes(clave(t[0])) || [fin, ini].includes(clave(t[t.length - 1])));
+      if (i < 0) break;
+      const t = tramos.splice(i, 1)[0];
+      if (clave(t[0]) === fin) actual = actual.concat(t.slice(1));
+      else if (clave(t[t.length - 1]) === fin) actual = actual.concat(t.slice(0, -1).reverse());
+      else if (clave(t[t.length - 1]) === ini) actual = t.slice(0, -1).concat(actual);
+      else actual = t.slice(1).reverse().concat(actual);
+    }
+    if (actual.length >= 4) anillos.push(actual);
+  }
+  const area = (a) => Math.abs(a.reduce((s, p, i) => { const q = a[(i + 1) % a.length]; return s + p[0] * q[1] - q[0] * p[1]; }, 0) / 2);
+  return anillos.sort((x, y) => area(y) - area(x))[0] || null;
+}
+// Simplifica una forma cerrada (Douglas-Peucker) hasta que tenga como máximo `max` puntos
+function simplificarAnillo(anillo, max = 200) {
+  let pts = clave0(anillo);
+  function clave0(a) { const b = a.slice(); if (b.length > 1 && b[0][0] === b[b.length - 1][0] && b[0][1] === b[b.length - 1][1]) b.pop(); return b; }
+  const dp = (lista, tol) => {
+    if (lista.length < 3) return lista;
+    const [a, b] = [lista[0], lista[lista.length - 1]];
+    let maxD = -1, idx = 0;
+    for (let i = 1; i < lista.length - 1; i++) {
+      const p = lista[i], dx = b[0] - a[0], dy = b[1] - a[1];
+      const d = dx === 0 && dy === 0 ? Math.hypot(p[0] - a[0], p[1] - a[1]) : Math.abs(dy * p[0] - dx * p[1] + b[0] * a[1] - b[1] * a[0]) / Math.hypot(dx, dy);
+      if (d > maxD) { maxD = d; idx = i; }
+    }
+    if (maxD <= tol) return [a, b];
+    return dp(lista.slice(0, idx + 1), tol).slice(0, -1).concat(dp(lista.slice(idx), tol));
+  };
+  // Se parte en dos mitades para que el primer punto no quede fijo como esquina
+  const mitad = Math.floor(pts.length / 2);
+  let tol = 0.00001, salida = pts;
+  while (salida.length > max && tol < 0.05) {
+    salida = dp(pts.slice(0, mitad + 1), tol).slice(0, -1).concat(dp(pts.slice(mitad).concat([pts[0]]), tol).slice(0, -1));
+    tol *= 1.6;
+  }
+  return salida.map(([lng, lat]) => [Math.round(lng * 1e6) / 1e6, Math.round(lat * 1e6) / 1e6]);
+}
+const normalNombreZona = (t) => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+ruta('POST', '/api/admin/zonas/importar', async ({ req, body }) => {
+  requiereRol(req, 'admin');
+  let elementos;
+  try { elementos = await descargarZonasOsm(); }
+  catch { falla(502, 'No pudimos conectarnos con el mapa (OpenStreetMap). Intenta de nuevo en unos minutos.'); }
+  // Forma de cada nombre: zonas de la capital ("Zona 10") y municipios ("Mixco", "Villa Nueva")
+  const formas = new Map();
+  for (const e of elementos) {
+    if (e.type !== 'relation' || !e.tags?.name) continue;
+    const nombre = e.tags.name.trim();
+    if (formas.has(normalNombreZona(nombre))) continue;
+    const anillo = anilloDeRelacion(e);
+    if (anillo) formas.set(normalNombreZona(nombre), { nombre, puntos: simplificarAnillo(anillo), municipio: e.tags.admin_level === '6' });
+  }
+  const zonas = db.prepare('SELECT * FROM zonas_fijas').all();
+  const llenadas = [], sinForma = [], conservadas = [];
+  const agregar = Array.isArray(body.agregar) ? body.agregar.map(normalNombreZona) : [];
+  db.exec('BEGIN');
+  try {
+    for (const z of zonas) {
+      const f = formas.get(normalNombreZona(z.nombre));
+      if (!f) { sinForma.push(z.nombre); continue; }
+      if (z.poligono && body.reemplazar !== true) { conservadas.push(z.nombre); continue; }
+      db.prepare('UPDATE zonas_fijas SET poligono = ? WHERE id = ?').run(JSON.stringify(f.puntos), z.id); llenadas.push(z.nombre);
+    }
+    const yaEstan = new Set(zonas.map((z) => normalNombreZona(z.nombre)));
+    for (const k of agregar) {
+      const f = formas.get(k);
+      if (!f || yaEstan.has(k)) continue;
+      db.prepare('INSERT INTO zonas_fijas (nombre, poligono) VALUES (?, ?)').run(f.nombre, JSON.stringify(f.puntos)); llenadas.push(f.nombre); yaEstan.add(k);
+    }
+    db.exec('COMMIT');
+  } catch (err) { db.exec('ROLLBACK'); throw err; }
+  const orden = (a, b) => (parseInt(a.replace(/\D/g, '')) || 999) - (parseInt(b.replace(/\D/g, '')) || 999) || a.localeCompare(b);
+  const yaEstan = new Set(db.prepare('SELECT nombre FROM zonas_fijas').all().map((z) => normalNombreZona(z.nombre)));
+  const disponibles = [...formas.values()].filter((f) => !yaEstan.has(normalNombreZona(f.nombre)));
+  return { ok: true, llenadas, sin_forma: sinForma, conservadas,
+    disponibles_zonas: disponibles.filter((f) => !f.municipio).map((f) => f.nombre).sort(orden),
+    disponibles_municipios: disponibles.filter((f) => f.municipio).map((f) => f.nombre).sort(orden) };
+});
+
 ruta('PUT', '/api/admin/ajustes', ({ req, body }) => {
   requiereRol(req, 'admin');
   const up = db.prepare('INSERT INTO ajustes (clave, valor) VALUES (?, ?) ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor');
