@@ -302,7 +302,7 @@
             <div class="campo"><label for="recargo-fragil">Recargo por paquete frágil (Q)</label><input id="recargo-fragil" type="number" min="0" step="0.5"></div>
             <div class="campo"><label for="vigencia">Vigencia de antecedentes de pilotos (meses)</label><input id="vigencia" type="number" min="1" max="24" step="1"></div>
           </div>
-          <label class="casilla tema-fiesta" for="tema-navidad"><input type="checkbox" id="tema-navidad" style="width:auto"><span><strong>🎄 Tema de Navidad</strong><br><small style="color:var(--suave)">Gorrito en el logo, luces, nieve y un saludo en la página de inicio, en todas las páginas. Se guarda al tocarlo.</small><br><small id="msg-navidad" role="status" style="color:var(--ok);font-weight:600"></small></span></label>
+          <label class="casilla tema-fiesta" for="tema-navidad"><input type="checkbox" id="tema-navidad" style="width:auto"><span><strong>Tema de Navidad</strong><br><small style="color:var(--suave)">Gorrito en el logo, luces, nieve y un saludo en la página de inicio, en todas las páginas. Se guarda al tocarlo.</small><br><small id="msg-navidad" role="status" style="color:var(--ok);font-weight:600"></small></span></label>
           <div class="campo"><label for="mapbox-token">Clave pública de Mapbox <span class="ayuda">Empieza con pk. Vacía = mapa gratis</span></label><input id="mapbox-token" maxlength="300" autocomplete="off" spellcheck="false" placeholder="pk.eyJ1Ijoi…"></div>
           <button class="boton" type="submit">Guardar</button>
         </form>
@@ -1463,7 +1463,7 @@ null))));
       $('tema-navidad').checked = t.ajustes.tema_navidad === '1';
       $('tema-navidad').onchange = async (ev) => {
         const si = ev.target.checked;
-        try { await api('/api/admin/ajustes', { method: 'PUT', body: { tema_navidad: si } }); $('msg-navidad').textContent = si ? '🎄 Activado: ya se ve en todas las páginas.' : 'Desactivado.'; }
+        try { await api('/api/admin/ajustes', { method: 'PUT', body: { tema_navidad: si } }); $('msg-navidad').textContent = si ? 'Activado: ya se ve en todas las páginas.' : 'Desactivado.'; }
         catch (e) { ev.target.checked = !si; $('msg-navidad').textContent = e.message; }
       };
       $('auto-asignar').checked = t.ajustes.auto_asignar === '1'; $('exigir-receptor').checked = t.ajustes.exigir_receptor !== '0'; $('segundos-aceptar').value = t.ajustes.segundos_aceptar || 60;

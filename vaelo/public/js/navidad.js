@@ -8,7 +8,7 @@
   if (location.pathname === '/' && leer('vaelo_nav_saludo') !== String(new Date().getFullYear())) {
     const f = document.createElement('div');
     f.className = 'nav-saludo';
-    f.innerHTML = '<span>🎄 ¡Felices fiestas! Vaelo lleva tus regalos a toda la ciudad esta Navidad 🎁</span><button type="button" aria-label="Cerrar saludo">×</button>';
+    f.innerHTML = '<span>¡Felices fiestas! Vaelo lleva tus regalos a toda la ciudad esta Navidad.</span><button type="button" aria-label="Cerrar saludo">×</button>';
     f.querySelector('button').onclick = () => { f.remove(); guardar('vaelo_nav_saludo', String(new Date().getFullYear())); };
     document.body.prepend(f);
   }
@@ -40,7 +40,7 @@
     if (si) { if (!lienzo.isConnected) document.body.append(lienzo); medir(); dibujar(); } else lienzo.remove();
   };
   const boton = document.createElement('button');
-  boton.type = 'button'; boton.className = 'nav-boton-nieve'; boton.textContent = '❄'; boton.setAttribute('aria-label', 'Nieve de Navidad');
+  boton.type = 'button'; boton.className = 'nav-boton-nieve'; boton.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2v20M3.3 7l17.4 10M20.7 7 3.3 17M9 4l3 2 3-2M9 20l3-2 3 2"/></svg>'; boton.setAttribute('aria-label', 'Nieve de Navidad');
   boton.onclick = () => { encender(!activo); guardar('vaelo_nieve', activo ? '1' : '0'); };
   document.body.append(boton);
   addEventListener('resize', () => { if (activo) medir(); });

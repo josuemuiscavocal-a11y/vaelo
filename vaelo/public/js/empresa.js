@@ -157,7 +157,7 @@ function docsEmpresa(r, s, subir, alCambiar) {
         : el('label', { class: 'doc-pro-vista' }, dibujoDoc(guia.dibujo), el('small', { class: 'doc-pro-soltar', text: 'Toca para subir o arrastra aquí' }), entradaArch);
       poner(caja,
         el('div', { class: 'doc-pro-cab' }, el('strong', { text: d.nombre }),
-          el('span', { class: 'doc-pro-chip ' + (listo ? 'ok' : d.opcional ? 'opc' : 'falta'), text: listo ? '✓ Listo' : d.opcional ? 'Opcional' : 'Falta' })),
+          el('span', { class: 'doc-pro-chip ' + (listo ? 'ok' : d.opcional ? 'opc' : 'falta'), text: listo ? 'Listo' : d.opcional ? 'Opcional' : 'Falta' })),
         vista,
         el('p', { class: 'doc-pro-ayuda', text: guia.ayuda || '' }),
         el('div', { class: 'doc-pro-botones' },
@@ -197,6 +197,42 @@ const waNum = (t) => { let n = String(t || '').replace(/\D/g, ''); if (n.length 
 const ESTADO_PEDIDO_CLASE = { pendiente: 'etiqueta-gris', esperando: 'etiqueta-azul', confirmado: 'etiqueta-completa', en_vaelo: 'etiqueta-azul', enviado: 'etiqueta-gris', vencido: 'etiqueta-pendiente', no_puede: 'etiqueta-pendiente' };
 const ESTADO_ENVIO_EMP = { pendiente: 'Por recoger', recogido: 'Recogido', en_camino: 'En camino', entregado: 'Entregado', fallido: 'No se entregó', a_sede: 'Va a la sede', en_sede: 'En la sede de Vaelo', devuelto: 'Devuelto', reenviado: 'Reenviado', cancelado: 'Cancelado' };
 
+// App "Vaelo Tiendas": se instala desde /tienda y abre directo en la tienda (sin entrar a Google cada vez)
+function bloqueAppTiendas() {
+  if (typeof yaInstalada === 'function' && yaInstalada()) return null;
+  if (cerradoHasta('app-tiendas')) return null;
+  const caja = el('section', { class: 'app-tiendas' });
+  const enTienda = location.pathname === '/tienda';
+  const pista = el('small', { text: 'Si no deseas estar entrando a Google cada vez, descarga la app: queda en tu pantalla de inicio y abre directo en tu tienda. No ocupa espacio ni se baja de ninguna tienda de aplicaciones.' });
+  const boton = el('button', { class: 'boton', type: 'button', text: 'Descargar Vaelo Tiendas', onclick: async () => {
+    if (!enTienda) { location.href = '/tienda?instalar=1'; return; }
+    if (await pedirInstalar()) { caja.remove(); return; }
+    pista.textContent = esIos() ? 'En Safari toca Compartir (el cuadro con la flecha) y luego «Agregar a pantalla de inicio». Quedará como Vaelo Tiendas.'
+      : 'En Chrome toca el menú de los tres puntos (arriba a la derecha) y elige «Instalar app» o «Agregar a pantalla principal». Quedará como Vaelo Tiendas.';
+    pista.className = 'aviso-pasos';
+  } });
+  caja.append(el('img', { src: '/img/icono-tiendas-192.png', alt: '', width: 56, height: 56 }),
+    el('div', {}, el('strong', { text: 'Descarga la app Vaelo Tiendas' }), pista), boton, botonCerrarAviso('app-tiendas', caja));
+  if (enTienda && new URLSearchParams(location.search).get('instalar')) { caja.classList.add('resaltada'); boton.textContent = 'Instalar ahora'; }
+  return caja;
+}
+// Lo que Vaelo hace por la tienda: la logística completa, explicada en corto
+const SERVICIOS_TIENDA = [
+  ['mensaje', 'Enlace exclusivo para cada cliente', 'Confirma día, horario, dirección y quién recibe. Tú no tienes que escribirle a cada uno.'],
+  ['ruta', 'Ubicación en tiempo real', 'Tu cliente comparte dónde está desde su celular y el piloto llega directo, sin perderse.'],
+  ['piloto', 'Rutas ordenadas', 'Juntamos tus pedidos del día y el piloto los entrega en el orden más rápido.'],
+  ['etiqueta', 'Código en cada paquete', 'Cada pedido lleva su código (o la guía impresa): el piloto nunca confunde uno con otro.'],
+  ['campana', 'Avisos a tu cliente', 'Le avisamos cuando su pedido sale y cuando es la próxima entrega, con su código para recibir.'],
+  ['dinero', 'Cobro al entregar', 'El piloto cobra tu producto y el envío. Vaelo te entrega tu dinero y lo ves aquí.'],
+];
+function bloqueServicios(clave) {
+  let abierto = true; try { abierto = localStorage.getItem('servicios-' + clave) !== '0'; } catch { /* sin almacenamiento */ }
+  const d = el('details', { class: 'servicios-tienda', open: abierto },
+    el('summary', {}, el('strong', { text: 'Lo que Vaelo hace por tu tienda' }), el('small', { text: 'Logística completa, sin costo extra' })),
+    el('ul', {}, SERVICIOS_TIENDA.map(([i, t, a]) => el('li', {}, icono(i), el('div', {}, el('strong', { text: t }), el('span', { text: a }))))));
+  d.addEventListener('toggle', () => { try { localStorage.setItem('servicios-' + clave, d.open ? '1' : '0'); } catch { /* sin almacenamiento */ } });
+  return d;
+}
 async function panelEmpresa(caja, op = {}, minorista = null) {
   const yo = (await api('/api/yo')).usuario;
   let bono = null; if (!minorista) try { bono = await api('/api/empresa/bono'); } catch { /* sin bono */ }
@@ -211,11 +247,12 @@ async function panelEmpresa(caja, op = {}, minorista = null) {
   poner(caja, 
     el('div', { class: 'empresa-cabecera' }, el('div', {}, el('span', { class: 'etiqueta-completa', text: minorista ? 'Tienda minorista' : 'Contrato firmado' }), el('h2', { text: yo.empresa_nombre || yo.nombre }),
       el('p', { class: 'pista', text: minorista
-        ? 'Para tus ventas en lives y redes: crea una carpeta por día, apunta cada pedido y mándale el enlace a tu cliente para que confirme su dirección. Cuando tengas los confirmados que pide la carpeta, envíala a Vaelo: recogemos todo junto y cada cliente paga su envío al recibir.'
+        ? 'Apunta los pedidos de tu live en una carpeta del día, mándale a cada cliente su enlace y cuando estén confirmados, envíala a Vaelo.'
         : 'Vaelo te presta sus pilotos: cada cliente paga su envío al recibir. Tu empresa solo paga si eliges pickup pagado por ti o si un paquete se queda en la sede.' }),
       yo.recogida_dias ? el('p', { class: 'recogida-fija' }, icono('reloj'), ` Pasamos por tus paquetes: ${yo.recogida_dias.split(',').map(d => ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'][d]).join(', ')} a las ${yo.recogida_hora}.`) : null),
       minorista ? el('button', { class: 'boton borde chico', type: 'button', text: '¿Ya vendes mucho? Pide contrato de empresa', onclick: () => pintarEmpresa(caja, { ...op, solicitud: true }) })
         : el('a', { class: 'boton borde chico', href: '/politicas-empresas', target: '_blank', text: 'Políticas para empresas' })),
+    bloqueAppTiendas(), bloqueServicios(minorista ? 'minorista' : 'empresa'),
     minorista && minorista.solicitud && ['enviada', 'cita'].includes(minorista.solicitud.estado) ? el('div', { class: 'mensaje aviso', text: 'Tu solicitud de contrato de empresa está en revisión. Mientras tanto sigue usando tu tienda con normalidad.' }) : null,
     conBono && bono.por_envio > 0 ? el('button', { type: 'button', class: 'bono-franja', onclick: () => { vista = 'ganancias'; pintarPest(); abrir(); } },
       el('span', { class: 'bono-franja-q', text: dinero(bono.por_envio) }),
@@ -602,7 +639,7 @@ function dialogoRecordar(pedidos, r, c) {
     el('h2', { text: 'Recordar a los que faltan' }), el('p', { class: 'pista', text: 'Toca cada uno: se abre WhatsApp con el mensaje y su enlace.' }),
     el('ul', { class: 'caja-enlaces' }, pedidos.map((p) => el('li', {}, el('span', {}, el('strong', { text: p.cliente_nombre }), el('small', { text: `${p.estado_texto} · ${p.descripcion}` })),
       el('a', { class: 'boton cinta chico', href: `https://wa.me/${waNum(p.cliente_telefono)}?text=${encodeURIComponent(textoEnlace(p, r, c.dia))}`, target: '_blank', rel: 'noopener',
-        onclick: (ev) => { api(`/api/empresa/pedidos/${p.id}/enlace`, { body: {} }).catch(() => {}); ev.currentTarget.textContent = 'Enviado ✓'; ev.currentTarget.classList.replace('cinta', 'borde'); }, text: 'Mandar' })))));
+        onclick: (ev) => { api(`/api/empresa/pedidos/${p.id}/enlace`, { body: {} }).catch(() => {}); ev.currentTarget.textContent = 'Enviado'; ev.currentTarget.classList.replace('cinta', 'borde'); }, text: 'Mandar' })))));
   dlg.addEventListener('close', () => dlg.remove());
   document.body.append(dlg); dlg.showModal();
 }
@@ -640,7 +677,9 @@ function dialogoNuevoEnvio(c, r, recargar) {
   const datosEntrega = camposEntrega({}, r, c);
   datosEntrega.nodo.hidden = true;
   let llenar = false;
-  const modos = el('div', { class: 'opciones' }, ...[[false, 'Le mando el enlace', 'Tu cliente confirma horario, lugar y quién recibe'], [true, 'Lo lleno yo', 'Ya tengo su dirección y horario']].map(([v, t, a]) =>
+  const recomendacion = el('p', { class: 'recomendacion' }, el('strong', { text: 'Te recomendamos mandar el enlace exclusivo. ' }),
+    'Tu cliente confirma con su ubicación en tiempo real y el piloto llega directo, sin errores de dirección. Llénalo tú solo si ya tienes su ubicación exacta.');
+  const modos = el('div', { class: 'opciones' }, ...[[false, 'Le mando el enlace (recomendado)', 'Tu cliente confirma horario, ubicación y quién recibe'], [true, 'Lo lleno yo', 'Solo si ya tengo su ubicación exacta']].map(([v, t, a]) =>
     el('label', { class: 'opcion' }, el('input', { type: 'radio', name: 'np-modo', checked: llenar === v, onchange: () => { llenar = v; datosEntrega.nodo.hidden = !v; if (v) datosEntrega.refrescar(); guardar.textContent = v ? 'Guardar envío' : 'Guardar y mandar enlace'; } }),
       el('span', {}, t, el('small', { text: a })))));
   const guardar = el('button', { class: 'boton accion-principal', type: 'submit', text: 'Guardar y mandar enlace' });
@@ -656,14 +695,14 @@ function dialogoNuevoEnvio(c, r, recargar) {
     if (d.direccion || d.zona) { datosEntrega.prellenar(d); if (!llenar) modos.querySelectorAll('input')[1].click(); }
   });
   const form = el('form', { novalidate: true },
-    el('button', { class: 'boton borde chico', type: 'button', style: 'margin-bottom:.6rem', text: '📋 Pegar datos de WhatsApp', onclick: () => { cajaPegar.hidden = !cajaPegar.hidden; if (!cajaPegar.hidden) pegado.focus(); } }), cajaPegar,
+    el('button', { class: 'boton borde chico', type: 'button', style: 'margin-bottom:.6rem', text: 'Pegar datos de WhatsApp', onclick: () => { cajaPegar.hidden = !cajaPegar.hidden; if (!cajaPegar.hidden) pegado.focus(); } }), cajaPegar,
     el('div', { class: 'campo' }, el('label', { for: 'np-desc', text: '¿Qué es el paquete?' }), desc),
     el('div', { class: 'campo' }, el('label', { text: 'Tamaño' }), tamanos),
     el('div', { class: 'foto-paquete foto-paquete-chica' }, el('label', { class: 'foto-paquete-boton', for: 'np-foto' }, vistaFoto, vacio, foto)),
     el('div', { class: 'fila' }, el('div', { class: 'campo' }, el('label', { for: 'np-nombre', text: 'Nombre de tu cliente' }), nombre), el('div', { class: 'campo' }, el('label', { for: 'np-tel', text: 'WhatsApp de tu cliente' }), tel)),
     el('div', { class: 'campo' }, el('label', { for: 'np-cobro' }, 'Cobrar tu producto al entregar (Q)', el('span', { class: 'ayuda', text: ' Opcional' })), cobro,
       el('small', { class: 'pista', text: 'Lo que el piloto le cobra a tu cliente por lo que compró, sin contar el envío. Déjalo vacío si ya te pagó. Vaelo te entrega ese dinero.' })),
-    el('div', { class: 'campo' }, el('label', { text: 'Datos de entrega' }), modos), datosEntrega.nodo, msg, otro, guardar);
+    el('div', { class: 'campo' }, el('label', { text: 'Datos de entrega' }), modos, recomendacion), datosEntrega.nodo, msg, otro, guardar);
   form.addEventListener('submit', async (ev) => {
     ev.preventDefault();
     guardar.disabled = true;

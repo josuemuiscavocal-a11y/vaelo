@@ -163,11 +163,13 @@ async function pintarBarra() {
   try { usuario = (await api('/api/yo')).usuario; } catch { /* sin sesión */ }
   const nav = el('nav', { class: 'nav', 'aria-label': 'Principal' });
   if (!usuario || usuario.rol !== 'mensajero') nav.append(el('a', { href: '/rastreo', text: 'Rastrear' }));
-  if (!usuario || (usuario.rol === 'cliente' && usuario.tipo_cuenta !== 'empresa')) nav.append(el('a', { href: '/empresas', text: 'Empresas' }));
+  const negocio = usuario && usuario.rol === 'cliente' && ['empresa', 'minorista'].includes(usuario.tipo_cuenta);
+  if (!usuario || (usuario.rol === 'cliente' && !negocio)) nav.append(el('a', { href: '/empresas', text: 'Empresas' }));
   if (usuario) {
     if (usuario.rol === 'admin') nav.append(el('a', { href: '/familiatecun', text: 'Panel' }));
     if (usuario.rol === 'mensajero') nav.append(el('a', { href: '/modomensajero', text: 'Mis entregas' }));
-    if (usuario.rol !== 'mensajero') nav.append(el('a', { href: '/mi-cuenta', text: 'Mis envíos' }));
+    if (negocio) nav.append(el('a', { href: '/tienda', text: usuario.tipo_cuenta === 'empresa' ? 'Mi empresa' : 'Mi tienda' }));
+    else if (usuario.rol !== 'mensajero') nav.append(el('a', { href: '/mi-cuenta', text: 'Mis envíos' }));
     nav.append(el('button', { class: 'enlace', type: 'button', text: 'Salir', onclick: salir }));
   } else {
     nav.append(el('a', { href: '/entrar', text: 'Entrar' }));
@@ -610,7 +612,7 @@ function campoDocumento({ titulo, tiene, ver, subir, pdf, ayuda, camara, soloVer
       : soloVer ? el('div', { class: 'doc-pro-vista' }, dibujoDocumento(dibujo), el('small', { class: 'doc-pro-soltar', text: 'Sin archivo' }))
       : el('label', { class: 'doc-pro-vista' }, dibujoDocumento(dibujo), el('small', { class: 'doc-pro-soltar', text: 'Toca para subir o arrastra aquí' }), entradaArch);
     const chip = soloVer ? null : el('span', { class: 'doc-pro-chip ' + (listo ? 'ok' : opcional || recomendada || siAplica ? 'opc' : 'falta'),
-      text: listo ? '✓ Listo' : opcional ? 'Opcional' : recomendada ? 'Recomendada' : siAplica ? 'Si aplica' : 'Falta' });
+      text: listo ? 'Listo' : opcional ? 'Opcional' : recomendada ? 'Recomendada' : siAplica ? 'Si aplica' : 'Falta' });
     const foto = !pdf;
     poner(caja,
       el('div', { class: 'doc-pro-cab' }, el('strong', { text: titulo }), chip),

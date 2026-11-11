@@ -5357,11 +5357,11 @@ const TIPOS = {
   '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp',
   '.ico': 'image/x-icon', '.pdf': 'application/pdf', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.txt': 'text/plain; charset=utf-8', '.xml': 'application/xml; charset=utf-8',
 };
-const PAGINAS = { '/': 'index.html', '/entrar': 'entrar.html', '/registro': 'registro.html', '/mi-cuenta': 'cliente.html',
+const PAGINAS = { '/': 'index.html', '/entrar': 'entrar.html', '/registro': 'registro.html', '/mi-cuenta': 'cliente.html', '/tienda': 'cliente.html',
   '/enviar': 'cliente.html', '/rastreo': 'rastreo.html', '/recuperar': 'recuperar.html', '/terminos': 'terminos.html', '/privacidad': 'privacidad.html',
   '/empresas': 'empresas.html', '/politica-pilotos': 'politica-pilotos.html', '/politicas-empresas': 'politicas-empresas.html' };
 // Páginas que piden cuenta: si no has iniciado sesión, el servidor te manda a entrar antes de mostrar nada
-const PIDEN_CUENTA = { '/enviar': ['cliente', 'admin'], '/mi-cuenta': ['cliente', 'admin'] };
+const PIDEN_CUENTA = { '/enviar': ['cliente', 'admin'], '/mi-cuenta': ['cliente', 'admin'], '/tienda': ['cliente', 'admin'] };
 
 // Cada vez que el servidor arranca (cada actualización) cambia este número; se agrega a comun.js y styles.css en las páginas
 // para que los navegadores bajen siempre la versión nueva en vez de usar una copia vieja guardada
@@ -5418,7 +5418,10 @@ function servirEstatico(req, res, pathname) {
       ...CABECERAS_SEGURIDAD,
     });
     if (req.method === 'HEAD') return res.end();
-    if (ext === '.html') return fs.readFile(archivo, 'utf8', (e, t) => res.end(e ? '' : conVersion(t)));
+    // /tienda es la misma página de la cuenta, pero se instala como la app "Vaelo Tiendas"
+    const paraTiendas = (t) => pathname === '/tienda' ? t.replace('/manifest.webmanifest', '/manifest-tiendas.webmanifest').replace('/img/apple-touch-icon.png', '/img/icono-tiendas-192.png')
+      .replace(/<title>[^<]*<\/title>/, '<title>Vaelo Tiendas</title>').replace('<meta name="apple-mobile-web-app-title" content="Vaelo">', '<meta name="apple-mobile-web-app-title" content="Vaelo Tiendas">') : t;
+    if (ext === '.html') return fs.readFile(archivo, 'utf8', (e, t) => res.end(e ? '' : conVersion(paraTiendas(t))));
     fs.createReadStream(archivo).pipe(res);
   });
 }

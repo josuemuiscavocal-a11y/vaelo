@@ -134,7 +134,10 @@
           el('button', { class: 'boton borde chico', type: 'button', style: 'margin-top:.9rem', text: 'No puedo ese día', onclick: noPuedo }))
         : sec('1', '¿Qué día puedes recibir?', chipsDia, el('div', { class: 'campo', style: 'margin-top:.75rem;max-width:240px' }, el('label', { text: 'Otro día' }), otro),
           el('h3', { style: 'margin-top:1.1rem', text: '¿En qué horario?' }), chipsHora),
-        sec('2', '¿Dónde lo entregamos?', mapaCaja,
+        sec('2', '¿Dónde lo entregamos?', el('div', { class: 'recomendacion' },
+            el('p', {}, el('strong', { text: 'Te recomendamos usar tu ubicación en tiempo real. ' }), 'Si estás donde vas a recibir, compártela y el piloto llega directo, sin perderse. Si recibes en otro lugar, búscalo en el mapa.'),
+            el('button', { class: 'boton', type: 'button', text: 'Usar mi ubicación en tiempo real', onclick: () => { const b = [...mapaCaja.querySelectorAll('button')].find((x) => /Usar mi ubicaci/.test(x.textContent)); if (b) b.click(); } })),
+          mapaCaja,
           el('div', { class: 'fila' }, el('div', { class: 'campo' }, el('label', { for: 'zona', text: 'Zona o municipio' }), zona), el('div', { class: 'campo' }, el('label', { for: 'direccion', text: 'Dirección' }), direccion)),
           el('div', { class: 'campo' }, el('label', { for: 'referencias' }, 'Referencias', el('span', { class: 'ayuda', text: ' Opcional' })), referencias), precio),
         sec('3', '¿Quién recibe?', el('div', { class: 'fila' }, el('div', { class: 'campo' }, el('label', { for: 'recibe_nombre', text: 'Nombre' }), nombre), el('div', { class: 'campo' }, el('label', { for: 'recibe_telefono', text: 'Teléfono' }), tel)),

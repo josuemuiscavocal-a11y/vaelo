@@ -17,7 +17,7 @@
   <header id="barra" class="barra"><div class="contenedor"><a href="/" class="marca"><img src="/img/logo-blanco.png" alt="Vaelo" width="139" height="40"></a></div></header>
   <section class="cliente-hero">
     <div class="contenedor">
-      <div><h1 id="saludo">Mis envíos</h1><p>Envía un paquete o sigue los que ya pediste.</p></div>
+      <div><h1 id="saludo">Mis envíos</h1><p id="saludo-sub">Envía un paquete o sigue los que ya pediste.</p></div>
       <div class="cliente-resumen" id="cliente-resumen"></div>
     </div>
   </section>
@@ -981,8 +981,12 @@
     (async () => {
       const usuario = await pintarBarra();
       if (!usuario) { location.href = '/entrar?volver=' + encodeURIComponent(location.pathname); return; }
-      $('zona-instalar').replaceChildren(bloqueInstalar('Vaelo'));
-      $('zona-avisos-push').replaceChildren(bloqueAvisos('Te avisamos al celular cuando el piloto acepte, recoja y entregue tu paquete, aunque Vaelo esté cerrado.'));
+      // Las tiendas y empresas tienen su propia app (Vaelo Tiendas), con su aviso dentro de «Mi tienda»
+      if (!['empresa', 'minorista'].includes(usuario.tipo_cuenta)) $('zona-instalar').replaceChildren(bloqueInstalar('Vaelo'));
+      const esNegocio = ['empresa', 'minorista'].includes(usuario.tipo_cuenta);
+      $('zona-avisos-push').replaceChildren(bloqueAvisos(esNegocio ? 'Te avisamos al celular cuando tus clientes confirmen su pedido y cuando el piloto los entregue, aunque Vaelo esté cerrado.'
+        : 'Te avisamos al celular cuando el piloto acepte, recoja y entregue tu paquete, aunque Vaelo esté cerrado.'));
+      if (esNegocio) { document.body.classList.add('cuenta-negocio'); $('saludo-sub').textContent = `${usuario.empresa_nombre || 'Tu tienda'} · tus pedidos, rutas y cobros en un solo lugar.`; }
       cargarCargos();
       cargarCuenta();
       $('saludo').textContent = `Hola, ${usuario.nombre.split(' ')[0]}`;
@@ -1056,9 +1060,11 @@
       new IntersectionObserver(([x]) => { formVisible = x.isIntersecting; ver(); }).observe($('form-envio'));
       $('barra-boton').addEventListener('click', () => $('form-envio').requestSubmit());
 
-      if (location.pathname === '/mi-cuenta') {
-        const tabInicial = ['empresa', 'minorista'].includes(usuario.tipo_cuenta) && !new URLSearchParams(location.search).get('envio') ? 'empresa' : 'lista';
+      if (location.pathname === '/mi-cuenta' || location.pathname === '/tienda') {
+        const negocio = ['empresa', 'minorista'].includes(usuario.tipo_cuenta);
+        const tabInicial = negocio && !new URLSearchParams(location.search).get('envio') ? 'empresa' : location.pathname === '/tienda' ? 'cuenta' : 'lista';
         abrirTab(tabInicial);
+        if (location.pathname === '/tienda' && !negocio) setTimeout(() => $('bloque-tienda').scrollIntoView({ block: 'start' }), 400);
         if (tabInicial !== 'lista') cargarEnvios();   // así el resumen de arriba (en curso, entregados) no sale en cero
       } else cargarEnvios();
       // Desde un aviso del celular: abre ese envío
