@@ -1666,3 +1666,11 @@ fieldset { min-width: 0; } .recientes { max-width: 100%; min-width: 0; }
 .efectivo-piloto.pronto { background: #fff7d1; border-color: #ecd98a; border-left-color: #d99a00; }
 .efectivo-piloto p { margin: .3rem 0 .6rem; font-size: .95rem; }
 .efectivo-piloto p:last-child { margin-bottom: 0; }
+
+/* Alerta de efectivo por nivel: verde en la mañana, naranja en la tarde, roja antes de cerrar */
+.efectivo-piloto.nivel-verde { background: #e7f6ee; border-color: #b6dfc8; border-left-color: var(--ok); }
+.efectivo-piloto.nivel-naranja { background: #fff1e0; border-color: #f3c999; border-left-color: #d9480f; }
+.efectivo-piloto.nivel-rojo { background: var(--alerta); border-color: var(--alerta); color: #fff; }
+.efectivo-piloto.nivel-rojo strong { font-size: 1.15rem; }
+.efectivo-recibir { display: flex; justify-content: space-between; align-items: center; gap: .75rem; flex-wrap: wrap; background: #fff7d1; border: 1.5px solid #ecd98a; border-radius: 10px; padding: .7rem .9rem; margin-top: .6rem; }
+.efectivo-recibir small { display: block; color: var(--suave); max-width: 46ch; }

@@ -1301,43 +1301,71 @@ test('planes de tiendas: precio, mínimo, cobro con comisión, volumen, excepcio
   assert.equal((await rosa('GET', '/api/empresa/carpetas')).j.minimo, 3);
 });
 
-test('efectivo en la mano del piloto: lo ve en su app con fecha límite y recibe un recordatorio antes de que venza, una sola vez', async () => {
-  const dia = new Date(Date.UTC(2026, 10, 11, 18, 0));   // mediodía en Guatemala
+test('efectivo en la mano del piloto: alerta por niveles según la hora, recordatorios, no termina el día sin entregarlo y la oficina lo marca entregado', async () => {
+  const gt = (h, m = 0) => new Date(Date.UTC(2026, 10, 11, h + 6, m));   // hora de Guatemala del 11 de noviembre
+  const yo = async () => (await piloto('GET', '/api/piloto/yo')).j.piloto.efectivo;
   db.prepare('UPDATE envios SET liquidado_id = 999 WHERE mensajero_id = ? AND liquidado_id IS NULL').run(pilotoId);   // empieza sin efectivo
-  db.prepare('UPDATE usuarios SET efectivo_aviso = NULL WHERE id = ?').run(pilotoId);
-  assert.equal((await piloto('GET', '/api/piloto/yo')).j.piloto.efectivo, null);
-  assert.equal(recordarEfectivo(dia), 0);
+  db.prepare('UPDATE usuarios SET efectivo_aviso = NULL, efectivo_nivel = NULL, efectivo_nivel_en = NULL WHERE id = ?').run(pilotoId);
+  db.prepare("UPDATE envios SET estado = 'cancelado' WHERE mensajero_id = ? AND estado IN ('pendiente','recogido','en_camino','fallido','devolviendo','a_sede')").run(pilotoId);   // sin entregas en curso
+  assert.equal(await yo(), null);
+  assert.equal(recordarEfectivo(gt(10)), 0);
   // Entrega con cobro del producto: Q35 de envío (paga quien recibe) + Q400 del producto
   const id = db.prepare('SELECT id FROM envios WHERE mensajero_id = ? ORDER BY id LIMIT 1').get(pilotoId).id;
-  db.prepare("UPDATE envios SET estado = 'entregado', metodo_pago = 'recibe', precio = 35, cargos_extra = 0, cobro_destinatario = 400, sede_llegada = NULL, entregado_en = datetime('now'), piloto_cerro_en = datetime('now'), liquidado_id = NULL WHERE id = ?").run(id);
-  let ef = (await piloto('GET', '/api/piloto/yo')).j.piloto.efectivo;
-  assert.equal(ef.monto, 435); assert.equal(ef.envios, 1); assert.equal(ef.vencido, false); assert.equal(ef.mucho, false); assert.ok(ef.horas > 60 && ef.horas <= 72);
-  assert.match(ef.limite, /^\d{4}-\d{2}-\d{2}$/); assert.match(ef.sede, /Sede Vaelo/);
-  assert.equal(recordarEfectivo(dia), 0, 'faltan casi 3 días y es poco: no molesta');
-  // Trae mucho efectivo: un aviso (una sola vez)
-  ajuste('efectivo_aviso_monto', 400);
-  assert.equal((await piloto('GET', '/api/piloto/yo')).j.piloto.efectivo.mucho, true);
-  assert.equal(recordarEfectivo(dia), 1); assert.equal(recordarEfectivo(dia), 0, 'no repite');
-  assert.equal(recordarEfectivo(new Date(Date.UTC(2026, 10, 12, 8, 0))), 0, 'de noche no avisa');
-  // Falta menos de un día: recordatorio de "mañana vence"
-  db.prepare("UPDATE envios SET piloto_cerro_en = datetime('now', '-50 hours') WHERE id = ?").run(id);
-  db.prepare("UPDATE usuarios SET efectivo_aviso = replace(efectivo_aviso, substr(efectivo_aviso, 1, instr(efectivo_aviso, '|') - 1), (SELECT piloto_cerro_en FROM envios WHERE id = ?)) WHERE id = ?").run(id, pilotoId);
-  ef = (await piloto('GET', '/api/piloto/yo')).j.piloto.efectivo;
-  assert.ok(ef.horas <= 24 && ef.horas > 0);
-  assert.equal(recordarEfectivo(dia), 1); assert.equal(recordarEfectivo(dia), 0);
-  // Vencido: aviso urgente y ya no puede conectarse
-  db.prepare("UPDATE envios SET piloto_cerro_en = datetime('now', '-80 hours') WHERE id = ?").run(id);
-  db.prepare("UPDATE usuarios SET efectivo_aviso = replace(efectivo_aviso, substr(efectivo_aviso, 1, instr(efectivo_aviso, '|') - 1), (SELECT piloto_cerro_en FROM envios WHERE id = ?)) WHERE id = ?").run(id, pilotoId);
-  assert.equal((await piloto('GET', '/api/piloto/yo')).j.piloto.efectivo.vencido, true);
-  assert.equal(recordarEfectivo(dia), 1); assert.equal(recordarEfectivo(dia), 0);
-  assert.equal((await piloto('POST', '/api/piloto/en-linea', { en_linea: true, lat: ZONA1.lat, lng: ZONA1.lng })).status, 403);
-  // Liquida en la sede: desaparece el aviso y la próxima tanda vuelve a avisar
-  const caja = (await admin('GET', '/api/admin/caja')).j.pilotos.find((x) => x.id === pilotoId);
-  assert.equal((await admin('POST', '/api/admin/caja/liquidar', { piloto_id: pilotoId, recibido: caja.efectivo })).status, 200);
-  assert.equal((await piloto('GET', '/api/piloto/yo')).j.piloto.efectivo, null);
+  const cerrado = (t) => db.prepare(`UPDATE envios SET estado = 'entregado', metodo_pago = 'recibe', precio = 35, cargos_extra = 0, cobro_destinatario = 400, sede_llegada = NULL, entregado_en = ${t}, piloto_cerro_en = ${t}, liquidado_id = NULL WHERE id = ?`).run(id);
+  cerrado("'2026-11-11 15:00:00'");   // 9 de la mañana en Guatemala
+  let ef = await yo();
+  assert.equal(ef.monto, 435); assert.equal(ef.envios, 1); assert.equal(ef.mucho, false); assert.equal(ef.nivel, null, 'con poco efectivo no hay alerta por niveles');
+  assert.match(ef.limite, /^\d{4}-\d{2}-\d{2}$/); assert.match(ef.sede, /Sede Vaelo/); assert.equal(ef.cierre, '10:00 p. m.');
+  assert.equal(recordarEfectivo(gt(10)), 0, 'es poco y falta para el plazo: no molesta');
   assert.equal((await piloto('POST', '/api/piloto/en-linea', { en_linea: true, lat: ZONA1.lat, lng: ZONA1.lng })).status, 200);
-  db.prepare("UPDATE envios SET liquidado_id = NULL, piloto_cerro_en = datetime('now') WHERE id = ?").run(id);
-  assert.equal(recordarEfectivo(dia), 1, 'tanda nueva: vuelve a avisar que trae mucho');
-  db.prepare('UPDATE envios SET liquidado_id = 999 WHERE id = ?').run(id);
+  assert.equal((await piloto('POST', '/api/piloto/en-linea', { en_linea: false })).status, 200, 'con poco efectivo se desconecta normal');
+
+  // Ya es bastante (desde Q400): la alerta sube con la hora
+  ajuste('efectivo_aviso_monto', 400);
+  const nivelA = (h) => { const { DatabaseSync } = require('node:sqlite'); void DatabaseSync; return require('../server').efectivoEnMano(pilotoId, gt(h)).nivel; };
+  assert.equal(nivelA(9), 'verde'); assert.equal(nivelA(11), 'verde'); assert.equal(nivelA(12), 'naranja'); assert.equal(nivelA(18), 'naranja'); assert.equal(nivelA(19), 'rojo'); assert.equal(nivelA(21), 'rojo'); assert.equal(nivelA(23), 'rojo');
+  // Mañana: un solo aviso verde
+  assert.equal(recordarEfectivo(gt(9, 30)), 1); assert.equal(recordarEfectivo(gt(10, 30)), 0); assert.equal(recordarEfectivo(gt(11, 55)), 0);
+  // Tarde: naranja cada hora
+  assert.equal(recordarEfectivo(gt(12, 0)), 1, 'cambia a naranja'); assert.equal(recordarEfectivo(gt(12, 30)), 0); assert.equal(recordarEfectivo(gt(13, 0)), 1); assert.equal(recordarEfectivo(gt(13, 45)), 0); assert.equal(recordarEfectivo(gt(14, 0)), 1);
+  // Últimas 3 horas: rojo cada 15 minutos, hasta que cierra
+  assert.equal(recordarEfectivo(gt(19, 0)), 1, 'cambia a rojo'); assert.equal(recordarEfectivo(gt(19, 5)), 0); assert.equal(recordarEfectivo(gt(19, 10)), 0);
+  assert.equal(recordarEfectivo(gt(19, 15)), 1); assert.equal(recordarEfectivo(gt(19, 30)), 1); assert.equal(recordarEfectivo(gt(19, 40)), 0); assert.equal(recordarEfectivo(gt(21, 45)), 1);
+  assert.equal(recordarEfectivo(gt(22, 0)), 0, 'Vaelo ya cerró: no avisa'); assert.equal(recordarEfectivo(gt(23, 30)), 0); assert.equal(recordarEfectivo(gt(6 + 24, 0)), 0, 'de madrugada tampoco');
+  // Al día siguiente todavía lo trae: empieza en naranja desde la mañana
+  const manana8 = new Date(Date.UTC(2026, 10, 12, 14, 0));
+  assert.equal(require('../server').efectivoEnMano(pilotoId, manana8).nivel, 'naranja');
+  assert.equal(recordarEfectivo(manana8), 1);
+
+  // No termina el día sin entregarlo: solo puede dejar de recibir envíos para ir a la sede
+  assert.equal((await piloto('POST', '/api/piloto/en-linea', { en_linea: true, lat: ZONA1.lat, lng: ZONA1.lng })).status, 200);
+  const no = await piloto('POST', '/api/piloto/en-linea', { en_linea: false });
+  assert.equal(no.status, 409); assert.match(no.j.error, /Q435\.00 de Vaelo.*entrégalo en la sede/);
+  assert.equal(db.prepare('SELECT en_linea FROM usuarios WHERE id = ?').get(pilotoId).en_linea, 1);
+  assert.equal((await piloto('POST', '/api/piloto/en-linea', { en_linea: false, voy_a_sede: true })).status, 200);
+  assert.equal((await yo()).monto, 435, 'la alerta sigue hasta que la oficina lo marque');
+
+  // La oficina marca «Dinero entregado»: desaparece la alerta, no se le bloquea y su ganancia se sigue juntando
+  const antes = (await admin('GET', '/api/admin/sueldos')).j.pilotos.find((x) => x.id === pilotoId);
+  assert.equal(antes.efectivo, 435);
+  assert.equal((await admin('POST', '/api/admin/caja/liquidar', { piloto_id: pilotoId, recibido: 435, nota: 'Dinero entregado en la sede' })).status, 200);
+  assert.equal(await yo(), null);
+  assert.equal(recordarEfectivo(gt(20)), 0);
+  const despues = (await admin('GET', '/api/admin/sueldos')).j.pilotos.find((x) => x.id === pilotoId);
+  if (despues) { assert.equal(despues.efectivo, 0); assert.equal(despues.ganancia, antes.ganancia, 'lo ganado sigue pendiente de pago'); }
+  assert.equal((await piloto('POST', '/api/piloto/en-linea', { en_linea: true, lat: ZONA1.lat, lng: ZONA1.lng })).status, 200);
+  assert.equal((await piloto('POST', '/api/piloto/en-linea', { en_linea: false })).status, 200);
+
+  // Plazo de días (para montos pequeños): aviso un día antes y al vencer, una vez cada uno
   ajuste('efectivo_aviso_monto', 1000);
+  cerrado("datetime('now', '-50 hours')");
+  ef = await yo(); assert.ok(ef.horas <= 24 && ef.horas > 0); assert.equal(ef.nivel, null);
+  const medio = new Date(); medio.setUTCHours(18, 0, 0, 0);
+  assert.equal(recordarEfectivo(medio), 1); assert.equal(recordarEfectivo(medio), 0);
+  cerrado("datetime('now', '-80 hours')");
+  db.prepare("UPDATE usuarios SET efectivo_aviso = (SELECT piloto_cerro_en FROM envios WHERE id = ?) || '|manana' WHERE id = ?").run(id, pilotoId);
+  assert.equal((await yo()).vencido, true);
+  assert.equal(recordarEfectivo(medio), 1); assert.equal(recordarEfectivo(medio), 0);
+  assert.equal((await piloto('POST', '/api/piloto/en-linea', { en_linea: true, lat: ZONA1.lat, lng: ZONA1.lng })).status, 403);
+  db.prepare('UPDATE envios SET liquidado_id = 999 WHERE id = ?').run(id);
 });

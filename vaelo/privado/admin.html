@@ -10,7 +10,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/vendor/maplibre/maplibre-gl.css?v=4.7.1">
-  <link rel="stylesheet" href="/css/styles.css?v=20261111c">
+  <link rel="stylesheet" href="/css/styles.css?v=20261111d">
   <link rel="stylesheet" href="/css/suave.css?v=20261111a">
 </head>
 <body class="app-panel">
@@ -354,6 +354,7 @@
             <div class="campo"><label for="aj-whatsapp_pagos">WhatsApp de Vaelo <span class="ayuda">Fletes y pickups. Con 502, ej. 50237731793</span></label><input id="aj-whatsapp_pagos" type="tel" maxlength="15"></div>
             <div class="campo"><label for="aj-dias_liquidar">Días para que el piloto entregue el efectivo <span class="ayuda">Después no puede conectarse</span></label><input id="aj-dias_liquidar" type="number" min="1" max="60" step="1"></div>
             <div class="campo"><label for="aj-efectivo_aviso_monto">Avisar al piloto cuando traiga este efectivo (Q) <span class="ayuda">Le sugiere pasar a la sede. 0: sin aviso</span></label><input id="aj-efectivo_aviso_monto" type="number" min="0" max="100000" step="1"></div>
+            <div class="campo"><label for="aj-hora_cierre_efectivo">Hora en que cierra Vaelo (0 a 23) <span class="ayuda">22 = 10 de la noche. Las últimas 3 horas la alerta de efectivo es roja</span></label><input id="aj-hora_cierre_efectivo" type="number" min="12" max="23" step="1"></div>
             <div class="campo"><label for="aj-dias_reclamo">Días para reportar un problema</label><input id="aj-dias_reclamo" type="number" min="1" max="60" step="1"></div>
             <div class="campo"><label for="aj-km_max_tarifa_fija">Km máximos con tarifa fija <span class="ayuda">Solo si no hay zonas dibujadas</span></label><input id="aj-km_max_tarifa_fija" type="number" min="1" max="200" step="1"></div>
           </div>
@@ -1682,7 +1683,7 @@ null))));
 
     // ---------- Zonas dibujadas en el mapa ----------
     const CAMPOS_AJUSTES = ['cargo_devolucion', 'cargo_bodega_dia', 'cargo_reentrega', 'horas_decidir_fallido', 'cargo_cancelacion', 'pct_piloto_cancelacion', 'sede_direccion',
-      'whatsapp_pagos', 'dias_liquidar', 'efectivo_aviso_monto', 'dias_reclamo', 'cargo_bodega_empresa', 'min_paquetes_sede', 'min_pedidos_lote', 'min_pedidos_minorista', 'km_max_tarifa_fija', 'correo_respaldos', 'precio_ayudante'];
+      'whatsapp_pagos', 'dias_liquidar', 'efectivo_aviso_monto', 'hora_cierre_efectivo', 'dias_reclamo', 'cargo_bodega_empresa', 'min_paquetes_sede', 'min_pedidos_lote', 'min_pedidos_minorista', 'km_max_tarifa_fija', 'correo_respaldos', 'precio_ayudante'];
     let mapaZonas = null, capaZonas = [], selectorSede = null;
     const COLORES_ZONA = ['#1c3faa', '#d9480f', '#17824a', '#7b2cbf', '#0e7490', '#b4261c', '#a16207', '#be185d'];
     function pintarMapaZonas(zonas) {
@@ -1740,7 +1741,7 @@ null))));
     });
     guardarAjustes($('form-fallidos'), ['cargo_devolucion', 'cargo_bodega_dia', 'cargo_reentrega', 'horas_decidir_fallido', 'cargo_cancelacion', 'pct_piloto_cancelacion', 'sede_direccion'],
       () => { const p = selectorSede && selectorSede.obtener(); return p ? { sede_lat: p.lat, sede_lng: p.lng } : {}; });
-    guardarAjustes($('form-seguro'), ['whatsapp_pagos', 'dias_liquidar', 'efectivo_aviso_monto', 'dias_reclamo', 'km_max_tarifa_fija', 'cargo_bodega_empresa', 'min_paquetes_sede', 'min_pedidos_lote', 'min_pedidos_minorista', 'precio_ayudante']);
+    guardarAjustes($('form-seguro'), ['whatsapp_pagos', 'dias_liquidar', 'efectivo_aviso_monto', 'hora_cierre_efectivo', 'dias_reclamo', 'km_max_tarifa_fija', 'cargo_bodega_empresa', 'min_paquetes_sede', 'min_pedidos_lote', 'min_pedidos_minorista', 'precio_ayudante']);
     guardarAjustes($('form-respaldos'), ['correo_respaldos']);
 
     $('form-zona').addEventListener('submit', async (ev) => {
@@ -1951,6 +1952,14 @@ null))));
           p.descuentos ? el('div', {}, el('span', { text: 'Reclamos' }), el('strong', { text: '− ' + dinero(p.descuentos) })) : null,
           el('div', { class: 'sueldo-neto ' + (neto >= 0 ? 'paga' : 'recibe') }, el('span', { text: neto >= 0 ? 'Vaelo le paga' : 'Debe entregar' }), el('strong', { text: dinero(Math.abs(neto)) }))),
         p.detalle ? el('details', {}, el('summary', { text: 'Ver envíos' }), el('ul', { class: 'lista-simple' }, p.detalle.map(d => el('li', { text: `${d.guia} · ${d.destino_zona} · ${fecha(d.piloto_cerro_en)} · gana ${dinero(d.ganancia)}${d.efectivo ? ` · cobró ${dinero(d.efectivo)}` : ''}` })))) : null,
+        p.efectivo > 0 ? el('div', { class: 'efectivo-recibir' },
+          el('div', {}, el('strong', { text: `Trae ${dinero(p.efectivo)} de Vaelo` }), el('small', { text: 'Si vino solo a dejar el dinero: se guarda como entregado, su alerta desaparece y su pago se sigue juntando.' })),
+          el('button', { class: 'boton cinta', type: 'button', text: 'Dinero entregado', onclick: async (ev) => {
+            if (!confirm(`¿${p.nombre} entregó ${dinero(p.efectivo)} en la sede?`)) return;
+            ev.target.disabled = true;
+            try { await api('/api/admin/caja/liquidar', { body: { piloto_id: p.id, recibido: p.efectivo, nota: nota.value || 'Dinero entregado en la sede' } }); mostrarMensaje($('msg-caja'), `${p.nombre} entregó ${dinero(p.efectivo)}. Su alerta ya desapareció.`, 'exito'); window.avisoHecho?.('Dinero entregado', `${p.nombre}: ${dinero(p.efectivo)}`); alPagar(); }
+            catch (e) { alert(e.message); ev.target.disabled = false; alPagar(); }
+          } })) : null,
         el('div', { class: 'fila', style: 'align-items:end;margin-top:.6rem' }, el('div', { class: 'campo', style: 'margin:0' }, nota),
           el('button', { class: 'boton', type: 'button', text: 'Ya fue pagado', onclick: async (ev) => {
             if (!confirm(neto >= 0 ? `¿Le pagaste ${dinero(neto)} a ${p.nombre}?` : `¿${p.nombre} entregó ${dinero(-neto)}?`)) return;

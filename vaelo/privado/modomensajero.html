@@ -11,7 +11,7 @@
   <link rel="manifest" href="/manifest-piloto.webmanifest">
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/vendor/maplibre/maplibre-gl.css?v=4.7.1">
-  <link rel="stylesheet" href="/css/styles.css?v=20261111c">
+  <link rel="stylesheet" href="/css/styles.css?v=20261111d">
   <link rel="stylesheet" href="/css/suave.css?v=20261111a">
 </head>
 <body class="modo-piloto app-piloto">
@@ -449,15 +449,23 @@
       }
       if (yo.deuda) nodos.push(el('div', { class: 'deuda-piloto' }, el('strong', { text: `Debes entregar ${dinero(yo.deuda.monto)} en la sede` }),
         el('p', { style: 'margin:.35rem 0 0', text: `Tienes efectivo de hace más de ${yo.deuda.dias} días. Pasa a la sede a aclarar cuentas: hasta entonces no puedes conectarte, y si no liquidas se suspende tu cuenta.` })));
-      // Efectivo de Vaelo en la mano: cuánto es y hasta cuándo se entrega (antes de que venza el plazo)
+      // Efectivo de Vaelo en la mano. Si ya es bastante, la alerta sube de nivel con la hora (verde, naranja, roja)
       const ef = yo.efectivo;
       if (ef && !yo.deuda) {
-        const dia = new Date(ef.limite + 'T12:00:00Z').toLocaleDateString('es-GT', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' });
-        const pronto = ef.horas <= 24;
-        nodos.push(el('div', { class: 'efectivo-piloto' + (pronto || ef.mucho ? ' pronto' : '') },
-          el('strong', { text: `Tienes ${dinero(ef.monto)} de Vaelo en efectivo` }),
-          el('p', { text: `${pronto ? 'Tu plazo vence ' + (ef.horas <= 0 ? 'hoy' : 'mañana') + ': entrégalo' : 'Entrégalo'} en la sede${ef.sede ? ' (' + ef.sede + ')' : ''} a más tardar el ${dia} para seguir recibiendo envíos.${ef.mucho ? ' Ya es bastante: por tu seguridad, pasa a dejarlo cuando termines esta ruta.' : ''}` }),
-          ef.sede_lat ? el('a', { class: 'boton borde chico', href: `https://www.google.com/maps/dir/?api=1&destination=${ef.sede_lat},${ef.sede_lng}`, target: '_blank', rel: 'noopener', text: 'Cómo llegar a la sede' }) : null));
+        const sede = ef.sede ? ' (' + ef.sede + ')' : '';
+        const comoLlegar = ef.sede_lat ? el('a', { class: 'boton chico ' + (ef.nivel === 'rojo' ? 'cinta' : 'borde'), href: `https://www.google.com/maps/dir/?api=1&destination=${ef.sede_lat},${ef.sede_lng}`, target: '_blank', rel: 'noopener', text: 'Cómo llegar a la sede' }) : null;
+        if (ef.nivel) {
+          const T = { verde: ['Tienes ' + dinero(ef.monto) + ' de Vaelo', `Es bastante dinero. Entrégalo en la sede${sede} por tu seguridad y por las políticas de Vaelo.`],
+            naranja: ['Aún tienes ' + dinero(ef.monto) + ' de Vaelo', `Es muy arriesgado llevarlo encima y Vaelo cierra a las ${ef.cierre}. Pasa a la sede${sede} a entregarlo.`],
+            rojo: ['Es hora de entregar ' + dinero(ef.monto), `Entrégalo en la sede${sede} antes de las ${ef.cierre}. Si no lo entregas, tu cuenta puede ser suspendida y Vaelo puede proceder legalmente.`] }[ef.nivel];
+          nodos.push(el('div', { class: 'efectivo-piloto nivel-' + ef.nivel, role: ef.nivel === 'rojo' ? 'alert' : 'status' }, el('strong', { text: T[0] }), el('p', { text: T[1] }), comoLlegar));
+        } else {
+          const dia = new Date(ef.limite + 'T12:00:00Z').toLocaleDateString('es-GT', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' });
+          const pronto = ef.horas <= 24;
+          nodos.push(el('div', { class: 'efectivo-piloto' + (pronto ? ' pronto' : '') },
+            el('strong', { text: `Tienes ${dinero(ef.monto)} de Vaelo en efectivo` }),
+            el('p', { text: `${pronto ? 'Tu plazo vence ' + (ef.horas <= 0 ? 'hoy' : 'mañana') + ': entrégalo' : 'Entrégalo'} en la sede${sede} a más tardar el ${dia} para seguir recibiendo envíos.` }), comoLlegar));
+        }
       }
       poner(caja, ...nodos);
     }
@@ -487,10 +495,24 @@
       } catch (e) { mostrarMensaje($('msg'), e.message); }
       pintarConexion();
     }
-    async function desconectar(boton) {
+    // Con bastante efectivo de Vaelo no se termina el día sin más: primero se entrega en la sede
+    function avisoAntesDeDesconectar(boton) {
+      const ef = yo.efectivo;
+      poner($('dlg-p-cuerpo'),
+        el('h2', { text: 'Primero entrega el dinero de Vaelo' }),
+        el('p', { text: `Tienes ${dinero(ef.monto)} de Vaelo en efectivo. No puedes terminar tu día sin entregarlo en la sede${ef.sede ? ' (' + ef.sede + ')' : ''}${ef.cierre ? ', que cierra a las ' + ef.cierre : ''}.` }),
+        el('p', { class: 'pista', text: 'Si vas para la sede, puedes dejar de recibir envíos mientras llegas. Tu alerta sigue activa hasta que la oficina marque el dinero como entregado.' }),
+        el('div', { class: 'navegar-recoger' },
+          ef.sede_lat ? el('a', { class: 'boton cinta', href: `https://www.google.com/maps/dir/?api=1&destination=${ef.sede_lat},${ef.sede_lng}`, target: '_blank', rel: 'noopener', text: 'Cómo llegar a la sede' }) : null,
+          el('button', { class: 'boton', type: 'button', text: 'Voy a la sede: dejar de recibir envíos', onclick: () => { $('dlg-p').close(); desconectar(boton, true); } }),
+          el('button', { class: 'boton borde', type: 'button', text: 'Seguir conectado', onclick: () => $('dlg-p').close() })));
+      $('dlg-p').showModal();
+    }
+    async function desconectar(boton, voyASede = false) {
+      if (!voyASede && yo.efectivo && yo.efectivo.nivel) { avisoAntesDeDesconectar(boton); return; }
       boton.disabled = true;
       try {
-        await api('/api/piloto/en-linea', { body: { en_linea: false } });
+        await api('/api/piloto/en-linea', { body: { en_linea: false, voy_a_sede: voyASede } });
         enLinea = false;
         if (!hayEntregaActiva()) { detenerGps(); mantenerPantalla(false); }
       } catch (e) { mostrarMensaje($('msg'), e.message); }

@@ -981,43 +981,65 @@ function deudaVencida(pilotoId) {
   if (neto <= 0) return null;
   return { monto: neto, desde: r.desde, dias };
 }
-// Efectivo de Vaelo que el piloto trae en la mano (envíos cobrados y productos de tiendas) y hasta cuándo puede entregarlo
-function efectivoEnMano(pilotoId) {
+// Efectivo de Vaelo que el piloto trae en la mano (envíos cobrados y productos de tiendas) y hasta cuándo puede entregarlo.
+// Si ya es bastante (Tarifas y ajustes > avisar desde), la alerta sube de nivel según la hora: verde en la mañana,
+// naranja en la tarde y roja las últimas 3 horas antes de que cierre Vaelo.
+const horaCierre = () => { const h = Math.round(Number(getAjustes().hora_cierre_efectivo)); return h >= 12 && h <= 23 ? h : 22; };
+const horaTexto = (h) => `${h % 12 === 0 ? 12 : h % 12}:00 ${h < 12 ? 'a. m.' : 'p. m.'}`;
+function efectivoEnMano(pilotoId, ahora = new Date()) {
   const aj = getAjustes(), dias = Number(aj.dias_liquidar) || 3;
   const r = db.prepare(`SELECT COALESCE(SUM(${SQL_EFECTIVO}), 0) AS monto, COUNT(*) AS envios, MIN(e.piloto_cerro_en) AS desde FROM envios e
     WHERE e.mensajero_id = ? AND e.piloto_cerro_en IS NOT NULL AND e.liquidado_id IS NULL AND ${SQL_EFECTIVO} > 0`).get(pilotoId);
   if (!(r.monto > 0)) return null;
   const limiteMs = fechaMs(r.desde) + dias * 86400_000;
   const tope = Number(aj.efectivo_aviso_monto);
+  const mucho = tope > 0 && r.monto >= tope;
+  const gt = new Date(ahora.getTime() - 6 * 3600_000), hora = gt.getUTCHours(), cierre = horaCierre();
+  const deAyer = new Date(fechaMs(r.desde) - 6 * 3600_000).toISOString().slice(0, 10) < gt.toISOString().slice(0, 10);
+  const nivel = !mucho ? null : hora >= cierre - 3 || hora < 5 ? 'rojo' : hora >= 12 || deAyer ? 'naranja' : 'verde';
   return { monto: redondear(r.monto), envios: r.envios, desde: r.desde, dias, limite: new Date(limiteMs - 6 * 3600_000).toISOString().slice(0, 10),
-    horas: Math.round((limiteMs - Date.now()) / 3600_000), vencido: !!deudaVencida(pilotoId), mucho: tope > 0 && r.monto >= tope,
+    horas: Math.round((limiteMs - ahora.getTime()) / 3600_000), vencido: !!deudaVencida(pilotoId), mucho, nivel, cierre: horaTexto(cierre),
     sede: aj.sede_direccion || '', sede_lat: Number(aj.sede_lat) || null, sede_lng: Number(aj.sede_lng) || null };
 }
-// Recordatorios al celular del piloto: un día antes del plazo, al vencer, y cuando ya trae mucho efectivo encima.
-// Cada aviso sale una sola vez por cada tanda de efectivo (se vuelve a activar cuando liquida y junta efectivo otra vez).
+// Recordatorios al celular del piloto.
+// 1) Por nivel, cuando trae bastante efectivo: verde una vez en la mañana, naranja cada hora y rojo cada 15 minutos, hasta que cierra Vaelo.
+// 2) Por plazo: un día antes de que venza y al vencer, una sola vez por cada tanda de efectivo.
+const CADA_NIVEL = { verde: 24 * 60, naranja: 60, rojo: 15 };   // minutos entre avisos
 function recordarEfectivo(ahora = new Date()) {
-  const hora = (ahora.getUTCHours() + 18) % 24;
-  if (hora < 7 || hora >= 20) return 0;   // solo de día (hora de Guatemala)
+  const gt = new Date(ahora.getTime() - 6 * 3600_000), hora = gt.getUTCHours(), hoy = gt.toISOString().slice(0, 10);
+  if (hora < 7 || hora >= horaCierre()) return 0;   // de noche y con la sede cerrada no se avisa
   let enviados = 0;
   const pilotos = db.prepare(`SELECT DISTINCT e.mensajero_id AS id FROM envios e WHERE e.mensajero_id IS NOT NULL AND e.piloto_cerro_en IS NOT NULL AND e.liquidado_id IS NULL AND ${SQL_EFECTIVO} > 0`).all();
   for (const { id } of pilotos) {
-    const m = efectivoEnMano(id);
+    const m = efectivoEnMano(id, ahora);
     if (!m) continue;
-    const u = db.prepare('SELECT efectivo_aviso FROM usuarios WHERE id = ?').get(id);
+    const u = db.prepare('SELECT efectivo_aviso, efectivo_nivel, efectivo_nivel_en FROM usuarios WHERE id = ?').get(id);
+    const q = `Q${m.monto.toFixed(2)}`, donde = m.sede ? ` (${m.sede})` : '';
+    if (m.nivel) {
+      const mismo = u.efectivo_nivel === `${hoy}|${m.nivel}`;
+      const pasaron = u.efectivo_nivel_en ? (ahora.getTime() - Number(u.efectivo_nivel_en)) / 60_000 : Infinity;
+      if (!mismo || pasaron >= CADA_NIVEL[m.nivel] - 0.5) {
+        db.prepare('UPDATE usuarios SET efectivo_nivel = ?, efectivo_nivel_en = ? WHERE id = ?').run(`${hoy}|${m.nivel}`, String(ahora.getTime()), id);
+        avisar(id, m.nivel === 'rojo' ? { titulo: 'Es hora de entregar el dinero', cuerpo: `Tienes ${q} de Vaelo. Entrégalo en la sede${donde} antes de las ${m.cierre}. Si no, tu cuenta puede ser suspendida y Vaelo puede proceder legalmente.`, url: RUTA_PILOTO, etiqueta: 'efectivo', urgente: true }
+          : m.nivel === 'naranja' ? { titulo: 'Aún tienes dinero de Vaelo', cuerpo: `Traes ${q} y es arriesgado llevarlo encima. Vaelo cierra a las ${m.cierre}: pasa a la sede${donde}.`, url: RUTA_PILOTO, etiqueta: 'efectivo', urgente: true }
+          : { titulo: 'Tienes dinero de Vaelo', cuerpo: `Traes ${q}. Entrégalo en la sede${donde} por tu seguridad y por las políticas de Vaelo.`, url: RUTA_PILOTO, etiqueta: 'efectivo' });
+        if (m.nivel === 'rojo' && !mismo) avisarStaff({ titulo: 'Piloto con efectivo sin entregar', cuerpo: `${nombreUsuario(id)} trae ${q} y faltan menos de 3 horas para cerrar.`, url: RUTA_ADMIN, etiqueta: 'efectivo-' + id });
+        enviados++;
+      }
+    }
     const previos = String(u?.efectivo_aviso || '').startsWith(m.desde + '|') ? u.efectivo_aviso.split('|').slice(1) : [];
-    const tipo = m.vencido ? 'vencido' : m.horas <= 24 ? 'manana' : m.mucho ? 'mucho' : null;
+    const tipo = m.vencido ? 'vencido' : m.horas <= 24 ? 'manana' : null;
     if (!tipo || previos.includes(tipo)) continue;
     db.prepare('UPDATE usuarios SET efectivo_aviso = ? WHERE id = ?').run([m.desde, ...previos, tipo].join('|'), id);
-    const q = `Q${m.monto.toFixed(2)}`, donde = m.sede ? ` (${m.sede})` : '';
+    if (m.nivel) continue;   // ya recibe los avisos por nivel: no se le duplica
     avisar(id, tipo === 'vencido' ? { titulo: 'Entrega el efectivo de Vaelo', cuerpo: `Tienes ${q} sin entregar y ya pasó el plazo. Pasa a la sede${donde}: hasta entonces no puedes conectarte.`, url: RUTA_PILOTO, etiqueta: 'efectivo', urgente: true }
-      : tipo === 'manana' ? { titulo: 'Mañana vence tu plazo', cuerpo: `Tienes ${q} de Vaelo en efectivo. Entrégalo en la sede${donde} para seguir recibiendo envíos.`, url: RUTA_PILOTO, etiqueta: 'efectivo', urgente: true }
-      : { titulo: 'Llevas bastante efectivo', cuerpo: `Ya traes ${q} de Vaelo. Por tu seguridad, pasa a dejarlo a la sede${donde} cuando termines esta ruta.`, url: RUTA_PILOTO, etiqueta: 'efectivo' });
+      : { titulo: 'Mañana vence tu plazo', cuerpo: `Tienes ${q} de Vaelo en efectivo. Entrégalo en la sede${donde} para seguir recibiendo envíos.`, url: RUTA_PILOTO, etiqueta: 'efectivo', urgente: true });
     if (tipo === 'vencido') avisarStaff({ titulo: 'Piloto con efectivo fuera de plazo', cuerpo: `${nombreUsuario(id)} tiene ${q} sin entregar.`, url: RUTA_ADMIN, etiqueta: 'efectivo-' + id });
     enviados++;
   }
   return enviados;
 }
-if (require.main === module) setInterval(() => { try { recordarEfectivo(); } catch (err) { console.error('Efectivo:', err.message); } }, 1800_000).unref();
+if (require.main === module) setInterval(() => { try { recordarEfectivo(); } catch (err) { console.error('Efectivo:', err.message); } }, 300_000).unref();
 // Por qué un piloto no puede trabajar (para que el panel diga exactamente qué falta)
 function porQueNoTrabaja(u, r = revisarPiloto(u)) {
   if (u.estado_piloto !== 'aprobado') return 'todavía no está aprobado';
@@ -1254,6 +1276,9 @@ ruta('POST', '/api/piloto/en-linea', ({ req, body }) => {
   const p = requierePiloto(req);
   const activos = db.prepare(`SELECT COUNT(*) AS n FROM envios WHERE mensajero_id = ? AND asignacion = 'aceptado' AND estado IN ${SQL_PILOTO_ACTIVO}`).get(p.id).n;
   if (activos) falla(400, 'Tienes entregas en curso. Termínalas antes de desconectarte: tu ubicación debe seguir activa.');
+  // Con bastante efectivo de Vaelo encima no termina el día sin más: solo puede dejar de recibir envíos para ir a la sede
+  const ef = efectivoEnMano(p.id);
+  if (ef && ef.nivel && body.voy_a_sede !== true) falla(409, `Tienes Q${ef.monto.toFixed(2)} de Vaelo en efectivo. Antes de terminar tu día entrégalo en la sede.`);
   db.prepare('UPDATE usuarios SET en_linea = 0 WHERE id = ?').run(p.id);
   return { ok: true, en_linea: false };
 });
@@ -5786,7 +5811,7 @@ ruta('PUT', '/api/admin/ajustes', ({ req, body }) => {
   }
   if (body.whatsapp_pagos !== undefined) up.run('whatsapp_pagos', String(body.whatsapp_pagos).replace(/\D/g, '').slice(0, 15));
   // Montos de cargos, seguro y tarifa fija
-  const montos = { dias_liquidar: [1, 60], efectivo_aviso_monto: [0, 100000], cargo_bodega_empresa: [0, 1000], min_paquetes_sede: [1, 500], min_pedidos_lote: [1, 500], min_pedidos_minorista: [1, 100], dias_reclamo: [1, 60], cargo_devolucion: [0, 1000], cargo_bodega_dia: [0, 1000], cargo_reentrega: [0, 1000], cargo_cancelacion: [0, 1000], pct_piloto_cancelacion: [0, 100],
+  const montos = { dias_liquidar: [1, 60], efectivo_aviso_monto: [0, 100000], hora_cierre_efectivo: [12, 23], cargo_bodega_empresa: [0, 1000], min_paquetes_sede: [1, 500], min_pedidos_lote: [1, 500], min_pedidos_minorista: [1, 100], dias_reclamo: [1, 60], cargo_devolucion: [0, 1000], cargo_bodega_dia: [0, 1000], cargo_reentrega: [0, 1000], cargo_cancelacion: [0, 1000], pct_piloto_cancelacion: [0, 100],
     horas_decidir_fallido: [0.25, 48], seguro_pct: [0, 50], seguro_minimo: [0, 1000], responsabilidad_max: [0, 100000], km_max_tarifa_fija: [1, 200] };
   for (const [k, [min, max]] of Object.entries(montos)) {
     if (body[k] === undefined) continue;
@@ -5957,4 +5982,4 @@ const servidor = http.createServer(async (req, res) => {
 if (require.main === module) {
   servidor.listen(PORT, HOST, () => console.log(`Vaelo funcionando en http://${HOST}:${PORT}`));
 }
-module.exports = { recordarEfectivo, servidor, hashPassword, asignacionAutomatica, decisionesVencidas, push, enviosAtascados, ordenarParadas, estimarLlegadas, avisarVencimientos };
+module.exports = { recordarEfectivo, efectivoEnMano, servidor, hashPassword, asignacionAutomatica, decisionesVencidas, push, enviosAtascados, ordenarParadas, estimarLlegadas, avisarVencimientos };

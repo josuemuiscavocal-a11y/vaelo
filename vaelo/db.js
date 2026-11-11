@@ -656,6 +656,7 @@ agregarColumnas('envios', [['comision_cobro', 'REAL NOT NULL DEFAULT 0']]);
 db.prepare("INSERT OR IGNORE INTO planes (clave, nombre, descripcion) VALUES ('minorista', 'Minorista', 'Tiendas de lives y ventas por redes')").run();
 db.prepare("INSERT OR IGNORE INTO planes (clave, nombre, descripcion) VALUES ('empresa', 'Empresa', 'Empresas con contrato')").run();
 // Recordatorios de efectivo al piloto (qué avisos ya se mandaron de la tanda actual) y monto desde el que se le sugiere pasar a la sede
-agregarColumnas('usuarios', [['efectivo_aviso', 'TEXT']]);
+agregarColumnas('usuarios', [['efectivo_aviso', 'TEXT'], ['efectivo_nivel', 'TEXT'], ['efectivo_nivel_en', 'TEXT']]);
+db.prepare("INSERT OR IGNORE INTO ajustes (clave, valor) VALUES ('hora_cierre_efectivo', '22')").run();
 db.prepare("INSERT OR IGNORE INTO ajustes (clave, valor) VALUES ('efectivo_aviso_monto', '1000')").run();
 module.exports = { db, DB_PATH, DATA_DIR };
