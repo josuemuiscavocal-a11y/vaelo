@@ -469,6 +469,10 @@ const MARCADO_TXT = {
 };
 function bloqueMarcado(c, abierta, pedidos, recargar) {
   const m = c.marcado || 'codigo';
+  // Con nombre: si dos clientes se llaman igual, que lo distingan (si no, el piloto puede confundirlos)
+  const llave = (n) => String(n || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const cuenta = {}; pedidos.filter((p) => p.estado !== 'cancelado').forEach((p) => { const k = llave(p.recibe_nombre || p.cliente_nombre); cuenta[k] = (cuenta[k] || 0) + 1; });
+  const repetidos = m === 'nombre' ? [...new Set(pedidos.map((p) => p.recibe_nombre || p.cliente_nombre).filter((n) => cuenta[llave(n)] > 1))] : [];
   const ejemplo = m === 'codigo' ? el('span', { class: 'codigo-paquete', text: pedidos.find((p) => p.codigo_corto)?.codigo_corto || 'TB-01' }) : null;
   return el('div', { class: 'bloque-marcado' },
     el('p', { class: 'aviso-codigos' }, ejemplo, el('span', {}, el('strong', { text: 'Cada paquete debe ir marcado. ' }), MARCADO_TXT[m][1], ' Sin marca no se recoge: el piloto no sabría cuál es cuál.')),
@@ -476,7 +480,8 @@ function bloqueMarcado(c, abierta, pedidos, recargar) {
       el('span', { class: 'etiqueta-campo', text: '¿Cómo vas a marcar los paquetes?' }),
       Object.entries(MARCADO_TXT).map(([k, [t]]) => el('button', { type: 'button', class: 'chip', role: 'radio', 'aria-checked': String(k === m), 'aria-pressed': String(k === m), text: t,
         onclick: async () => { if (k === m) return; try { await api(`/api/empresa/carpetas/${c.id}`, { method: 'PUT', body: { marcado: k } }); recargar(); } catch (e) { alert(e.message); } } })))
-      : el('p', { class: 'pista', text: 'Marcados con: ' + MARCADO_TXT[m][0].toLowerCase() + '.' }));
+      : el('p', { class: 'pista', text: 'Marcados con: ' + MARCADO_TXT[m][0].toLowerCase() + '.' }),
+    repetidos.length ? el('div', { class: 'mensaje error', text: `Hay clientes con el mismo nombre (${repetidos.join(', ')}). Escribe también la zona en esos paquetes, o mejor usa «Código escrito» para no confundir al piloto.` }) : null);
 }
 // Reportar un problema con un pedido (queja): la oficina lo evalúa y, si fue culpa del piloto, se le descuenta y se compensa
 const TIPOS_RECLAMO_EMP = { danado: 'Llegó dañado', incompleto: 'Llegó incompleto', perdido: 'El paquete se perdió', otro: 'Otro problema (trato, retraso, etc.)' };
@@ -710,13 +715,13 @@ function imprimirEtiquetas(pedidos, empresa) {
   const w = window.open('', '_blank');
   if (!w) { alert('Permite las ventanas emergentes para imprimir las etiquetas.'); return; }
   const etiquetas = pedidos.map((p) => `<div class="et"><div class="cab"><b>VAELO</b><span>${esc(empresa)}</span></div>
-    <div class="cuerpo">${qrVaelo.svg(p.codigo, 120)}<div>${p.codigo_corto ? `<div class="corto">${esc(p.codigo_corto)}</div>` : ''}<div class="cod">${esc(p.codigo)}</div><div class="n">${esc(p.recibe_nombre || p.cliente_nombre)}</div>
+    <div class="cuerpo">${qrVaelo.svg(p.codigo, 120)}<div>${p.codigo_corto ? `<div class="corto">${esc(p.codigo_corto)}</div>` : ''}<div class="cod">${esc(p.codigo.slice(0, -4))}<u>${esc(p.codigo.slice(-4))}</u></div><div class="n">${esc(p.recibe_nombre || p.cliente_nombre)}</div>
     <div>${esc([p.zona, p.direccion].filter(Boolean).join(' · '))}</div><div>${esc(p.dia ? diaEmp(p.dia) : 'Fecha por confirmar')}${p.horario_texto ? ' · ' + esc(p.horario_texto) : ''}</div>
     <div class="t">${esc(p.tamano_texto)} · ${esc(p.descripcion)}</div></div></div></div>`).join('');
   w.document.write(`<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Etiquetas Vaelo</title><style>
     body{font-family:Arial,sans-serif;margin:12px}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
     .et{border:2px solid #000;border-radius:8px;break-inside:avoid;overflow:hidden}.cab{display:flex;justify-content:space-between;background:#0e2463;color:#fff;padding:6px 10px;font-size:13px}
-    .cuerpo{display:flex;gap:10px;padding:8px;align-items:center;font-size:12px;line-height:1.35}.cod{font-size:20px;font-weight:bold;letter-spacing:.05em}.n{font-size:15px;font-weight:bold}.corto{font-size:30px;font-weight:900;letter-spacing:.06em;border:3px solid #000;border-radius:6px;display:inline-block;padding:0 8px;margin-bottom:4px}.t{color:#555}
+    .cuerpo{display:flex;gap:10px;padding:8px;align-items:center;font-size:12px;line-height:1.35}.cod{font-size:20px;font-weight:bold;letter-spacing:.05em}.cod u{font-size:26px;text-decoration-thickness:3px}.n{font-size:15px;font-weight:bold}.corto{font-size:30px;font-weight:900;letter-spacing:.06em;border:3px solid #000;border-radius:6px;display:inline-block;padding:0 8px;margin-bottom:4px}.t{color:#555}
     @media print{body{margin:0}.no{display:none}}</style></head><body><p class="no"><button onclick="print()">Imprimir</button></p><div class="grid">${etiquetas}</div></body></html>`);
   w.document.close();
   setTimeout(() => { try { w.focus(); w.print(); } catch { /* el usuario imprime con el botón */ } }, 400);

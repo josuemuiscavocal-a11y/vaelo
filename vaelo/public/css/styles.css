@@ -1481,12 +1481,12 @@ fieldset { min-width: 0; } .recientes { max-width: 100%; min-width: 0; }
 .caja-busca > div { display: flex; flex-direction: column; min-width: 0; }
 .busca-etq { flex: none; background: #1d1d1d; color: #ffd23f; font-weight: 900; letter-spacing: .08em; font-size: .8rem; padding: .35rem .5rem; border-radius: 6px; writing-mode: horizontal-tb; }
 .busca-grande { font-size: 1.7rem; font-weight: 900; letter-spacing: .03em; line-height: 1.15; overflow-wrap: anywhere; }
-.busca-grande.nombre { font-size: 1.35rem; letter-spacing: 0; }
-.busca-grande.etiqueta, .busca-grande.guía { font-size: 1.25rem; font-family: ui-monospace, monospace; }
+.busca-grande.bv-nombre { font-size: 1.35rem; letter-spacing: 0; }
+.busca-grande.bv-guia { font-size: 1.3rem; font-family: ui-monospace, monospace; }
 .caja-busca small { color: #5b6478; font-size: .8rem; }
 .caja-busca .busca-ayuda { color: #8a5a00; font-weight: 600; margin-top: .2rem; }
 .busca-valor { display: inline-block; background: #ffd23f; color: #1d1d1d; border: 2px solid #1d1d1d; border-radius: 7px; padding: .05rem .45rem; font-weight: 800; margin-right: .4rem; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
-.busca-valor.etiqueta, .busca-valor.guía { font-family: ui-monospace, monospace; font-size: .85rem; }
+.busca-valor.bv-guia { font-family: ui-monospace, monospace; font-size: .9rem; }
 .busca-fila { display: flex; flex-direction: column; align-items: flex-start; gap: .1rem; margin-right: .3rem; flex: none; max-width: 55%; }
 .busca-fila small { font-size: .62rem; font-weight: 900; letter-spacing: .08em; color: #5b6478; }
 .paquete-recoger { align-items: center; }
@@ -1496,3 +1496,9 @@ fieldset { min-width: 0; } .recientes { max-width: 100%; min-width: 0; }
 .guia-puntos { display: flex; gap: .35rem; justify-content: center; margin-top: .4rem; }
 .guia-puntos span { width: 9px; height: 9px; border-radius: 50%; background: #d5dbe8; }
 .guia-puntos span.si { background: var(--azul-hondo); width: 22px; border-radius: 999px; }
+
+.bv-tenue { opacity: .55; font-weight: 600; }
+.bv-fin { font-weight: 900; text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 3px; }
+.busca-grande .bv-fin { font-size: 1.15em; }
+.busca-valor.bv-nombre { white-space: normal; }
+.parada-num { display: inline-block; background: var(--azul-hondo); color: #fff; border-radius: 999px; font-size: .7rem; font-weight: 800; padding: .05rem .45rem; margin-right: .3rem; vertical-align: middle; }
