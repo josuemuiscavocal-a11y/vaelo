@@ -908,3 +908,33 @@ test('cómo marca la empresa los paquetes: con etiqueta o nombre no se usa el c�
     db.prepare("UPDATE envios SET marcado = NULL, estado = 'entregado' WHERE id = ?").run(e.id);
   }
 });
+
+test('códigos sin cruzarse: clientes con las mismas iniciales, empresa con las mismas iniciales y paquetes de ayer aún en camino', async () => {
+  const crearCuenta = async (nombre, email, tipo = 'personal', empresa = null) => {
+    db.prepare("INSERT OR IGNORE INTO usuarios (nombre,email,telefono,password_hash,rol,email_verificado,verificacion,tipo_cuenta,empresa_nombre) VALUES (?,?,?,?,'cliente',1,'verificado',?,?)")
+      .run(nombre, email, '5' + String(Math.floor(Math.random() * 1e7)).padStart(7, '0'), await hashPassword('clave-cruce-123'), tipo, empresa);
+    const c = cliente(); assert.equal((await c('POST', '/api/login', { email, password: 'clave-cruce-123' })).status, 200); return c;
+  };
+  const a = await crearCuenta('Zoe Quintana', 'zq1@prueba.com'), b = await crearCuenta('Zacarías Quiñónez', 'zq2@prueba.com'), c = await crearCuenta('Zulma Quan', 'zq3@prueba.com');
+  const emp = await crearCuenta('Dueño', 'zq4@prueba.com', 'empresa', 'Zapatería Quetzal');
+  const envio = (q) => q('POST', '/api/envios', { vehiculo_id: 1, peso: 1, origen_zona: 'Zona 1', destino_zona: 'Zona 1', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng,
+    metodo_pago: 'efectivo', destino_nombre: 'Recibe', destino_telefono: '55554444', foto_paquete: FOTO });
+  // Un paquete de ayer, con ZQ-01, que sigue en camino
+  const ayer = await envio(a); assert.equal(ayer.status, 201, JSON.stringify(ayer.j));
+  db.prepare("UPDATE envios SET creado = datetime('now', '-1 day'), estado = 'en_camino' WHERE id = ?").run(ayer.j.id);
+  assert.equal(db.prepare('SELECT codigo_corto FROM envios WHERE id = ?').get(ayer.j.id).codigo_corto, 'ZQ-01');
+  // Hoy: los tres clientes mandan envíos intercalados y la empresa registra pedidos
+  const codigos = [];
+  for (let i = 0; i < 4; i++) for (const q of [a, b, c]) { const r = await envio(q); assert.equal(r.status, 201); codigos.push(r.j.codigo_corto); }
+  const dia = new Date(Date.now() - 6 * 3600_000).toISOString().slice(0, 10);
+  const carpeta = (await emp('POST', '/api/empresa/carpetas', { dia })).j.carpeta;
+  for (let i = 0; i < 5; i++) assert.equal((await emp('POST', `/api/empresa/carpetas/${carpeta.id}/pedidos`, { descripcion: 'Zapatos ' + i, tamano: 'pequeno', cliente_nombre: 'Comprador ' + i, cliente_telefono: '5555123' + i })).status, 201);
+  codigos.push(...(await emp('GET', `/api/empresa/carpetas/${carpeta.id}`)).j.carpeta.pedidos.map((p) => p.codigo_corto));
+  assert.ok(codigos.every((x) => /^ZQ-\d{2,}$/.test(x)), codigos.join(','));
+  assert.ok(!codigos.includes('ZQ-01'), 'el ZQ-01 de ayer sigue en camino: nadie más lo usa');
+  assert.equal(new Set(codigos).size, codigos.length, 'ningún código repetido: ' + codigos.join(','));
+  // Revisión general: entre todos los paquetes en curso no hay dos con el mismo código
+  const activos = db.prepare("SELECT codigo_corto AS c, COUNT(*) AS n FROM envios WHERE codigo_corto IS NOT NULL AND estado IN ('pendiente','recogido','en_camino') GROUP BY codigo_corto HAVING n > 1").all();
+  assert.deepEqual(activos, [], 'códigos repetidos en curso: ' + JSON.stringify(activos));
+  db.prepare("UPDATE envios SET estado = 'cancelado' WHERE usuario_id IN (SELECT id FROM usuarios WHERE email LIKE 'zq%@prueba.com')").run();
+});

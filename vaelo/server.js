@@ -3541,21 +3541,35 @@ function prefijoCodigo(nombre) {
   return w.length > 1 ? w[0][0] + w[1][0] : w[0].slice(0, 2).padEnd(2, 'X');
 }
 const numeroCodigo = (c) => Number(String(c || '').split('-')[1]) || 0;
+// Números ya ocupados para unas iniciales: los de ese día (de cualquier cliente o empresa) y los de paquetes que siguen
+// en camino de días anteriores. Así dos remitentes con las mismas iniciales nunca tienen el mismo código a la vez.
+const ACTIVOS_CODIGO = "('pendiente','recogido','en_camino','fallido','devolviendo','a_sede','en_sede')";
+function codigosOcupados(prefijo, dia, excluirPedido = 0, excluirEnvio = 0) {
+  const like = prefijo + '-%';
+  const env = db.prepare(`SELECT codigo_corto AS c FROM envios WHERE codigo_corto LIKE ? AND id != ?
+    AND (date(creado, '-6 hours') = ? OR estado IN ${ACTIVOS_CODIGO})`).all(like, excluirEnvio, dia);
+  const ped = db.prepare(`SELECT codigo_corto AS c FROM pedidos_empresa WHERE codigo_corto LIKE ? AND id != ? AND estado != 'cancelado'
+    AND (COALESCE(codigo_dia, '') = ? OR envio_id IS NULL)`).all(like, excluirPedido, dia);
+  return new Set([...env, ...ped].map((x) => x.c));
+}
+const siguienteCodigo = (prefijo, ocupados) => {
+  let n = 1;
+  while (ocupados.has(`${prefijo}-${String(n).padStart(2, '0')}`)) n++;
+  return `${prefijo}-${String(n).padStart(2, '0')}`;
+};
 function codigoCortoPedido(p) {
   if (!p) return null;
-  const dia = p.dia || '';
+  const dia = p.dia || hoyGT();
   if (p.codigo_corto && (p.envio_id || (p.codigo_dia || '') === dia)) return p.codigo_corto;
-  const otros = db.prepare('SELECT codigo_corto FROM pedidos_empresa WHERE usuario_id = ? AND COALESCE(codigo_dia, \'\') = ? AND codigo_corto IS NOT NULL AND id != ? AND estado != \'cancelado\'').all(p.usuario_id, dia, p.id).map((x) => x.codigo_corto);
-  let codigo = p.codigo_corto;
-  if (!codigo || otros.includes(codigo)) {   // si se movió de día y su código ya existe en el día nuevo, se le da otro
-    const u = db.prepare('SELECT nombre, empresa_nombre FROM usuarios WHERE id = ?').get(p.usuario_id) || {};
-    const n = Math.max(0, ...otros.map(numeroCodigo)) + 1;
-    codigo = `${prefijoCodigo(u.empresa_nombre || u.nombre)}-${String(n).padStart(2, '0')}`;
-  }
+  const u = db.prepare('SELECT nombre, empresa_nombre FROM usuarios WHERE id = ?').get(p.usuario_id) || {};
+  const prefijo = prefijoCodigo(u.empresa_nombre || u.nombre);
+  const ocupados = codigosOcupados(prefijo, dia, p.id);
+  // Se conserva el que ya tenía si sigue libre en el día nuevo (por si ya lo escribieron en el paquete)
+  const codigo = p.codigo_corto && p.codigo_corto.startsWith(prefijo + '-') && !ocupados.has(p.codigo_corto) ? p.codigo_corto : siguienteCodigo(prefijo, ocupados);
   db.prepare('UPDATE pedidos_empresa SET codigo_corto = ?, codigo_dia = ? WHERE id = ?').run(codigo, dia, p.id);
   return codigo;
 }
-// Envío de un cliente: sus iniciales y el número de ese día (LP-01, LP-02…)
+// Envío de un cliente: sus iniciales y el siguiente número libre del día (LP-01, LP-02…)
 function codigoCortoEnvio(envioId) {
   const e = db.prepare('SELECT id, usuario_id, pedido_id, codigo_corto, creado FROM envios WHERE id = ?').get(envioId);
   if (!e || e.codigo_corto) return e?.codigo_corto || null;
@@ -3566,13 +3580,23 @@ function codigoCortoEnvio(envioId) {
     return c;
   }
   const u = db.prepare('SELECT nombre, empresa_nombre FROM usuarios WHERE id = ?').get(e.usuario_id) || {};
-  const pref = prefijoCodigo(u.empresa_nombre || u.nombre);
-  const usados = db.prepare(`SELECT codigo_corto FROM envios WHERE usuario_id = ? AND pedido_id IS NULL AND codigo_corto IS NOT NULL
-    AND date(creado, '-6 hours') = date(?, '-6 hours')`).all(e.usuario_id, e.creado).map((x) => x.codigo_corto);
-  const c = `${pref}-${String(Math.max(0, ...usados.map(numeroCodigo)) + 1).padStart(2, '0')}`;
+  const prefijo = prefijoCodigo(u.empresa_nombre || u.nombre);
+  const dia = db.prepare("SELECT date(?, '-6 hours') AS d").get(e.creado).d;
+  const c = siguienteCodigo(prefijo, codigosOcupados(prefijo, dia, 0, e.id));
   db.prepare('UPDATE envios SET codigo_corto = ? WHERE id = ?').run(c, e.id);
   return c;
 }
+
+// Arreglo de una vez: si de antes quedaron dos paquetes en curso con el mismo código, el más nuevo recibe otro
+function repararCodigosRepetidos() {
+  let n = 0;
+  for (const { c } of db.prepare(`SELECT codigo_corto AS c FROM envios WHERE codigo_corto IS NOT NULL AND estado IN ${ACTIVOS_CODIGO} GROUP BY codigo_corto HAVING COUNT(*) > 1`).all()) {
+    const filas = db.prepare(`SELECT id FROM envios WHERE codigo_corto = ? AND estado IN ${ACTIVOS_CODIGO} ORDER BY id`).all(c);
+    for (const f of filas.slice(1)) { db.prepare('UPDATE envios SET codigo_corto = NULL WHERE id = ?').run(f.id); codigoCortoEnvio(f.id); n++; }
+  }
+  return n;
+}
+if (require.main === module) { try { const n = repararCodigosRepetidos(); if (n) console.log(`Códigos de paquete repetidos corregidos: ${n}`); } catch (err) { console.error('Códigos:', err.message); } }
 
 function crearPedido(u, b) {
   const tamano = TAMANOS[b.tamano] ? b.tamano : falla(400, 'Elige el tamaño del paquete.');
