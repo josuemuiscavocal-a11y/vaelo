@@ -1476,3 +1476,23 @@ fieldset { min-width: 0; } .recientes { max-width: 100%; min-width: 0; }
 .marcado-opciones .chip, .duracion-rapida .chip { font: inherit; font-size: .9rem; padding: .45rem .8rem; border-radius: 999px; border: 1.5px solid var(--linea); background: #fff; cursor: pointer; min-height: 38px; }
 .marcado-opciones .chip[aria-pressed="true"], .duracion-rapida .chip[aria-pressed="true"] { background: var(--azul-hondo); color: #fff; border-color: var(--azul-hondo); }
 .marcado-opciones .etiqueta-campo { width: 100%; font-weight: 700; }
+/* Piloto: recuadro BUSCA (siempre igual: qué buscar en el paquete) */
+.caja-busca { display: flex; align-items: center; gap: .75rem; background: #fff6d6; border: 2.5px solid #1d1d1d; border-radius: 12px; padding: .6rem .8rem; margin: .5rem 0 .7rem; }
+.caja-busca > div { display: flex; flex-direction: column; min-width: 0; }
+.busca-etq { flex: none; background: #1d1d1d; color: #ffd23f; font-weight: 900; letter-spacing: .08em; font-size: .8rem; padding: .35rem .5rem; border-radius: 6px; writing-mode: horizontal-tb; }
+.busca-grande { font-size: 1.7rem; font-weight: 900; letter-spacing: .03em; line-height: 1.15; overflow-wrap: anywhere; }
+.busca-grande.nombre { font-size: 1.35rem; letter-spacing: 0; }
+.busca-grande.etiqueta, .busca-grande.guía { font-size: 1.25rem; font-family: ui-monospace, monospace; }
+.caja-busca small { color: #5b6478; font-size: .8rem; }
+.caja-busca .busca-ayuda { color: #8a5a00; font-weight: 600; margin-top: .2rem; }
+.busca-valor { display: inline-block; background: #ffd23f; color: #1d1d1d; border: 2px solid #1d1d1d; border-radius: 7px; padding: .05rem .45rem; font-weight: 800; margin-right: .4rem; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+.busca-valor.etiqueta, .busca-valor.guía { font-family: ui-monospace, monospace; font-size: .85rem; }
+.busca-fila { display: flex; flex-direction: column; align-items: flex-start; gap: .1rem; margin-right: .3rem; flex: none; max-width: 55%; }
+.busca-fila small { font-size: .62rem; font-weight: 900; letter-spacing: .08em; color: #5b6478; }
+.paquete-recoger { align-items: center; }
+.guia-paso { color: #5b6478; font-size: .8rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; margin: 0; }
+.guia-marcas { display: flex; flex-wrap: wrap; gap: .45rem; margin: .6rem 0; }
+.guia-marcas .busca-valor { font-size: 1.1rem; padding: .25rem .6rem; }
+.guia-puntos { display: flex; gap: .35rem; justify-content: center; margin-top: .4rem; }
+.guia-puntos span { width: 9px; height: 9px; border-radius: 50%; background: #d5dbe8; }
+.guia-puntos span.si { background: var(--azul-hondo); width: 22px; border-radius: 999px; }

@@ -319,7 +319,9 @@
         window.scrollTo(0, 0);
         $('boton-emergencia').hidden = t === 'perfil';
         if (t === 'ganancias') pintarGanancias(panelGanancias);
-        if (t === 'perfil') poner(panelPerfil, cajaRevision(), formularioPerfil(true, () => { poner($('revision'), cajaRevision()); }), formularioClave());
+        if (t === 'perfil') poner(panelPerfil, cajaRevision(),
+          el('button', { class: 'boton-ver-ruta', type: 'button', onclick: () => guiaRapida() }, icono('paquete'), el('span', {}, el('strong', { text: 'Cómo identificar los paquetes' }), el('small', { text: 'Guía rápida de 3 pasos' }))),
+          formularioPerfil(true, () => { poner($('revision'), cajaRevision()); }), formularioClave());
       };
       poner(app, el('div', { class: 'area-cabecera' }, el('div', {}, el('h1', { text: `Hola, ${yo.nombre.split(' ')[0]}` }),
         el('p', {}, `${yo.vehiculo || ''} ${yo.veh_placa ? '· ' + yo.veh_placa : ''}`, yo.calificacion ? ` · ${yo.calificacion} de 5 estrellas` : ''))), panelEntregas, panelGanancias, panelPerfil, tabs);
@@ -328,6 +330,9 @@
       pintarConexion();
       $('boton-emergencia').hidden = false;
       cargarEnvios(true);
+      // La primera vez: guía rápida de cómo identificar los paquetes
+      let vista = false; try { vista = localStorage.getItem('vaelo_guia_busca') === '1'; } catch { /* sin almacenamiento */ }
+      if (!vista) setTimeout(() => guiaRapida(), 900);
       temporizador = setInterval(() => cargarEnvios(), 10000);
       setInterval(async () => { try { yo = (await api('/api/piloto/yo')).piloto; pintarConexion(); } catch { /* sigue */ } }, 60000);
     }
@@ -648,7 +653,7 @@
       const abiertos = lista.filter(x => ['pendiente', 'recogido', 'en_camino'].includes(x.estado));
       const cab = (extra) => el('div', { class: 'cab' }, el('strong', { class: 'guia' }, `Ruta de ${e0.empresa}`), extra);
       const paradasResumen = () => el('ol', { class: 'paradas-ruta' }, lista.map(x => el('li', { class: ['entregado', 'a_sede', 'en_sede', 'fallido'].includes(x.estado) ? 'hecha' : '' },
-        el('span', { class: 'num', text: String(x.parada || '') }), el('div', {}, chipCodigo(x), el('strong', { text: x.destino_nombre }),
+        el('span', { class: 'num', text: String(x.parada || '') }), el('div', {}, x.marcado === 'nombre' ? null : valorBusca(x), el('strong', { text: x.destino_nombre }),
           el('small', { text: `${x.destino_zona} · ${HORARIO_TXT[x.horario] || ''} · ${TAMANO_TXT[x.tamano] || ''}${x.metodo_pago === 'recibe' ? ` · cobra ${dinero(x.precio)}` : ''}` })),
         x.estado !== 'pendiente' ? chipEstado(x.estado) : null)));
       const cobros = lista.filter(x => x.metodo_pago === 'recibe');
@@ -689,7 +694,8 @@
         const filas = porRecoger.map(x => {
           const c = el('input', { type: 'checkbox', style: 'width:auto', onchange: (ev) => { if (ev.target.checked) marcados.add(x.id); else marcados.delete(x.id); actualizar(); } });
           casillas.set(x.guia, { c, x });
-          return el('label', { class: 'casilla paquete-recoger' }, c, chipCodigo(x, true), el('span', {}, el('strong', { text: x.destino_nombre }), ` · ${TAMANO_TXT[x.tamano] || ''}`, el('small', { text: [x.guia, x.descripcion].filter(Boolean).join(' · ') })));
+          return el('label', { class: 'casilla paquete-recoger' }, c, el('span', { class: 'busca-fila' }, el('small', { text: 'BUSCA' }), valorBusca(x)),
+            el('span', {}, x.marcado === 'nombre' ? null : el('strong', { text: x.destino_nombre }), el('small', { text: [TAMANO_TXT[x.tamano], x.descripcion].filter(Boolean).join(' · ') })));
         });
         const boton = el('button', { class: 'boton cinta accion-principal', type: 'button', text: 'Ya recogí los paquetes marcados', disabled: true, onclick: async () => {
           boton.disabled = true; boton.textContent = 'Guardando…'; ocupado++;
@@ -719,10 +725,8 @@
           bloquePersona(e0, { titulo: 'Recoges en', nombre: e0.origen_quien === 'sede' ? 'Sede de Vaelo' : e0.empresa, telefono: e0.origen_telefono, chip: null,
             zona: e0.origen_zona, referencias: e0.origen_direccion, punto: 'origen', accion: 'Ir a recoger' }),
           notaCobro,
-          e0.marcado === 'etiqueta' ? el('div', { class: 'mensaje aviso' }, el('strong', { text: 'La empresa pegó etiquetas impresas. ' }), 'Revisa cada paquete con su guía o tócale «Escanear etiquetas». Si a alguno le falta, pídele que la pegue antes de llevártelo.')
-          : e0.marcado === 'nombre' ? el('div', { class: 'mensaje aviso' }, el('strong', { text: 'La empresa escribió el nombre del cliente en cada paquete. ' }), 'Revísalos por nombre. Si alguno no lo tiene, pídele que lo escriba antes de llevártelo.')
-          : el('div', { class: 'mensaje aviso' }, el('strong', { text: 'Cada paquete debe traer escrito su código (el recuadro amarillo). ' }), 'Si a alguno le falta, pídele a la empresa que lo marque antes de llevártelo. Así no se te confunden en la ruta.'),
-          el('div', { class: 'recoger-lista' }, el('div', { class: 'recoger-cab' }, el('p', {}, 'Revisa cada paquete con su código: ', contador), todos), ...filas),
+          el('div', { class: 'mensaje aviso' }, el('strong', { text: 'Marca cada paquete que tengas en la mano y que diga lo del recuadro BUSCA. ' }), 'Si a alguno le falta, pídele a la empresa que lo marque antes de llevártelo.'),
+          el('div', { class: 'recoger-lista' }, el('div', { class: 'recoger-cab' }, el('p', {}, 'Recogidos: ', contador), todos), ...filas),
           el('div', { style: 'display:grid;gap:.5rem' }, escanear, boton));
       }
       // 3) Entregas en orden: la siguiente abierta completa y el resto como lista
@@ -739,7 +743,7 @@
       return el('div', { class: 'ruta-en-curso' },
         el('article', { class: 'entrega-tarjeta ruta' }, cab(el('span', { class: 'estado en_camino', text: abiertos.length ? `${lista.length - abiertos.length} de ${lista.length} hechas` : 'Ruta terminada' })),
           actual ? el('div', { class: 'ruta-progreso' }, el('div', { class: 'barra-progreso' }, el('span', { style: `width:${Math.round(((lista.length - abiertos.length) / lista.length) * 100)}%` })),
-            el('p', {}, el('strong', {}, `Ahora: parada ${actual.parada} · `, chipCodigo(actual), actual.destino_nombre), siguiente ? el('small', { text: `Después: parada ${siguiente.parada}${siguiente.codigo_corto ? ' (' + siguiente.codigo_corto + ')' : ''} · ${siguiente.destino_nombre} · ${siguiente.destino_zona}` }) : el('small', { text: 'Es la última entrega' }))) : null,
+            el('p', {}, el('strong', {}, `Ahora: parada ${actual.parada} · `, actual.destino_nombre), siguiente ? el('small', { text: `Después: parada ${siguiente.parada} · ${siguiente.destino_nombre} · ${siguiente.destino_zona}` }) : el('small', { text: 'Es la última entrega' }))) : null,
           cajaEfectivo,
           !abiertos.length ? el('p', { class: 'pista', text: cobrado > 0 ? 'Ruta terminada. Entrega este efectivo en la oficina o como te indiquen; también queda en tu pestaña Ganancias.' : 'Ruta terminada. ¡Buen trabajo!' }) : null,
           abiertos.length ? botonVerRuta(abiertos[0], `Lo que falta de la ruta de ${e0.empresa}`) : null,
@@ -763,7 +767,7 @@
       if (e.asignacion === 'por_aceptar') {
         const km = kmHasta(e.origen_lat, e.origen_lng);
         return el('article', { class: 'entrega-tarjeta por-aceptar' },
-          el('div', { class: 'cab' }, el('strong', { class: 'guia' }, chipCodigo(e), 'Nuevo envío ' + e.guia), el('span', { class: 'estado pendiente', text: 'Por aceptar' })),
+          el('div', { class: 'cab' }, el('strong', { class: 'guia' }, 'Nuevo envío ' + e.guia), el('span', { class: 'estado pendiente', text: 'Por aceptar' })),
           e.grupo_total > 1 ? el('div', { class: 'mensaje aviso', text: `Viaje con ${e.grupo_total} entregas desde el mismo punto. Al aceptar, aceptas todas.` }) : '',
           e.calif_cliente ? el('div', { class: 'estrellas-piloto' }, icono('estrella'), `Cliente calificado con ${e.calif_cliente} de 5 por otros pilotos`) : '',
           e.programado_para ? el('div', { class: 'mensaje aviso', text: 'Recoger el ' + fechaProgramada(e.programado_para) }) : '',
@@ -827,9 +831,8 @@
         zona: e.destino_zona, referencias: [e.destino_direccion, e.horario ? HORARIO_TXT[e.horario] : ''].filter(Boolean).join(' · '), punto: 'destino', accion: 'Dejar el pedido',
         extra: e.pedido_id ? botonWhatsCliente(e) : r.omitido && !r.confirmado ? el('div', { class: 'pista', text: 'Sin ubicación: ' + r.omitido }) : null });
       return el('article', { class: 'entrega-tarjeta' + (!cerrado ? ' activa' : '') },
-        el('div', { class: 'cab' }, el('strong', { class: 'guia' }, chipCodigo(e, true), e.guia, e.flete ? el('span', { class: 'etiqueta-flete', style: 'margin-left:.4rem', text: 'Flete' }) : null), chipEstado(e.estado)),
-        e.pedido_id && !recoger && !cerrado && e.marcado && e.marcado !== 'codigo' ? el('div', { class: 'buscar-paquete' }, 'Busca ', el('strong', { text: comoBuscar(e) })) : null,
-        recoger && e.codigo_corto && !e.pedido_id ? el('div', { class: 'mensaje aviso' }, 'Al recoger, revisa que el paquete diga ', el('strong', { text: e.codigo_corto }), '. Si no lo trae, escríbelo tú con tu marcador.') : null,
+        el('div', { class: 'cab' }, el('strong', { class: 'guia' }, e.guia, e.flete ? el('span', { class: 'etiqueta-flete', style: 'margin-left:.4rem', text: 'Flete' }) : null), chipEstado(e.estado)),
+        e.flete ? null : cajaBusca(e, recoger ? 'recoger' : 'entregar'),
         e.programado_para && recoger ? el('div', { class: 'mensaje aviso', text: 'Recoger el ' + fechaProgramada(e.programado_para) }) : '',
         e.ayudantes && !cerrado ? el('p', { class: 'flete-ayud-piloto', text: `Van ${e.ayudantes} ayudante${e.ayudantes === 1 ? '' : 's'} contigo para subir y bajar la carga` }) : null,
         fragil,
@@ -959,11 +962,49 @@
 
     // ---------- Ruta sugerida con varios paquetes ----------
     // Ordena las paradas (recoger antes de entregar) yendo siempre a la más cercana, y arma la ruta para Google Maps
+    // ---------- Guía rápida: cómo identificar los paquetes (3 pasos) ----------
+    function guiaRapida() {
+      const ej = (valor, tipo, nota) => el('div', { class: 'caja-busca' }, el('span', { class: 'busca-etq', text: 'BUSCA' }),
+        el('div', {}, el('strong', { class: 'busca-grande ' + tipo, text: valor }), el('small', { text: nota })));
+      const pasos = [
+        { t: 'Cada paquete trae una marca', p: 'Puede ser un código escrito (como TB-03), el nombre del cliente escrito, o una etiqueta impresa.',
+          v: el('div', { class: 'guia-marcas' }, el('span', { class: 'busca-valor', text: 'TB-03' }), el('span', { class: 'busca-valor', text: 'Ana López' }), el('span', { class: 'busca-valor etiqueta', text: 'VA-AQ2H6XSD' })) },
+        { t: 'La app te dice qué buscar', p: 'En cada paquete, al recoger y al entregar, sale este recuadro. Busca en la bolsa o caja lo que dice ahí. Nada más.',
+          v: ej('TB-03', 'código', 'escrito en el paquete') },
+        { t: '¿No trae la marca? Márcala tú', p: 'Siempre anda con tu marcador y tu cinta. Si un cliente no marcó su paquete, escribe tú lo que dice el recuadro BUSCA y pégale cinta. Si es de una empresa, pídele que lo marque antes de llevártelo.',
+          v: ej('LP-01', 'código', 'escríbelo con marcador y pégale cinta') },
+      ];
+      let i = 0;
+      const cuerpo = el('div');
+      const cerrar = () => { try { localStorage.setItem('vaelo_guia_busca', '1'); } catch { /* sin almacenamiento */ } $('dlg-p').close(); };
+      const pintar = () => {
+        const x = pasos[i];
+        poner(cuerpo, el('p', { class: 'guia-paso', text: `Paso ${i + 1} de ${pasos.length}` }), el('h2', { style: 'font-size:1.35rem', text: x.t }), x.v, el('p', { text: x.p }),
+          el('div', { class: 'guia-puntos' }, pasos.map((_, k) => el('span', { class: k === i ? 'si' : '' }))),
+          el('div', { style: 'display:grid;gap:.5rem;margin-top:.6rem' },
+            el('button', { class: 'boton accion-principal', type: 'button', text: i < pasos.length - 1 ? 'Siguiente' : 'Entendido', onclick: () => { if (i < pasos.length - 1) { i++; pintar(); } else cerrar(); } }),
+            i > 0 ? el('button', { class: 'boton borde', type: 'button', text: 'Atrás', onclick: () => { i--; pintar(); } }) : null));
+      };
+      pintar();
+      poner($('dlg-p-cuerpo'), el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: cerrar }), cuerpo);
+      if (!$('dlg-p').open) $('dlg-p').showModal();
+    }
+
     // ---------- Ver ruta antes de aceptar: todo el recorrido dibujado por calles, con km y minutos ----------
     // Código corto escrito en el paquete (TB-07): así se sabe cuál es cuál sin etiqueta impresa
     // Cómo viene marcado el paquete (lo eligió la empresa): qué tiene que buscar el piloto
-    const comoBuscar = (x) => x.marcado === 'etiqueta' ? `la etiqueta impresa con la guía ${x.guia}` : x.marcado === 'nombre' ? `el nombre «${x.destino_nombre}» escrito en el paquete` : x.codigo_corto ? `el código ${x.codigo_corto}` : `la guía ${x.guia}`;
-    const chipCodigo = (x, grande) => x && x.codigo_corto ? el('span', { class: 'codigo-paquete' + (grande ? ' grande' : ''), title: 'Código escrito en el paquete', text: x.codigo_corto }) : null;
+    // Qué buscar en el paquete: una sola regla para el piloto («mira el recuadro BUSCA y busca eso»)
+    const buscaDe = (x) => x.marcado === 'etiqueta' ? { tipo: 'Etiqueta', valor: x.guia } : x.marcado === 'nombre' ? { tipo: 'Nombre', valor: x.destino_nombre }
+      : x.codigo_corto ? { tipo: 'Código', valor: x.codigo_corto } : { tipo: 'Guía', valor: x.guia };
+    const valorBusca = (x) => { const b = buscaDe(x); return el('span', { class: 'busca-valor ' + b.tipo.toLowerCase(), title: b.tipo }, b.valor); };
+    // Recuadro grande: siempre igual, en el mismo lugar. al: 'recoger' muestra qué hacer si no trae la marca
+    function cajaBusca(x, al) {
+      const b = buscaDe(x);
+      const ayuda = al === 'recoger' ? (x.pedido_id ? '¿No la trae? Pídele a la empresa que la marque antes de llevártelo.' : '¿No lo trae? Escríbelo tú con tu marcador y pégale cinta.') : '';
+      return el('div', { class: 'caja-busca' }, el('span', { class: 'busca-etq', text: 'BUSCA' }),
+        el('div', {}, el('strong', { class: 'busca-grande ' + b.tipo.toLowerCase(), text: b.valor }), el('small', { text: b.tipo === 'Código' ? 'escrito en el paquete' : b.tipo === 'Nombre' ? 'escrito en el paquete' : b.tipo === 'Etiqueta' ? 'en la etiqueta impresa' : 'en la etiqueta' }),
+          ayuda ? el('small', { class: 'busca-ayuda', text: ayuda }) : null));
+    }
     function botonVerRuta(e, titulo) {
       return el('button', { class: 'boton-ver-ruta', type: 'button', onclick: () => verRuta(e, titulo) },
         icono('ruta'), el('span', {}, el('strong', { text: 'Ver ruta' }), el('small', { text: 'Todo el recorrido en el mapa, con kilómetros y tiempo' })));
@@ -1076,8 +1117,8 @@
       });
       poner($('dlg-p-cuerpo'), 
         el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: cerrar }),
-        el('h2', { style: 'font-size:1.4rem' }, chipCodigo(e, true), 'Entregar ' + e.guia),
-        el('p', { class: 'pista', text: `Revisa que el paquete que entregas tenga ${comoBuscar(e)}.` }), msg,
+        el('h2', { style: 'font-size:1.4rem', text: 'Entregar ' + e.guia }),
+        e.flete ? null : cajaBusca(e, 'entregar'), msg,
         Number(e.cobro_destinatario) > 0 ? el('div', { class: 'cobro', text: `Antes de entregar, cobra ${dinero(e.cobro_destinatario)}` }) : '',
         el('div', { class: 'campo' }, el('label', { for: 'en-codigo', text: 'Código de entrega (te lo da quien recibe)' }), codigo),
         el('div', { class: 'campo' }, el('label', { for: 'en-recibio', text: '¿Quién recibió?' }), recibio),
