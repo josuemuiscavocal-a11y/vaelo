@@ -5004,8 +5004,8 @@ ruta('GET', '/api/admin/buscar', ({ req, query }) => {
     LEFT JOIN usuarios m ON m.id = e.mensajero_id WHERE e.guia LIKE ? OR e.destino_nombre LIKE ? OR REPLACE(e.destino_telefono, '-', '') LIKE ? ORDER BY e.guia = ? DESC, e.id DESC LIMIT 8`).all(`%${codigo}%`, like, likeTel, codigo);
   const pedidos = db.prepare(`SELECT p.id, p.codigo, p.estado, p.cliente_nombre, p.dia, p.usuario_id, COALESCE(u.empresa_nombre, u.nombre) AS empresa FROM pedidos_empresa p JOIN usuarios u ON u.id = p.usuario_id
     WHERE p.envio_id IS NULL AND p.estado != 'cancelado' AND (p.codigo LIKE ? OR p.cliente_nombre LIKE ? OR REPLACE(p.cliente_telefono, '-', '') LIKE ?) ORDER BY p.id DESC LIMIT 6`).all(`%${codigo}%`, like, likeTel);
-  const empresas = db.prepare(`SELECT id, COALESCE(empresa_nombre, nombre) AS nombre, telefono FROM usuarios WHERE tipo_cuenta = 'empresa' AND rol = 'cliente' AND (empresa_nombre LIKE ? OR nombre LIKE ?) LIMIT 5`).all(like, like);
-  const clientes = db.prepare(`SELECT id, nombre, telefono, email FROM usuarios WHERE rol = 'cliente' AND COALESCE(tipo_cuenta, 'personal') != 'empresa' AND (nombre LIKE ? OR email LIKE ? OR REPLACE(telefono, '-', '') LIKE ?) LIMIT 5`).all(like, like, likeTel);
+  const empresas = db.prepare(`SELECT id, COALESCE(empresa_nombre, nombre) AS nombre, telefono FROM usuarios WHERE tipo_cuenta IN ('empresa','minorista') AND rol = 'cliente' AND (empresa_nombre LIKE ? OR nombre LIKE ?) LIMIT 5`).all(like, like);
+  const clientes = db.prepare(`SELECT id, nombre, telefono, email FROM usuarios WHERE rol = 'cliente' AND COALESCE(tipo_cuenta, 'personal') NOT IN ('empresa','minorista') AND (nombre LIKE ? OR email LIKE ? OR REPLACE(telefono, '-', '') LIKE ?) LIMIT 5`).all(like, like, likeTel);
   return { pilotos, envios, pedidos, empresas, clientes };
 });
 

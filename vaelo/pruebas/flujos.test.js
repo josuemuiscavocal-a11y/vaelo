@@ -1033,3 +1033,28 @@ test('lugar de recogida: con el GPS en el lugar o con el enlace de la persona qu
   assert.equal((await anon('GET', '/api/punto/' + tok)).status, 404, 'el enlace se usa una vez');
   assert.equal((await cliente()('GET', '/punto/' + tok)).status, 200, 'la página existe');
 });
+
+test('códigos de tiendas minoristas: dos tiendas y un cliente con las mismas iniciales no se cruzan, ni con la tienda del mismo nombre', async () => {
+  const crear = async (nombre, email, tipo, tienda) => {
+    db.prepare("INSERT OR IGNORE INTO usuarios (nombre,email,telefono,password_hash,rol,email_verificado,verificacion,tipo_cuenta,empresa_nombre) VALUES (?,?,?,?,'cliente',1,'verificado',?,?)")
+      .run(nombre, email, '5' + String(Math.floor(Math.random() * 1e7)).padStart(7, '0'), await hashPassword('clave-tienda-123'), tipo, tienda);
+    const c = cliente(); assert.equal((await c('POST', '/api/login', { email, password: 'clave-tienda-123' })).status, 200); return c;
+  };
+  const t1 = await crear('Rosa Méndez', 'xr1@prueba.com', 'minorista', 'Rosita Modas');
+  const t2 = await crear('Raquel Mus', 'xr2@prueba.com', 'minorista', 'Rosita Modas');   // otra tienda con el mismo nombre
+  const t3 = await crear('Rita Mejía', 'xr3@prueba.com', 'minorista', 'Ropa Mía');
+  const p = await crear('Raúl Morales', 'xr4@prueba.com', 'personal', null);
+  const dia = new Date(Date.now() - 6 * 3600_000).toISOString().slice(0, 10);
+  const codigos = [];
+  for (const [i, t] of [t1, t2, t3, t1, t2, t3].entries()) {
+    const c = (await t('POST', '/api/empresa/carpetas', { dia })).j.carpeta || (await t('GET', '/api/empresa/carpetas')).j.abiertas[0];
+    assert.equal((await t('POST', `/api/empresa/carpetas/${c.id}/pedidos`, { descripcion: 'Blusa ' + i, tamano: 'pequeno', cliente_nombre: 'Clienta ' + i, cliente_telefono: '5555321' + i })).status, 201);
+    const r = await p('POST', '/api/envios', { vehiculo_id: 1, peso: 1, origen_zona: 'Zona 1', destino_zona: 'Zona 1', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng,
+      metodo_pago: 'efectivo', destino_nombre: 'Recibe', destino_telefono: '55554444', foto_paquete: FOTO });
+    assert.equal(r.status, 201); codigos.push(r.j.codigo_corto);
+  }
+  for (const t of [t1, t2, t3]) for (const c of (await t('GET', '/api/empresa/carpetas')).j.abiertas) codigos.push(...(await t('GET', `/api/empresa/carpetas/${c.id}`)).j.carpeta.pedidos.map((x) => x.codigo_corto));
+  assert.equal(codigos.length, 12);
+  assert.ok(codigos.every((x) => /^RM-\d{2,}$/.test(x)), codigos.join(','));
+  assert.equal(new Set(codigos).size, codigos.length, 'ningún código repetido: ' + codigos.join(','));
+});
