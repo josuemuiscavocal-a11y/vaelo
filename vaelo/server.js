@@ -287,7 +287,19 @@ function leerCookies(req) {
   return out;
 }
 const esHttps = (req) => req.headers['x-forwarded-proto'] === 'https' || /"scheme":"https"/.test(req.headers['cf-visitor'] || '');
-const cookieSesion = (req, token, maxAge) => `vaelo_sesion=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${esHttps(req) ? '; Secure' : ''}`;
+// Una sesión aparte para cada parte de Vaelo: clientes y tiendas, el panel (administración y oficina) y los pilotos.
+// Así se pueden tener abiertas a la vez en el mismo navegador sin que una saque a la otra.
+const COOKIES_SESION = { cliente: 'vaelo_sesion', panel: 'vaelo_panel', piloto: 'vaelo_piloto' };
+const areaDeRol = (rol) => (rol === 'mensajero' ? 'piloto' : rol === 'admin' || rol === 'operador' ? 'panel' : 'cliente');
+const cookieSesion = (req, token, maxAge, area = 'cliente') => `${COOKIES_SESION[area] || COOKIES_SESION.cliente}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${esHttps(req) ? '; Secure' : ''}`;
+// De qué parte viene la petición: las páginas por su dirección; las consultas (/api) por la página que las hizo
+function areaDePeticion(req) {
+  const deRuta = (p) => (p.startsWith(RUTA_ADMIN) ? 'panel' : p.startsWith(RUTA_PILOTO) ? 'piloto' : 'cliente');
+  const ruta = String(req.url || '').split('?')[0];
+  if (!ruta.startsWith('/api/')) return deRuta(ruta);
+  try { const ref = req.headers.referer; if (ref) return deRuta(new URL(ref).pathname); } catch { /* sin referencia */ }
+  return null;   // sin página de origen (pruebas, herramientas): vale cualquier sesión
+}
 // La IP real la pone Nginx en X-Real-IP (con Cloudflare, Nginx la toma de CF-Connecting-IP solo si la petición viene de Cloudflare).
 // No se lee CF-Connecting-IP directo porque cualquiera puede inventarla si entra sin pasar por Cloudflare.
 const ipDe = (req) => {
@@ -297,12 +309,27 @@ const ipDe = (req) => {
 };
 
 function usuarioActual(req) {
-  const token = leerCookies(req).vaelo_sesion;
-  if (!token || !/^[a-f0-9]{64}$/.test(token)) return null;
-  return db.prepare(`
-    SELECT u.id, u.nombre, u.email, u.telefono, u.rol, u.vehiculo_id, u.estado_piloto, u.email_verificado, u.verificacion, u.permisos FROM sesiones s
-    JOIN usuarios u ON u.id = s.usuario_id
-    WHERE s.token = ? AND s.expira > ? AND u.activo = 1`).get(token, Date.now()) || null;
+  if (req._usuario !== undefined) return req._usuario;
+  const cookies = leerCookies(req);
+  const area = areaDePeticion(req);
+  // Primero la sesión de esta parte; la antigua (vaelo_sesion) sirve mientras tanto en el panel y con los pilotos.
+  // En la parte de clientes la administración también puede entrar con su sesión del panel.
+  const orden = area === 'panel' ? ['panel', 'cliente'] : area === 'piloto' ? ['piloto', 'cliente'] : area === 'cliente' ? ['cliente', 'panel'] : ['cliente', 'panel', 'piloto'];
+  for (const a of orden) {
+    const token = cookies[COOKIES_SESION[a]];
+    if (!token || !/^[a-f0-9]{64}$/.test(token)) continue;
+    const u = db.prepare(`
+      SELECT u.id, u.nombre, u.email, u.telefono, u.rol, u.vehiculo_id, u.estado_piloto, u.email_verificado, u.verificacion, u.permisos FROM sesiones s
+      JOIN usuarios u ON u.id = s.usuario_id
+      WHERE s.token = ? AND s.expira > ? AND u.activo = 1`).get(token, Date.now());
+    if (!u) continue;
+    // La sesión antigua solo vale en la parte que le corresponde a su rol
+    if (a === 'cliente' && area && area !== 'cliente' && areaDeRol(u.rol) !== area) continue;
+    req._token = token; req._cookieArea = a; req._usuario = u;
+    return u;
+  }
+  req._usuario = null;
+  return null;
 }
 function requiereUsuario(req) { const u = usuarioActual(req); if (!u) falla(401, 'Inicia sesión para continuar.'); return u; }
 function requiereRol(req, ...roles) {
@@ -335,7 +362,8 @@ function requiereStaff(req) {
 function crearSesion(req, usuarioId, maxAge = SESION_DIAS * 86400) {
   const token = crypto.randomBytes(32).toString('hex');
   db.prepare('INSERT INTO sesiones (token, usuario_id, expira) VALUES (?, ?, ?)').run(token, usuarioId, Date.now() + maxAge * 1000);
-  return cookieSesion(req, token, maxAge);
+  const rol = db.prepare('SELECT rol FROM usuarios WHERE id = ?').get(usuarioId)?.rol;
+  return cookieSesion(req, token, maxAge, areaDeRol(rol));
 }
 
 // ---------- Consultas de envíos ----------
@@ -573,9 +601,10 @@ ruta('POST', '/api/acceso-familia', ({ req, body }) => {
 });
 
 ruta('POST', '/api/logout', ({ req }) => {
-  const token = leerCookies(req).vaelo_sesion;
-  if (token) db.prepare('DELETE FROM sesiones WHERE token = ?').run(token);
-  return { _headers: { 'Set-Cookie': cookieSesion(req, '', 0) }, ok: true };
+  // Se cierra solo la sesión de la parte desde donde se sale (las demás pestañas siguen abiertas)
+  usuarioActual(req);
+  if (req._token) db.prepare('DELETE FROM sesiones WHERE token = ?').run(req._token);
+  return { _headers: { 'Set-Cookie': cookieSesion(req, '', 0, req._cookieArea || areaDePeticion(req) || 'cliente') }, ok: true };
 });
 
 ruta('GET', '/api/yo', ({ req }) => {
@@ -620,7 +649,7 @@ ruta('POST', '/api/cambiar-password', ({ req, body }) => {
   if (nueva.length < 8) falla(400, 'La nueva contraseña debe tener al menos 8 caracteres.');
   db.prepare('UPDATE usuarios SET password_hash = ? WHERE id = ?').run(hashPassword(nueva), u.id);
   // Se cierran las demás sesiones abiertas (otros teléfonos o computadoras); esta sigue abierta
-  db.prepare('DELETE FROM sesiones WHERE usuario_id = ? AND token != ?').run(u.id, leerCookies(req).vaelo_sesion || '');
+  db.prepare('DELETE FROM sesiones WHERE usuario_id = ? AND token != ?').run(u.id, req._token || '');
   return { ok: true };
 });
 

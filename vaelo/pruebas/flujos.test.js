@@ -1058,3 +1058,25 @@ test('códigos de tiendas minoristas: dos tiendas y un cliente con las mismas in
   assert.ok(codigos.every((x) => /^RM-\d{2,}$/.test(x)), codigos.join(','));
   assert.equal(new Set(codigos).size, codigos.length, 'ningún código repetido: ' + codigos.join(','));
 });
+
+test('sesiones separadas: la tienda, el panel y el piloto abiertos en el mismo navegador no se sacan entre sí', async () => {
+  const sacar = async (ruta, body) => { const r = await fetch(BASE + ruta, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); return (r.headers.get('set-cookie') || '').split(';')[0]; };
+  const tienda = await sacar('/api/login', { email: 'lupe@prueba.com', password: 'clave-de-prueba-123' });
+  const panel = await sacar('/api/acceso-familia', { email: 'administracionvaelo@vaelomensajeria.com', password: 'clave-de-prueba-123' });
+  const piloto = await sacar('/api/piloto/entrar', { email: 'carlos@prueba.com', password: 'clave-de-prueba-123' });
+  assert.ok(tienda.startsWith('vaelo_sesion=') && panel.startsWith('vaelo_panel=') && piloto.startsWith('vaelo_piloto='), [tienda, panel, piloto].join(' | '));
+  const todas = [tienda, panel, piloto].join('; ');
+  const yo = async (desde) => (await (await fetch(BASE + '/api/yo', { headers: { Cookie: todas, Referer: BASE + desde } })).json()).usuario;
+  assert.equal((await yo('/mi-cuenta')).email, 'lupe@prueba.com');
+  assert.equal((await yo('/tienda')).email, 'lupe@prueba.com');
+  assert.equal((await yo('/familiatecun')).rol, 'admin');
+  assert.equal((await yo('/modomensajero')).email, 'carlos@prueba.com');
+  // La tienda sigue con sus carpetas aunque el panel esté abierto en otra pestaña
+  const r = await fetch(BASE + '/api/empresa/solicitud', { headers: { Cookie: todas, Referer: BASE + '/mi-cuenta' } });
+  assert.equal(r.status, 200);
+  // Salir del panel no cierra la tienda
+  await fetch(BASE + '/api/logout', { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: todas, Referer: BASE + '/familiatecun' }, body: '{}' });
+  assert.equal(await yo('/familiatecun'), null);
+  assert.equal((await yo('/mi-cuenta')).email, 'lupe@prueba.com');
+  assert.equal((await yo('/modomensajero')).email, 'carlos@prueba.com');
+});
