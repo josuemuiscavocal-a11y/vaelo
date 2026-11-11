@@ -463,9 +463,9 @@ async function dialogoMover(p, r, c, recargar) {
 }
 // Cómo marca la empresa sus paquetes: así el piloto sabe qué buscar (sin código no se recoge)
 const MARCADO_TXT = {
-  etiqueta: ['Etiqueta impresa', 'Imprimes las etiquetas y las pegas en cada paquete.'],
-  codigo: ['Código escrito', 'Escribes con marcador el código amarillo de cada envío (TB-01, TB-02…).'],
-  nombre: ['Nombre del cliente', 'Escribes con marcador el nombre del cliente en cada paquete.'],
+  etiqueta: ['Guía impresa', 'Imprimes las guías con «Imprimir etiquetas» y pegas cada una en su paquete.', 'Recomendado'],
+  codigo: ['Código escrito', 'Escribes con marcador el código amarillo de cada envío (TB-01, TB-02…).', 'Si no tienes impresora'],
+  nombre: ['Nombre del cliente', 'Escribes con marcador el nombre del cliente en cada paquete.', 'Solo si no hay otra opción'],
 };
 function bloqueMarcado(c, abierta, pedidos, recargar) {
   const m = c.marcado || 'codigo';
@@ -478,8 +478,10 @@ function bloqueMarcado(c, abierta, pedidos, recargar) {
     el('p', { class: 'aviso-codigos' }, ejemplo, el('span', {}, el('strong', { text: 'Cada paquete debe ir marcado. ' }), MARCADO_TXT[m][1], ' Sin marca no se recoge: el piloto no sabría cuál es cuál.')),
     abierta ? el('div', { class: 'marcado-opciones', role: 'radiogroup', 'aria-label': '¿Cómo vas a marcar los paquetes?' },
       el('span', { class: 'etiqueta-campo', text: '¿Cómo vas a marcar los paquetes?' }),
-      Object.entries(MARCADO_TXT).map(([k, [t]]) => el('button', { type: 'button', class: 'chip', role: 'radio', 'aria-checked': String(k === m), 'aria-pressed': String(k === m), text: t,
-        onclick: async () => { if (k === m) return; try { await api(`/api/empresa/carpetas/${c.id}`, { method: 'PUT', body: { marcado: k } }); recargar(); } catch (e) { alert(e.message); } } })))
+      el('p', { class: 'marcado-recomienda' }, el('strong', { text: 'Recomendado: usar la guía impresa. ' }), 'Si no tienes impresora, usa «Código escrito»: escribes el código amarillo de cada envío con marcador.'),
+      Object.entries(MARCADO_TXT).map(([k, [t, , nota]]) => el('button', { type: 'button', class: 'chip marcado-chip' + (k === 'etiqueta' ? ' recomendado' : ''), role: 'radio', 'aria-checked': String(k === m), 'aria-pressed': String(k === m),
+        onclick: async () => { if (k === m) return; try { await api(`/api/empresa/carpetas/${c.id}`, { method: 'PUT', body: { marcado: k } }); recargar(); } catch (e) { alert(e.message); } } },
+        el('span', { text: t }), el('small', { text: nota }))))
       : el('p', { class: 'pista', text: 'Marcados con: ' + MARCADO_TXT[m][0].toLowerCase() + '.' }),
     repetidos.length ? el('div', { class: 'mensaje error', text: `Hay clientes con el mismo nombre (${repetidos.join(', ')}). Escribe también la zona en esos paquetes, o mejor usa «Código escrito» para no confundir al piloto.` }) : null);
 }
