@@ -719,7 +719,9 @@
           bloquePersona(e0, { titulo: 'Recoges en', nombre: e0.origen_quien === 'sede' ? 'Sede de Vaelo' : e0.empresa, telefono: e0.origen_telefono, chip: null,
             zona: e0.origen_zona, referencias: e0.origen_direccion, punto: 'origen', accion: 'Ir a recoger' }),
           notaCobro,
-          el('div', { class: 'mensaje aviso' }, el('strong', { text: 'Cada paquete debe traer escrito su código (el recuadro amarillo). ' }), 'Si a alguno le falta, pídele a la empresa que lo marque antes de llevártelo. Así no se te confunden en la ruta.'),
+          e0.marcado === 'etiqueta' ? el('div', { class: 'mensaje aviso' }, el('strong', { text: 'La empresa pegó etiquetas impresas. ' }), 'Revisa cada paquete con su guía o tócale «Escanear etiquetas». Si a alguno le falta, pídele que la pegue antes de llevártelo.')
+          : e0.marcado === 'nombre' ? el('div', { class: 'mensaje aviso' }, el('strong', { text: 'La empresa escribió el nombre del cliente en cada paquete. ' }), 'Revísalos por nombre. Si alguno no lo tiene, pídele que lo escriba antes de llevártelo.')
+          : el('div', { class: 'mensaje aviso' }, el('strong', { text: 'Cada paquete debe traer escrito su código (el recuadro amarillo). ' }), 'Si a alguno le falta, pídele a la empresa que lo marque antes de llevártelo. Así no se te confunden en la ruta.'),
           el('div', { class: 'recoger-lista' }, el('div', { class: 'recoger-cab' }, el('p', {}, 'Revisa cada paquete con su código: ', contador), todos), ...filas),
           el('div', { style: 'display:grid;gap:.5rem' }, escanear, boton));
       }
@@ -826,6 +828,7 @@
         extra: e.pedido_id ? botonWhatsCliente(e) : r.omitido && !r.confirmado ? el('div', { class: 'pista', text: 'Sin ubicación: ' + r.omitido }) : null });
       return el('article', { class: 'entrega-tarjeta' + (!cerrado ? ' activa' : '') },
         el('div', { class: 'cab' }, el('strong', { class: 'guia' }, chipCodigo(e, true), e.guia, e.flete ? el('span', { class: 'etiqueta-flete', style: 'margin-left:.4rem', text: 'Flete' }) : null), chipEstado(e.estado)),
+        e.pedido_id && !recoger && !cerrado && e.marcado && e.marcado !== 'codigo' ? el('div', { class: 'buscar-paquete' }, 'Busca ', el('strong', { text: comoBuscar(e) })) : null,
         recoger && e.codigo_corto && !e.pedido_id ? el('div', { class: 'mensaje aviso' }, 'Al recoger, revisa que el paquete diga ', el('strong', { text: e.codigo_corto }), '. Si no lo trae, escríbelo tú con tu marcador.') : null,
         e.programado_para && recoger ? el('div', { class: 'mensaje aviso', text: 'Recoger el ' + fechaProgramada(e.programado_para) }) : '',
         e.ayudantes && !cerrado ? el('p', { class: 'flete-ayud-piloto', text: `Van ${e.ayudantes} ayudante${e.ayudantes === 1 ? '' : 's'} contigo para subir y bajar la carga` }) : null,
@@ -958,6 +961,8 @@
     // Ordena las paradas (recoger antes de entregar) yendo siempre a la más cercana, y arma la ruta para Google Maps
     // ---------- Ver ruta antes de aceptar: todo el recorrido dibujado por calles, con km y minutos ----------
     // Código corto escrito en el paquete (TB-07): así se sabe cuál es cuál sin etiqueta impresa
+    // Cómo viene marcado el paquete (lo eligió la empresa): qué tiene que buscar el piloto
+    const comoBuscar = (x) => x.marcado === 'etiqueta' ? `la etiqueta impresa con la guía ${x.guia}` : x.marcado === 'nombre' ? `el nombre «${x.destino_nombre}» escrito en el paquete` : x.codigo_corto ? `el código ${x.codigo_corto}` : `la guía ${x.guia}`;
     const chipCodigo = (x, grande) => x && x.codigo_corto ? el('span', { class: 'codigo-paquete' + (grande ? ' grande' : ''), title: 'Código escrito en el paquete', text: x.codigo_corto }) : null;
     function botonVerRuta(e, titulo) {
       return el('button', { class: 'boton-ver-ruta', type: 'button', onclick: () => verRuta(e, titulo) },
@@ -1072,7 +1077,7 @@
       poner($('dlg-p-cuerpo'), 
         el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: cerrar }),
         el('h2', { style: 'font-size:1.4rem' }, chipCodigo(e, true), 'Entregar ' + e.guia),
-        e.codigo_corto ? el('p', { class: 'pista', text: `Revisa que el paquete que entregas diga ${e.codigo_corto}.` }) : null, msg,
+        el('p', { class: 'pista', text: `Revisa que el paquete que entregas tenga ${comoBuscar(e)}.` }), msg,
         Number(e.cobro_destinatario) > 0 ? el('div', { class: 'cobro', text: `Antes de entregar, cobra ${dinero(e.cobro_destinatario)}` }) : '',
         el('div', { class: 'campo' }, el('label', { for: 'en-codigo', text: 'Código de entrega (te lo da quien recibe)' }), codigo),
         el('div', { class: 'campo' }, el('label', { for: 'en-recibio', text: '¿Quién recibió?' }), recibio),

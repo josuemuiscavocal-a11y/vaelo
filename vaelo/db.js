@@ -556,6 +556,11 @@ agregarColumnas('envios', [['calif_receptor', 'INTEGER'], ['calif_receptor_comen
 // Código corto para escribir a mano en el paquete (TB-07): sin impresora, el piloto sabe cuál es cuál
 agregarColumnas('envios', [['codigo_corto', 'TEXT']]);
 agregarColumnas('pedidos_empresa', [['codigo_corto', 'TEXT'], ['codigo_dia', 'TEXT']]);
+// Cómo marca la empresa sus paquetes: etiqueta impresa, código escrito (TB-07) o nombre del cliente escrito
+agregarColumnas('carpetas_empresa', [['marcado', "TEXT NOT NULL DEFAULT 'codigo'"]]);
+agregarColumnas('lotes_empresa', [['marcado', "TEXT NOT NULL DEFAULT 'codigo'"]]);
+agregarColumnas('envios', [['marcado', 'TEXT']]);
+agregarColumnas('usuarios', [['marcado_paquetes', 'TEXT']]);
 // Promociones por horas (hora de inicio y fin opcionales) y cupones personales de compensación por un reclamo
 agregarColumnas('promociones', [['desde_hora', 'TEXT'], ['hasta_hora', 'TEXT'], ['usuario_id', 'INTEGER'], ['reclamo_id', 'INTEGER']]);
 agregarColumnas('reclamos', [['cupon_monto', 'REAL'], ['cupon_promo_id', 'INTEGER']]);

@@ -390,8 +390,7 @@ async function vistaCarpeta(caja, yo, id) {
           abierta && pedidos.some((p) => ['pendiente', 'esperando'].includes(p.estado)) ? el('button', { class: 'boton cinta chico', type: 'button', text: `Recordar a los que faltan (${pedidos.filter((p) => ['pendiente', 'esperando'].includes(p.estado)).length})`,
             onclick: () => dialogoRecordar(pedidos.filter((p) => ['pendiente', 'esperando'].includes(p.estado)), r, c) }) : null,
           pedidos.length ? el('button', { class: 'boton borde chico', type: 'button', text: 'Imprimir etiquetas', onclick: () => imprimirEtiquetas(pedidos, r.empresa) }) : null)),
-      pedidos.length ? el('p', { class: 'aviso-codigos' }, el('span', { class: 'codigo-paquete', text: pedidos.find((p) => p.codigo_corto)?.codigo_corto || 'TB-01' }),
-        'Cada paquete debe ir marcado: imprime las etiquetas o escribe con marcador el código amarillo de cada envío en su paquete. Sin código no se recoge.') : null,
+      pedidos.length ? bloqueMarcado(c, abierta, pedidos, recargar) : null,
       pedidos.length ? el('ul', { class: 'pedidos-lista' }, pedidos.map((p) => filaPedido(p, r, c, recargar)))
         : el('div', { class: 'carpetas-vacio' }, el('p', { text: 'La carpeta está vacía. Toca «Añadir envío» para registrar el primero.' }))));
 }
@@ -461,6 +460,23 @@ async function dialogoMover(p, r, c, recargar) {
     el('button', { class: 'boton borde', type: 'button', style: 'margin-top:1rem', text: '+ Crear carpeta nueva y mover', onclick: () => { dlg.close(); dialogoCarpeta(null, r, async (nueva) => { try { const x = await api(`/api/empresa/pedidos/${p.id}/carpeta`, { method: 'PUT', body: { carpeta_id: nueva.id } }); recargar(); if (x.reconfirmar) alert(`Listo. Mándale el enlace otra vez a ${p.cliente_nombre} para que confirme la nueva fecha.`); } catch (e) { alert(e.message); } }); } }));
   dlg.addEventListener('close', () => dlg.remove());
   document.body.append(dlg); dlg.showModal();
+}
+// Cómo marca la empresa sus paquetes: así el piloto sabe qué buscar (sin código no se recoge)
+const MARCADO_TXT = {
+  etiqueta: ['Etiqueta impresa', 'Imprimes las etiquetas y las pegas en cada paquete.'],
+  codigo: ['Código escrito', 'Escribes con marcador el código amarillo de cada envío (TB-01, TB-02…).'],
+  nombre: ['Nombre del cliente', 'Escribes con marcador el nombre del cliente en cada paquete.'],
+};
+function bloqueMarcado(c, abierta, pedidos, recargar) {
+  const m = c.marcado || 'codigo';
+  const ejemplo = m === 'codigo' ? el('span', { class: 'codigo-paquete', text: pedidos.find((p) => p.codigo_corto)?.codigo_corto || 'TB-01' }) : null;
+  return el('div', { class: 'bloque-marcado' },
+    el('p', { class: 'aviso-codigos' }, ejemplo, el('span', {}, el('strong', { text: 'Cada paquete debe ir marcado. ' }), MARCADO_TXT[m][1], ' Sin marca no se recoge: el piloto no sabría cuál es cuál.')),
+    abierta ? el('div', { class: 'marcado-opciones', role: 'radiogroup', 'aria-label': '¿Cómo vas a marcar los paquetes?' },
+      el('span', { class: 'etiqueta-campo', text: '¿Cómo vas a marcar los paquetes?' }),
+      Object.entries(MARCADO_TXT).map(([k, [t]]) => el('button', { type: 'button', class: 'chip', role: 'radio', 'aria-checked': String(k === m), 'aria-pressed': String(k === m), text: t,
+        onclick: async () => { if (k === m) return; try { await api(`/api/empresa/carpetas/${c.id}`, { method: 'PUT', body: { marcado: k } }); recargar(); } catch (e) { alert(e.message); } } })))
+      : el('p', { class: 'pista', text: 'Marcados con: ' + MARCADO_TXT[m][0].toLowerCase() + '.' }));
 }
 // Reportar un problema con un pedido (queja): la oficina lo evalúa y, si fue culpa del piloto, se le descuenta y se compensa
 const TIPOS_RECLAMO_EMP = { danado: 'Llegó dañado', incompleto: 'Llegó incompleto', perdido: 'El paquete se perdió', otro: 'Otro problema (trato, retraso, etc.)' };

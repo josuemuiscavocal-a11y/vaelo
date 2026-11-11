@@ -351,7 +351,10 @@ const SQL_ENVIO = `
 function envioSalida(e) {
   const out = { ...e };
   // Envíos de antes (sin código corto) que siguen en curso: se les asigna al mostrarlos
-  if (!out.codigo_corto && ['pendiente', 'recogido', 'en_camino'].includes(e.estado) && !e.flete) out.codigo_corto = codigoCortoEnvio(e.id);
+  if (!out.codigo_corto && ['pendiente', 'recogido', 'en_camino'].includes(e.estado) && !e.flete && (!e.marcado || e.marcado === 'codigo')) out.codigo_corto = codigoCortoEnvio(e.id);
+  // La empresa marcó con etiqueta impresa o con el nombre del cliente: el código no se usa ni se muestra
+  if (e.marcado && e.marcado !== 'codigo') out.codigo_corto = null;
+  if (e.marcado) out.marcado_texto = MARCADOS[e.marcado] || '';
   // La ubicación del mensajero solo se muestra mientras lleva el paquete y si es reciente (2 horas)
   const reciente = e.mensajero_ubic_fecha && (Date.now() - new Date(e.mensajero_ubic_fecha.replace(' ', 'T') + 'Z').getTime()) < 2 * 3600_000;
   if (!['recogido', 'en_camino', 'pendiente'].includes(e.estado) || !reciente) {
@@ -3919,9 +3922,9 @@ function crearLoteEmpresa(u, pedidos, dia, body, alCrear) {
   db.exec('BEGIN');
   let lote;
   try {
-    lote = Number(db.prepare(`INSERT INTO lotes_empresa (usuario_id, dia, modo, recogida, paga, recomendado, nota, origen_lat, origen_lng, origen_direccion)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(u.id, dia, body.modo, recogida, paga, JSON.stringify(rec), texto(body.nota, 300) || null,
-      origen.lat, origen.lng, recogida === 'sede' ? (getAjustes().sede_direccion || 'Sede Vaelo') : punto.direccion).lastInsertRowid);
+    lote = Number(db.prepare(`INSERT INTO lotes_empresa (usuario_id, dia, modo, recogida, paga, recomendado, nota, origen_lat, origen_lng, origen_direccion, marcado)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(u.id, dia, body.modo, recogida, paga, JSON.stringify(rec), texto(body.nota, 300) || null,
+      origen.lat, origen.lng, recogida === 'sede' ? (getAjustes().sede_direccion || 'Sede Vaelo') : punto.direccion, marcadoValido(body._marcado)).lastInsertRowid);
     db.prepare(`UPDATE pedidos_empresa SET lote_id = ?, actualizado = datetime('now') WHERE id IN (${pedidos.map(() => '?').join(',')})`).run(lote, ...pedidos.map((p) => p.id));
     if (alCrear) alCrear(lote);
     db.exec('COMMIT');
@@ -3978,10 +3981,12 @@ function leerDiaCarpeta(v) {
   if (dia > sumarDias(hoyGT(), 30)) falla(400, 'Elige un día dentro del próximo mes.');
   return dia;
 }
+const MARCADOS = { etiqueta: 'Etiqueta impresa', codigo: 'Código escrito a mano', nombre: 'Nombre del cliente escrito a mano' };
+const marcadoValido = (m) => (MARCADOS[m] ? m : 'codigo');
 function carpetaSalida(c, conPedidos = false) {
   const filas = db.prepare("SELECT * FROM pedidos_empresa WHERE carpeta_id = ? AND estado != 'cancelado' ORDER BY id").all(c.id);
   const cuenta = (f) => filas.filter(f).length;
-  const out = { id: c.id, nombre: c.nombre, dia: c.dia, dia_texto: fechaLarga(c.dia), estado: c.estado, creado: c.creado,
+  const out = { id: c.id, nombre: c.nombre, dia: c.dia, dia_texto: fechaLarga(c.dia), estado: c.estado, creado: c.creado, marcado: marcadoValido(c.marcado), marcado_texto: MARCADOS[marcadoValido(c.marcado)],
     total: filas.length, confirmados: cuenta((p) => p.estado === 'confirmado'), esperando: cuenta((p) => p.estado === 'pendiente' && p.enlace_enviado_en),
     sin_datos: cuenta((p) => p.estado === 'pendiente' && !p.enlace_enviado_en), no_puede: cuenta((p) => ['no_puede', 'vencido'].includes(p.estado)),
     sin_foto: cuenta((p) => p.estado !== 'cancelado' && !p.foto), grandes: cuenta((p) => p.tamano === 'grande'), minimo: minimoLote() };
@@ -3993,7 +3998,8 @@ function carpetaSalida(c, conPedidos = false) {
       en_sede: db.prepare("SELECT COUNT(*) AS n FROM envios WHERE lote_empresa_id = ? AND estado IN ('a_sede','en_sede')").get(l.id).n };
     out.total = db.prepare('SELECT COUNT(*) AS n FROM pedidos_empresa WHERE lote_id = ?').get(c.lote_id).n;
   }
-  if (conPedidos) out.pedidos = (c.lote_id ? db.prepare('SELECT * FROM pedidos_empresa WHERE lote_id = ? ORDER BY id').all(c.lote_id) : filas).map((p) => pedidoSalida(p));
+  if (conPedidos) out.pedidos = (c.lote_id ? db.prepare('SELECT * FROM pedidos_empresa WHERE lote_id = ? ORDER BY id').all(c.lote_id) : filas).map((p) => pedidoSalida(p))
+    .map((p) => (out.marcado === 'codigo' ? p : { ...p, codigo_corto: null }));   // con etiqueta o nombre no se usa el código
   return out;
 }
 const datosPanelEmpresa = (u) => ({ minimo: minimoLote(), punto: puntoEmpresa(u), tamanos: TAMANOS, horarios: HORARIOS, modos: MODOS_LOTE, empresa: u.empresa_nombre || u.nombre,
@@ -4010,7 +4016,7 @@ ruta('POST', '/api/empresa/carpetas', ({ req, body }) => {
   const dia = leerDiaCarpeta(body.dia);
   if (db.prepare("SELECT COUNT(*) AS n FROM carpetas_empresa WHERE usuario_id = ? AND estado = 'abierta'").get(u.id).n >= 30) falla(400, 'Tienes demasiadas carpetas abiertas.');
   const nombre = texto(body.nombre, 60) || `Envíos del ${fechaLarga(dia)}`;
-  const id = Number(db.prepare('INSERT INTO carpetas_empresa (usuario_id, nombre, dia) VALUES (?, ?, ?)').run(u.id, nombre, dia).lastInsertRowid);
+  const id = Number(db.prepare('INSERT INTO carpetas_empresa (usuario_id, nombre, dia, marcado) VALUES (?, ?, ?, ?)').run(u.id, nombre, dia, marcadoValido(db.prepare('SELECT marcado_paquetes FROM usuarios WHERE id = ?').get(u.id)?.marcado_paquetes)).lastInsertRowid);
   return { _status: 201, carpeta: carpetaSalida(carpetaDeEmpresa(u, id)) };
 });
 ruta('GET', '/api/empresa/carpetas/:id', ({ req, params }) => {
@@ -4022,6 +4028,13 @@ ruta('PUT', '/api/empresa/carpetas/:id', ({ req, params, body }) => {
   const u = requiereEmpresa(req);
   const c = carpetaDeEmpresa(u, params.id);
   carpetaAbierta(c);
+  // Cómo marca los paquetes de esta carpeta (se recuerda para las carpetas nuevas)
+  if (body.marcado !== undefined && Object.keys(body).length === 1) {
+    if (!MARCADOS[body.marcado]) falla(400, 'Elige cómo vas a marcar los paquetes.');
+    db.prepare("UPDATE carpetas_empresa SET marcado = ?, actualizado = datetime('now') WHERE id = ?").run(body.marcado, c.id);
+    db.prepare('UPDATE usuarios SET marcado_paquetes = ? WHERE id = ?').run(body.marcado, u.id);
+    return { carpeta: carpetaSalida(carpetaDeEmpresa(u, c.id)) };
+  }
   const nombre = body.nombre !== undefined ? (texto(body.nombre, 60) || c.nombre) : c.nombre;
   const dia = body.dia !== undefined ? leerDiaCarpeta(body.dia) : c.dia;
   db.exec('BEGIN');
@@ -4105,7 +4118,7 @@ ruta('POST', '/api/empresa/carpetas/:id/enviar', ({ req, params, body }) => {
   if (c.dia < hoyGT()) falla(400, 'El día de esta carpeta ya pasó. Cámbialo y pide a tus clientes que confirmen de nuevo.');
   const pedidos = db.prepare("SELECT * FROM pedidos_empresa WHERE carpeta_id = ? AND estado = 'confirmado' AND lote_id IS NULL").all(c.id);
   let pendientes = 0;
-  const r = crearLoteEmpresa(u, pedidos, c.dia, body, (lote) => {
+  const r = crearLoteEmpresa(u, pedidos, c.dia, { ...body, _marcado: c.marcado }, (lote) => {
     const resto = db.prepare("SELECT id FROM pedidos_empresa WHERE carpeta_id = ? AND lote_id IS NULL AND estado IN ('pendiente','vencido','no_puede')").all(c.id);
     pendientes = resto.length;
     if (resto.length) {
@@ -4547,7 +4560,7 @@ ruta('POST', '/api/admin/lotes-empresa/:id/confirmar', ({ req, params, body }) =
           p.foto, p.id, l.id, grupo ? i + 1 : null, p.tamano, p.horario, grupo, pagaEmpresa && metodoEmpresa === 'efectivo' ? precioTotal : null,
           piloto ? piloto.id : null, piloto ? 'por_aceptar' : null, piloto ? 'oficina' : null, p.lat, p.lng);
         const id = Number(res.lastInsertRowid);
-        db.prepare('UPDATE envios SET codigo_corto = ? WHERE id = ?').run(codigoCortoPedido(p), id);
+        db.prepare('UPDATE envios SET codigo_corto = ?, marcado = ? WHERE id = ?').run(codigoCortoPedido(p), marcadoValido(l.marcado), id);
         db.prepare("UPDATE pedidos_empresa SET estado = 'enviado', envio_id = ?, actualizado = datetime('now') WHERE id = ?").run(id, p.id);
         db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(id, 'pendiente', `Pedido de ${emp.empresa_nombre || emp.nombre}${grupo ? `, parada ${i + 1} de ${ordenados.length}` : ''}${piloto ? `. Asignado a ${piloto.nombre.split(' ')[0]}, esperando que acepte` : ''} (${quien.nombre.split(' ')[0]})`);
         creados.push({ id, ruta: ri, piloto });

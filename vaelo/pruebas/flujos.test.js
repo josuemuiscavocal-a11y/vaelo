@@ -882,3 +882,29 @@ test('código corto para escribir en el paquete: por remitente y por día, sin r
   if (ped) { assert.match(ped.c_envio || '', /^[A-Z0-9]{2}-\d{2}$/); }
   for (const x of [a.j.id, ...caja.j.envios.map((y) => y.id)]) db.prepare("UPDATE envios SET estado = 'cancelado' WHERE id = ?").run(x);
 });
+
+test('cómo marca la empresa los paquetes: con etiqueta o nombre no se usa el código', async () => {
+  const beto = cliente(); await beto('POST', '/api/login', { email: 'beto@prueba.com', password: 'clave-de-prueba-123' });
+  const dia = new Date(Date.now() - 6 * 3600_000 + 3 * 86400_000).toISOString().slice(0, 10);
+  const c = (await beto('POST', '/api/empresa/carpetas', { dia })).j.carpeta;
+  assert.equal(c.marcado, 'codigo', 'por defecto, código escrito');
+  const p = await beto('POST', `/api/empresa/carpetas/${c.id}/pedidos`, { descripcion: 'Blusa', tamano: 'sobre', cliente_nombre: 'Ana Ruiz', cliente_telefono: '55551234' });
+  assert.equal(p.status, 201, JSON.stringify(p.j));
+  assert.match((await beto('GET', `/api/empresa/carpetas/${c.id}`)).j.carpeta.pedidos[0].codigo_corto, /^TB-\d{2}$/);
+  assert.equal((await beto('PUT', `/api/empresa/carpetas/${c.id}`, { marcado: 'etiqueta' })).status, 200);
+  const v = (await beto('GET', `/api/empresa/carpetas/${c.id}`)).j.carpeta;
+  assert.equal(v.marcado, 'etiqueta'); assert.equal(v.pedidos[0].codigo_corto, null);
+  assert.equal((await beto('PUT', `/api/empresa/carpetas/${c.id}`, { marcado: 'otra' })).status, 400);
+  // La siguiente carpeta recuerda lo que eligió
+  const c2 = (await beto('POST', '/api/empresa/carpetas', { dia: new Date(Date.now() - 6 * 3600_000 + 4 * 86400_000).toISOString().slice(0, 10) })).j.carpeta;
+  assert.equal(c2.marcado, 'etiqueta');
+  await beto('PUT', `/api/empresa/carpetas/${c2.id}`, { marcado: 'codigo' });
+  // Un envío de empresa marcado con nombre: el piloto no ve el código
+  const e = db.prepare("SELECT id FROM envios WHERE pedido_id IS NOT NULL AND mensajero_id = ? ORDER BY id DESC LIMIT 1").get(pilotoId);
+  if (e) {
+    db.prepare("UPDATE envios SET marcado = 'nombre', estado = 'recogido' WHERE id = ?").run(e.id);
+    const x = (await piloto('GET', '/api/piloto/envios')).j.envios.find((y) => y.id === e.id);
+    if (x) { assert.equal(x.codigo_corto, null); assert.match(x.marcado_texto, /Nombre/); }
+    db.prepare("UPDATE envios SET marcado = NULL, estado = 'entregado' WHERE id = ?").run(e.id);
+  }
+});
