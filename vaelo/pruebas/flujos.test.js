@@ -1134,3 +1134,29 @@ test('zonas dibujadas a mano: la franja entre dos vecinas (unos metros) cuenta c
     for (const x of antes) db.prepare('UPDATE zonas_fijas SET poligono = ? WHERE id = ?').run(x.poligono, x.id);
   }
 });
+
+test('precios con las zonas reales de Vaelo: Q35 dentro, Q45 fuera, y la ubicación de quien recibe corrige la zona elegida', async () => {
+  const reales = JSON.parse(fs.readFileSync(path.join(__dirname, 'datos', 'zonas-reales.json'), 'utf8'));
+  const antes = db.prepare('SELECT * FROM zonas_fijas').all();
+  db.exec('DELETE FROM zonas_fijas');
+  for (const z of reales) db.prepare('INSERT INTO zonas_fijas (nombre, activa, poligono) VALUES (?, ?, ?)').run(z.nombre, z.activa, z.poligono);
+  try {
+    const L = { Z1: [14.6360, -90.5130], Cayala: [14.6133, -90.4858], Z10: [14.5990, -90.5070], Z17: [14.6408, -90.4752], Mixco: [14.6330, -90.6064],
+      borde1516: [14.59040, -90.48390], Z24: [14.6183, -90.4368], Z6: [14.6650, -90.4900], Z18: [14.6808, -90.4460], Z15: [14.5990, -90.4930] };
+    const casos = [['Z1', 'Zona 1', 'Cayala', 'Zona 16', 35], ['Z1', 'Zona 1', 'Z10', 'Zona 16', 45], ['Z1', 'Zona 1', 'Z17', 'Otra zona o municipio', 35],
+      ['Mixco', 'Otra zona o municipio', 'Z1', 'Zona 1', 45], ['borde1516', 'Zona 15', 'Z24', 'Zona 24', 35], ['Z6', 'Zona 6', 'Z18', 'Otra zona o municipio', 45],
+      ['Z15', 'Zona 15', 'Z24', 'Zona 24', 35], ['Mixco', 'Zona 1', 'Z6', 'Zona 6', 45]];
+    for (const [o, oz, de, dz, esperado] of casos) {
+      const r = await ana('POST', '/api/envios', { vehiculo_id: 1, peso: 2, origen_zona: oz, destino_zona: dz, origen_lat: L[o][0], origen_lng: L[o][1],
+        destino_nombre: 'Recibe', destino_telefono: '55554444', destino_direccion: 'Casa', metodo_pago: 'efectivo', foto_paquete: FOTO });
+      assert.equal(r.status, 201, JSON.stringify(r.j));
+      await cliente()('POST', `/api/recibe/${r.j.enlace_receptor.split('/').pop()}/confirmar`, { nombre: 'Recibe', lat: L[de][0], lng: L[de][1] });
+      await new Promise((ok) => setTimeout(ok, 30));
+      assert.equal(fila(r.j.id).precio, esperado, `${o} (${oz}) → ${de} (${dz})`);
+      await ana('POST', `/api/envios/${r.j.id}/cancelar`, {});
+    }
+  } finally {
+    db.exec('DELETE FROM zonas_fijas');
+    for (const z of antes) db.prepare('INSERT INTO zonas_fijas (id, nombre, activa, poligono) VALUES (?, ?, ?, ?)').run(z.id, z.nombre, z.activa, z.poligono);
+  }
+});
