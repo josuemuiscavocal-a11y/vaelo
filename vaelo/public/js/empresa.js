@@ -746,6 +746,7 @@ function dialogoNuevoEnvio(c, r, recargar) {
         desc.value = ''; nombre.value = ''; tel.value = ''; cobro.value = ''; foto.value = ''; vistaFoto.hidden = true; vacio.hidden = false;
         mostrarMensaje(msg, `Listo: ${p.cliente_nombre} quedó en la carpeta. Añade el siguiente.`, 'exito'); nombre.focus(); guardar.disabled = false; dlg.dataset.cambios = '1';
       } else { dlg.close(); recargar(); }
+      window.avisoHecho?.('Pedido añadido', p.cliente_nombre);
     } catch (e) { if (ventana) ventana.close(); mostrarMensaje(msg, e.message); guardar.disabled = false; }
   });
   dlg.append(el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: () => dlg.close() }),
@@ -844,7 +845,7 @@ async function dialogoEnviar(c, r, recargar) {
     try {
       const x = await api(`/api/empresa/carpetas/${c.id}/enviar`, { body: { modo, recogida, paga } });
       if (ventana && x.whatsapp) ventana.location.href = x.whatsapp; else if (ventana) ventana.close();
-      poner(dlg, el('div', { class: 'celebra-caja' }, el('h2', { text: '¡Listo! Vaelo ya tiene tu carpeta' }),
+      poner(dlg, el('div', { class: 'celebra-caja' }, window.checkAnimado ? checkAnimado() : null, el('h2', { text: '¡Listo! Vaelo ya tiene tu carpeta' }),
         el('p', { text: x.whatsapp ? 'Te abrimos WhatsApp para acordar el precio del pickup. Después Vaelo asigna el piloto.' : 'Vaelo arma las rutas (primero la entrega más cercana) y te avisamos cuando cada piloto acepte.' }),
         x.pendientes ? el('p', { class: 'pista', text: `${x.pendientes} envío(s) sin confirmar quedaron en una carpeta nueva.` }) : null,
         x.whatsapp ? el('a', { class: 'boton cinta', href: x.whatsapp, target: '_blank', rel: 'noopener', text: 'Abrir WhatsApp de Vaelo' }) : null,

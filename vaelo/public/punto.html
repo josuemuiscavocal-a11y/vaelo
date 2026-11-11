@@ -9,11 +9,13 @@
   <link rel="icon" href="/img/favicon.png" type="image/png">
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/styles.css?v=20261110b">
+  <link rel="stylesheet" href="/css/suave.css?v=20261111a">
 </head>
 <body>
   <header class="barra"><div class="contenedor"><a href="/" class="marca"><img src="/img/logo-blanco.png" alt="Vaelo" width="139" height="40"></a></div></header>
   <main class="area"><div class="contenedor" id="app" style="max-width:560px"><p class="pista">Cargando…</p></div></main>
   <script src="/js/comun.js?v=20261109d"></script>
+  <script src="/js/suave.js?v=20261111a"></script>
   <script>
     // Quien tiene los paquetes en otro lugar confirma desde ahí: acepta entregarlos y comparte su ubicación real
     const app = document.getElementById('app');
@@ -30,7 +32,7 @@
         guardar.disabled = true;
         try {
           await api('/api/punto/' + token, { body: { ...pos, direccion: dir.value, acepto: acepto.checked } });
-          poner(app, el('div', { class: 'bloque' }, el('h1', { text: 'Listo, gracias' }),
+          poner(app, el('div', { class: 'bloque' }, window.checkAnimado ? el('div', { style: 'margin-bottom:.8rem' }, checkAnimado()) : null, el('h1', { text: 'Listo, gracias' }),
             el('p', { text: `Este lugar quedó como punto de recogida de ${d.tienda}. Cuando un piloto de Vaelo venga por los paquetes, entrégaselos aquí.` })));
         } catch (e) { mostrarMensaje(msg, e.message); guardar.disabled = false; }
       } });

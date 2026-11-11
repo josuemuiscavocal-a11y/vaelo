@@ -12,12 +12,14 @@
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/vendor/maplibre/maplibre-gl.css?v=4.7.1">
   <link rel="stylesheet" href="/css/styles.css?v=20261109d">
+  <link rel="stylesheet" href="/css/suave.css?v=20261111a">
 </head>
 <body>
   <header class="barra"><div class="contenedor"><a href="/" class="marca"><img src="/img/logo-blanco.png" alt="Vaelo" width="139" height="40"></a></div></header>
   <main class="area"><div class="contenedor" id="app" style="max-width:720px"><p class="pista">Cargando…</p></div></main>
   <script src="/vendor/maplibre/maplibre-gl.js?v=4.7.1"></script>
   <script src="/js/comun.js?v=20261109d"></script>
+  <script src="/js/suave.js?v=20261111a"></script>
   <script src="/js/qr.js?v=1"></script>
   <script>
     const app = document.getElementById('app');
@@ -155,6 +157,7 @@
           await api('/api/pedido/' + token, { body: { dia, horario, lat: punto.lat, lng: punto.lng, zona: zona.value, direccion: direccion.value, referencias: referencias.value,
             recibe_nombre: nombre.value, recibe_telefono: tel.value } });
           editando = false;
+          window.avisoHecho?.('Pedido confirmado', 'Te avisamos cuando vaya en camino.');
           await cargar();
           window.scrollTo({ top: 0, behavior: sinAnimacion() ? 'auto' : 'smooth' });
         } catch (e) { mostrarMensaje(msg, e.message); b.disabled = false; }

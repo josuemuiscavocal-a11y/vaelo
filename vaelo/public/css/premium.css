@@ -106,18 +106,18 @@ input, select, textarea { transition: border-color .18s ease, box-shadow .18s ea
 /* ---------- Movimiento (solo si la persona no pidió reducirlo) ---------- */
 @media (prefers-reduced-motion: no-preference) {
   /* Entrada de la portada, un elemento tras otro */
-  .portada .contenedor > div:first-child > * { animation: subir .7s var(--suave-salida) both; }
+  .portada .contenedor > div:first-child > * { animation: pm-subir .7s var(--suave-salida) both; }
   .portada .contenedor > div:first-child > :nth-child(2) { animation-delay: .08s; }
   .portada .contenedor > div:first-child > :nth-child(3) { animation-delay: .16s; }
   .portada .contenedor > div:first-child > :nth-child(4) { animation-delay: .24s; }
-  .escena { animation: llegar .9s var(--suave-salida) .2s both; }
-  .ruta .calle { animation: aparecer 1.2s ease .5s both; }
-  .ruta .estela { animation: aparecer .6s ease 1s both, recorrer 9s linear 1s infinite; }
-  .ruta .moto { animation: aparecer .6s ease 1s both, recorrer-moto 9s linear 1s infinite; }
-  .ruta .punto { animation: aparecer .5s ease .8s both; }
-  .ruta .onda { animation: onda 2.4s ease-out 1.4s infinite; }
-  .codigo-barras::after { animation: escanear 4.5s ease-in-out 1.6s infinite; }
-  .precio-grande strong.cambio { animation: precio .45s var(--suave-salida); }
+  .escena { animation: pm-llegar .9s var(--suave-salida) .2s both; }
+  .ruta .calle { animation: pm-aparecer 1.2s ease .5s both; }
+  .ruta .estela { animation: pm-aparecer .6s ease 1s both, pm-recorrer 9s linear 1s infinite; }
+  .ruta .moto { animation: pm-aparecer .6s ease 1s both, pm-recorrer-moto 9s linear 1s infinite; }
+  .ruta .punto { animation: pm-aparecer .5s ease .8s both; }
+  .ruta .onda { animation: pm-onda 2.4s ease-out 1.4s infinite; }
+  .codigo-barras::after { animation: pm-escanear 4.5s ease-in-out 1.6s infinite; }
+  .precio-grande strong.cambio { animation: pm-precio .45s var(--suave-salida); }
 
   /* Aparición al bajar por la página (premium.js marca los elementos) */
   .anim .ver { opacity: 0; transform: translateY(18px); transition: opacity .7s var(--suave-salida), transform .7s var(--suave-salida); transition-delay: calc(var(--i, 0) * 90ms); }
@@ -127,15 +127,15 @@ input, select, textarea { transition: border-color .18s ease, box-shadow .18s ea
 }
 /* La guía flota solo en pantallas grandes y se queda quieta mientras se usa */
 @media (prefers-reduced-motion: no-preference) and (min-width: 861px) {
-  .escena .etiqueta { animation: flotar 7s ease-in-out 1.2s infinite; }
+  .escena .etiqueta { animation: pm-flotar 7s ease-in-out 1.2s infinite; }
   .escena:hover .etiqueta, .escena:focus-within .etiqueta { animation-play-state: paused; }
 }
-@keyframes subir { from { opacity: 0; transform: translateY(16px); } }
-@keyframes llegar { from { opacity: 0; transform: translateY(26px) scale(.97); } }
-@keyframes flotar { 0%, 100% { transform: rotate(var(--giro)) translateY(0); } 50% { transform: rotate(var(--giro)) translateY(-7px); } }
-@keyframes aparecer { from { opacity: 0; } }
-@keyframes recorrer { from { stroke-dashoffset: 9; } to { stroke-dashoffset: -91; } }
-@keyframes recorrer-moto { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -100; } }
-@keyframes onda { 0% { opacity: .8; transform: scale(.6); } 100% { opacity: 0; transform: scale(2.4); } }
-@keyframes escanear { 0%, 55% { transform: translateX(-120%); } 100% { transform: translateX(480%); } }
-@keyframes precio { 0% { opacity: .2; transform: translateY(8px) scale(.96); } 100% { opacity: 1; transform: none; } }
+@keyframes pm-subir { from { opacity: 0; transform: translateY(16px); } }
+@keyframes pm-llegar { from { opacity: 0; transform: translateY(26px) scale(.97); } }
+@keyframes pm-flotar { 0%, 100% { transform: rotate(var(--giro)) translateY(0); } 50% { transform: rotate(var(--giro)) translateY(-7px); } }
+@keyframes pm-aparecer { from { opacity: 0; } }
+@keyframes pm-recorrer { from { stroke-dashoffset: 9; } to { stroke-dashoffset: -91; } }
+@keyframes pm-recorrer-moto { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -100; } }
+@keyframes pm-onda { 0% { opacity: .8; transform: scale(.6); } 100% { opacity: 0; transform: scale(2.4); } }
+@keyframes pm-escanear { 0%, 55% { transform: translateX(-120%); } 100% { transform: translateX(480%); } }
+@keyframes pm-precio { 0% { opacity: .2; transform: translateY(8px) scale(.96); } 100% { opacity: 1; transform: none; } }

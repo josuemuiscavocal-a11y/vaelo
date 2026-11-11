@@ -1,6 +1,6 @@
 // Permite instalar Vaelo como app en el celular. Guarda solo archivos de diseño; los datos siempre se piden en vivo.
-const CACHE = 'vaelo-v11';
-const ARCHIVOS = ['/css/styles.css', '/js/comun.js', '/img/logo-blanco.png', '/img/logo-negro.png', '/img/icono-192.png'];
+const CACHE = 'vaelo-v12';
+const ARCHIVOS = ['/css/styles.css', '/css/suave.css', '/js/comun.js', '/js/suave.js', '/img/logo-blanco.png', '/img/logo-negro.png', '/img/icono-192.png'];
 
 self.addEventListener('install', (ev) => {
   ev.waitUntil(caches.open(CACHE).then((c) => c.addAll(ARCHIVOS)).then(() => self.skipWaiting()));
