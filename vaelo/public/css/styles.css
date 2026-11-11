@@ -1633,3 +1633,7 @@ fieldset { min-width: 0; } .recientes { max-width: 100%; min-width: 0; }
 .importar-zonas > div { display: grid; gap: .2rem; flex: 1 1 320px; }
 .importar-zonas small { color: var(--suave); }
 #resultado-importar .mensaje p { margin: .25rem 0; }
+
+/* Aviso de confirmar correo para tiendas: más discreto y se puede cerrar */
+.aviso-suave { position: relative; padding-right: 2.4rem; font-size: .92rem; background: #fffbea; }
+.aviso-suave .cerrar-aviso { position: absolute; top: .4rem; right: .4rem; }

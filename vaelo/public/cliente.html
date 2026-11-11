@@ -686,12 +686,19 @@
         $('tab-empresa').textContent = yoCliente.tipo_cuenta === 'minorista' ? 'Mi tienda' : 'Mi empresa';
         pintarTienda();
         if (yoCliente.tipo_cuenta === 'empresa' && yoCliente.descuento_empresa > 0) avisos.push(el('div', { class: 'mensaje exito', text: `Tu empresa tiene ${yoCliente.descuento_empresa}% de descuento en sus envíos.` }));
-        if (correoActivo && !yoCliente.email_verificado) avisos.push(el('div', { class: 'mensaje aviso aviso-accion' },
-          el('span', {}, 'Confirma tu correo: te enviamos un enlace a ', el('strong', { text: yoCliente.email }), '. Revisa también la carpeta de spam.'),
-          el('button', { class: 'boton chico borde', type: 'button', text: 'Reenviar correo', onclick: async (ev) => {
+        const reenviar = el('button', { class: 'boton chico borde', type: 'button', text: 'Reenviar correo', onclick: async (ev) => {
             ev.target.disabled = true;
             try { await api('/api/yo/reenviar-correo', { body: {} }); ev.target.textContent = 'Enviado'; } catch (e) { alert(e.message); ev.target.disabled = false; }
-          } })));
+          } });
+        // Las tiendas y empresas no necesitan confirmar para trabajar: solo se les recomienda (sirve para recuperar la contraseña) y lo pueden cerrar
+        if (correoActivo && !yoCliente.email_verificado && ['empresa', 'minorista'].includes(yoCliente.tipo_cuenta)) {
+          if (!cerradoHasta('confirmar-correo')) {
+            const caja = el('div', { class: 'mensaje aviso aviso-accion aviso-suave' });
+            caja.append(el('span', {}, 'Te recomendamos confirmar tu correo (', el('strong', { text: yoCliente.email }), '): así puedes recuperar tu contraseña si la olvidas. Tu tienda ya funciona sin hacerlo.'), reenviar, botonCerrarAviso('confirmar-correo', caja));
+            avisos.push(caja);
+          }
+        } else if (correoActivo && !yoCliente.email_verificado) avisos.push(el('div', { class: 'mensaje aviso aviso-accion' },
+          el('span', {}, 'Confirma tu correo: te enviamos un enlace a ', el('strong', { text: yoCliente.email }), '. Revisa también la carpeta de spam.'), reenviar));
         $('docs-identidad').replaceChildren(
           campoDocumento({ titulo: 'Tu foto', tiene: yoCliente.tiene_foto, ver: '/api/yo/documento/foto',
             ayuda: 'Opcional. Elige una de tu galería.', subir: (archivo) => api('/api/yo/documento', { body: { tipo: 'foto', archivo } }), alCambiar: cargarCuenta }));
