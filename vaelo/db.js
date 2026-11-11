@@ -557,7 +557,11 @@ agregarColumnas('envios', [['calif_receptor', 'INTEGER'], ['calif_receptor_comen
 // Código corto para escribir a mano en el paquete (TB-07): sin impresora, el piloto sabe cuál es cuál
 agregarColumnas('envios', [['codigo_corto', 'TEXT']]);
 agregarColumnas('pedidos_empresa', [['codigo_corto', 'TEXT'], ['codigo_dia', 'TEXT']]);
-agregarColumnas('pedidos_empresa', [['cobro', 'REAL NOT NULL DEFAULT 0']]);   // lo que la tienda cobra por su producto al entregar
+agregarColumnas('pedidos_empresa', [['cobro', 'REAL NOT NULL DEFAULT 0']]);
+// Punto de recogida de empresas y tiendas: siempre con la ubicación real del celular en el lugar.
+// Si los paquetes están en otro lugar, una persona de ahí lo confirma con un enlace (/punto/<clave>).
+agregarColumnas('usuarios', [['punto_contacto', 'TEXT'], ['punto_telefono', 'TEXT'], ['punto_fuente', 'TEXT'], ['punto_precision', 'REAL'], ['punto_actualizado', 'TEXT'],
+  ['punto_token', 'TEXT'], ['punto_token_vence', 'TEXT'], ['punto_pend_nombre', 'TEXT'], ['punto_pend_telefono', 'TEXT']]);   // lo que la tienda cobra por su producto al entregar
 // Cómo marca la empresa sus paquetes: etiqueta impresa, código escrito (TB-07) o nombre del cliente escrito
 agregarColumnas('carpetas_empresa', [['marcado', "TEXT NOT NULL DEFAULT 'codigo'"]]);
 agregarColumnas('lotes_empresa', [['marcado', "TEXT NOT NULL DEFAULT 'codigo'"]]);

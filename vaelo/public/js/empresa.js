@@ -279,35 +279,107 @@ async function panelPedidos(caja, yo, abrirId) {
       el('li', {}, el('strong', { text: 'Añade tus envíos' }), el('span', { text: 'uno por uno. A cada cliente le mandas su enlace por WhatsApp.' })),
       el('li', {}, el('strong', { text: 'Tus clientes confirman' }), el('span', { text: 'su horario, dónde lo reciben y quién lo recibe.' })),
       el('li', {}, el('strong', { text: `Con ${r.minimo} confirmados, envíala a Vaelo` }), el('span', { text: 'y nosotros armamos las rutas.' }))));
-  poner(caja, bloquePunto(r),
+  const cp = r.cobros_producto;
+  const cajaCobros = cp && (cp.pendiente > 0 || cp.pagado_30 > 0) ? el('section', { class: 'bloque cobros-tienda' },
+    el('div', {}, el('span', { text: 'Dinero de tus productos que Vaelo te tiene' }), el('strong', { text: dinero(cp.pendiente) }),
+      el('small', { text: cp.pendiente > 0 ? `De ${cp.envios} entrega(s) ya cobrada(s). Vaelo te lo entrega y aquí queda marcado.` : 'Estás al día: ya te entregamos todo.' })),
+    cp.pagado_30 > 0 ? el('div', {}, el('span', { text: 'Ya te entregamos (30 días)' }), el('strong', { text: dinero(cp.pagado_30) }), cp.ultimo_pago ? el('small', { text: 'Último: ' + fecha(cp.ultimo_pago, false) }) : null) : null) : null;
+  poner(caja, cajaCobros, bloquePunto(r, () => panelPedidos(caja, yo)),
     el('section', { class: 'bloque' },
       el('div', { class: 'cab-bloque' }, el('div', {}, el('h2', { text: 'Tus carpetas de envíos' }), el('p', { class: 'pista', text: 'Una carpeta por día de entrega.' })), nueva),
       r.abiertas.length ? el('div', { class: 'carpetas' }, r.abiertas.map(tarjeta)) : vacio),
     r.enviadas.length ? el('section', { class: 'bloque' }, el('h2', { text: 'Enviadas a Vaelo' }), el('div', { class: 'carpetas' }, r.enviadas.map(tarjeta))) : null);
 }
 // Punto de recogida: donde el piloto pasa por los paquetes
-function bloquePunto(r) {
+function bloquePunto(r, alCambiar) {
   const punto = el('section', { class: 'bloque recogida-empresa' });
-  const pintarPunto = (editar) => {
-    if (!editar && r.punto) {
-      poner(punto, icono('sede'), el('div', {}, el('strong', { text: 'Los pilotos recogen en' }), el('span', { text: r.punto.direccion })),
-        el('button', { class: 'boton borde chico', type: 'button', text: 'Cambiar', onclick: () => pintarPunto(true) }));
+  const tel8 = (t) => String(t || '').replace(/\D/g, '').slice(-8);
+  const leerGps = () => new Promise((ok, mal) => {
+    if (!navigator.geolocation) return mal(new Error('Tu navegador no puede compartir la ubicación. Abre Vaelo en Chrome o Safari.'));
+    navigator.geolocation.getCurrentPosition((x) => ok({ lat: x.coords.latitude, lng: x.coords.longitude, precision: x.coords.accuracy }),
+      (e) => mal(new Error(e.code === 1 ? 'Necesitamos tu ubicación. Toca el candado junto a la dirección de la página y permite la ubicación.' : 'No pudimos leer tu ubicación. Acércate a una ventana y vuelve a intentar.')),
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+  });
+  const listo = () => { if (alCambiar) alCambiar(); };
+  const pintar = (modo) => {
+    // Ya guardado: se ve dónde y quién entrega, y siempre se puede cambiar
+    if (!modo && r.punto) {
+      poner(punto, icono('sede'), el('div', {}, el('strong', { text: 'Los pilotos recogen tus paquetes en' }), el('span', { text: r.punto.direccion }),
+          el('small', { class: 'pista', text: `Entrega: ${r.punto.contacto}${r.punto.telefono ? ' · ' + r.punto.telefono : ''}${r.punto.fuente === 'mapa' ? '' : ' · ubicación tomada con GPS en el lugar'}` }),
+          r.punto.fuente === 'mapa' ? el('small', { class: 'error-texto', text: 'Este punto se marcó en el mapa. Para que el piloto no se confunda, vuelve a tomarlo con «Cambiar» estando en el lugar.' }) : null),
+        el('button', { class: 'boton borde chico', type: 'button', text: 'Cambiar', onclick: () => pintar('elegir') }));
       return;
     }
+    if (!modo && r.punto_pendiente) modo = 'esperando';
     const msg = el('div', { class: 'mensaje', role: 'alert' });
-    const dir = el('input', { maxlength: 300, value: r.punto?.direccion || '', placeholder: 'Dirección de tu local o bodega' });
-    const mapa = el('div');
-    let p = r.punto ? { lat: r.punto.lat, lng: r.punto.lng } : null;
-    poner(punto, el('div', { style: 'flex:1' }, el('h3', { text: '¿Dónde recoge el piloto tus paquetes?' }), el('p', { class: 'pista', text: 'Marca tu local o bodega. Desde aquí se arman las rutas.' }),
-      mapa, el('div', { class: 'campo' }, el('label', { text: 'Dirección' }), dir), msg,
-      el('div', { class: 'navegar' }, el('button', { class: 'boton chico', type: 'button', text: 'Guardar', onclick: async () => {
-        try { if (!p) throw new Error('Marca el punto en el mapa.'); const x = await api('/api/empresa/punto', { method: 'PUT', body: { lat: p.lat, lng: p.lng, direccion: dir.value } }); r.punto = x.punto; pintarPunto(false); }
-        catch (e) { mostrarMensaje(msg, e.message); }
-      } }), r.punto ? el('button', { class: 'boton borde chico', type: 'button', text: 'Cancelar', onclick: () => pintarPunto(false) }) : null)));
-    const sel = selectorPunto(mapa, { letra: 'A', clase: 'recogida', conMiUbicacion: true, alCambiar: (x) => { p = x; }, alDireccion: (t, usar) => { if (usar || !dir.value) dir.value = t; } });
-    if (p) sel.poner(p.lat, p.lng);
+    const cancelar = r.punto || r.punto_pendiente ? el('button', { class: 'boton borde chico', type: 'button', text: 'Cancelar', onclick: () => pintar(null) }) : null;
+    const titulo = el('h3', { text: '¿Dónde recoge el piloto tus paquetes?' });
+    if (modo === 'esperando') {
+      const pe = r.punto_pendiente;
+      const wa = `https://wa.me/502${tel8(pe.telefono)}?text=${encodeURIComponent(`Hola ${pe.nombre}, soy ${r.empresa}. Vaelo va a pasar por mis paquetes donde estás tú. Abre este enlace estando ahí y comparte tu ubicación: ${location.origin + pe.enlace}`)}`;
+      poner(punto, el('div', { style: 'flex:1' }, titulo,
+        el('div', { class: 'mensaje aviso' }, 'Esperando que ', el('strong', { text: pe.nombre }), ' abra el enlace en el lugar y comparta su ubicación.'), msg,
+        el('div', { class: 'navegar' },
+          el('a', { class: 'boton cinta chico', href: wa, target: '_blank', rel: 'noopener', text: 'Mandar el enlace otra vez' }),
+          el('button', { class: 'boton borde chico', type: 'button', text: 'Ya lo compartió', onclick: () => listo() }),
+          el('button', { class: 'boton borde chico', type: 'button', text: 'Cambiar', onclick: async () => { await api('/api/empresa/punto/enlace', { method: 'DELETE' }).catch(() => {}); r.punto_pendiente = null; pintar('elegir'); } }))));
+      return;
+    }
+    if (modo === 'aqui') {
+      const dir = el('input', { maxlength: 300, value: r.punto?.direccion || '', placeholder: 'Ej. 5a calle 3-20 zona 1, portón negro' });
+      let pos = null;
+      const estado = el('p', { class: 'pista', text: 'Leyendo tu ubicación…' });
+      const guardar = el('button', { class: 'boton', type: 'button', text: 'Guardar este lugar', disabled: true, onclick: async () => {
+        guardar.disabled = true;
+        try { const x = await api('/api/empresa/punto', { method: 'PUT', body: { ...pos, direccion: dir.value } }); r.punto = x.punto; r.punto_pendiente = null; pintar(null); listo(); }
+        catch (e) { mostrarMensaje(msg, e.message); guardar.disabled = false; }
+      } });
+      const leer = async () => {
+        estado.textContent = 'Leyendo tu ubicación…'; guardar.disabled = true;
+        try {
+          pos = await leerGps();
+          estado.textContent = pos.precision > 250 ? `La señal está débil (unos ${Math.round(pos.precision)} m de error). Acércate a una ventana y toca «Leer otra vez».` : `Ubicación tomada (unos ${Math.round(pos.precision)} m de margen).`;
+          estado.className = pos.precision > 250 ? 'error-texto' : 'exito-texto';
+          guardar.disabled = pos.precision > 250;
+        } catch (e) { estado.textContent = e.message; estado.className = 'error-texto'; }
+      };
+      poner(punto, el('div', { style: 'flex:1' }, titulo,
+        el('p', { class: 'pista', text: 'Estás en el lugar donde el piloto va a recoger. Tomamos la ubicación de tu celular para que llegue directo.' }), estado,
+        el('div', { class: 'campo' }, el('label', { text: 'Dirección o referencia para el piloto' }), dir), msg,
+        el('div', { class: 'navegar' }, guardar, el('button', { class: 'boton borde chico', type: 'button', text: 'Leer otra vez', onclick: leer }),
+          el('button', { class: 'boton borde chico', type: 'button', text: 'Atrás', onclick: () => pintar('elegir') }))));
+      leer();
+      return;
+    }
+    if (modo === 'otro') {
+      const nombre = el('input', { maxlength: 80, placeholder: 'Ej. Doña Marta' }), tel = el('input', { type: 'tel', maxlength: 30, placeholder: '5555 5555' });
+      poner(punto, el('div', { style: 'flex:1' }, titulo,
+        el('div', { class: 'mensaje aviso' }, el('strong', { text: 'En ese lugar tiene que haber una persona. ' }),
+          'Le mandamos un enlace por WhatsApp: lo abre estando ahí, acepta que va a entregar los paquetes al piloto y comparte su ubicación en tiempo real. Esa ubicación queda como el lugar de recogida.'),
+        el('div', { class: 'fila' }, el('div', { class: 'campo' }, el('label', { text: 'Nombre de esa persona' }), nombre), el('div', { class: 'campo' }, el('label', { text: 'Su WhatsApp' }), tel)), msg,
+        el('div', { class: 'navegar' }, el('button', { class: 'boton', type: 'button', text: 'Mandar enlace por WhatsApp', onclick: async () => {
+          const ventana = window.open('about:blank', '_blank');
+          try {
+            const x = await api('/api/empresa/punto/enlace', { body: { nombre: nombre.value, telefono: tel.value } });
+            r.punto_pendiente = x.pendiente;
+            const pe = x.pendiente;
+            const texto = `Hola ${pe.nombre}, soy ${r.empresa}. Vaelo va a pasar por mis paquetes donde estás tú. Abre este enlace estando ahí y comparte tu ubicación: ${location.origin + pe.enlace}`;
+            if (ventana) ventana.location.href = `https://wa.me/502${tel8(pe.telefono)}?text=${encodeURIComponent(texto)}`;
+            pintar('esperando');
+          } catch (e) { if (ventana) ventana.close(); mostrarMensaje(msg, e.message); }
+        } }), el('button', { class: 'boton borde chico', type: 'button', text: 'Atrás', onclick: () => pintar('elegir') }))));
+      return;
+    }
+    // Elegir: dos opciones rápidas
+    const opcion = (t, a, fn) => el('button', { type: 'button', class: 'opcion-punto', onclick: fn }, el('strong', { text: t }), el('small', { text: a }));
+    poner(punto, el('div', { style: 'flex:1' }, titulo,
+      el('p', { class: 'pista', text: 'Usamos la ubicación real del celular, no un mapa: así el piloto llega directo y no se confunde.' }),
+      el('div', { class: 'opciones-punto' },
+        opcion('Usar mi ubicación en tiempo real', 'Estoy ahora donde están los paquetes', () => pintar('aqui')),
+        opcion('Lo tengo en otro lugar', 'Le mando un enlace a la persona que está ahí', () => pintar('otro'))), msg,
+      cancelar ? el('div', { class: 'navegar' }, cancelar) : null));
   };
-  pintarPunto(false);
+  pintar(null);
   return punto;
 }
 // Nueva carpeta o cambiar nombre y día
@@ -378,7 +450,7 @@ async function vistaCarpeta(caja, yo, id) {
     ? el('section', { class: 'bloque carpeta-estado' + (listo ? ' lista' : '') },
       el('div', {}, el('strong', { class: 'carpeta-cifra', text: `${c.confirmados}` }), el('span', { text: ` de ${c.minimo} confirmados` }), progresoCarpeta(c),
         c.dia < r.hoy ? el('small', { class: 'error-texto', text: 'El día de entrega ya pasó. Toca «Cambiar día o nombre» y tus clientes confirman la nueva fecha.' }) : null,
-        !r.punto ? el('small', { class: 'error-texto', text: 'Marca primero dónde recoge el piloto tus paquetes (en Tus carpetas).' }) : null,
+        !r.punto ? el('small', { class: 'error-texto', text: 'Falta el lugar donde el piloto recoge tus paquetes (abajo).' }) : null,
         c.sin_foto ? el('small', { text: `Falta la foto de ${c.sin_foto} paquete(s).` }) : null),
       listo ? el('button', { class: 'boton cinta boton-grande', type: 'button', text: 'Enviar a Vaelo', onclick: () => dialogoEnviar(c, r, recargar) })
         : el('p', { class: 'pista', text: `Cuando ${c.minimo - c.confirmados === 1 ? 'falte 0' : 'tengas ' + c.minimo} confirmados aparece «Enviar a Vaelo».`.replace('falte 0', 'confirme uno más') }))
@@ -386,7 +458,7 @@ async function vistaCarpeta(caja, yo, id) {
       el('strong', { text: { nuevo: 'Vaelo la está preparando', en_ruta: 'En reparto', terminado: 'Terminada', cancelado: 'Cancelada' }[c.lote?.estado] || 'Enviada a Vaelo' }),
       c.lote ? el('small', { text: `${c.lote.modo_texto} · ${c.lote.entregados} de ${c.total} entregados${c.lote.en_camino ? ` · ${c.lote.en_camino} en camino` : ''}${c.lote.en_sede ? ` · ${c.lote.en_sede} en la sede de Vaelo` : ''}` }) : null),
       el('a', { class: 'boton borde chico', href: `/api/empresa/excel?dia=${c.dia}`, text: 'Excel del día' }));
-  poner(caja, cabecera, estadoCaja,
+  poner(caja, cabecera, estadoCaja, abierta && !r.punto ? bloquePunto(r, recargar) : null,
     abierta ? el('div', { class: 'carpeta-acciones' }, anadir,
       el('div', { class: 'navegar' }, el('label', { class: 'boton borde chico doc-boton' }, 'Subir Excel', archivo), el('a', { class: 'boton borde chico', href: '/api/empresa/pedidos/plantilla', text: 'Plantilla' }))) : null,
     msgArchivo,
@@ -438,7 +510,8 @@ function filaPedido(p, r, c, recargar) {
   return el('li', { class: 'pedido-fila' },
     el('div', { class: 'pedido-info' },
       el('div', {}, p.codigo_corto && p.estado !== 'cancelado' ? el('span', { class: 'codigo-paquete', title: 'Escribe este código en el paquete con marcador', text: p.codigo_corto }) : null,
-        el('strong', { text: p.cliente_nombre }), ' ', el('span', { class: ESTADO_PEDIDO_CLASE[p.estado] || 'etiqueta-gris', text: p.estado_texto }),
+        el('strong', { text: p.cliente_nombre }), ' ', e ? el('span', { class: e.estado === 'entregado' ? 'etiqueta-completa' : ['fallido', 'a_sede', 'en_sede', 'devuelto', 'cancelado'].includes(e.estado) ? 'etiqueta-pendiente' : 'etiqueta-azul', text: ESTADO_ENVIO_EMP[e.estado] || p.estado_texto })
+          : el('span', { class: ESTADO_PEDIDO_CLASE[p.estado] || 'etiqueta-gris', text: p.estado_texto }),
         !p.tiene_foto && editable ? el('span', { class: 'etiqueta-pendiente', style: 'margin-left:.3rem', text: 'Falta foto' }) : null,
         p.avisos ? el('span', { class: 'etiqueta-azul', style: 'margin-left:.3rem', title: 'Tu cliente activó los avisos', text: 'Avisos activos' }) : null),
       el('small', { text: `${p.codigo} · ${p.descripcion} · ${p.tamano_texto}${p.cobro > 0 ? ` · cobrar ${dinero(p.cobro)}` : ''}` }),
@@ -481,7 +554,7 @@ function bloqueMarcado(c, abierta, pedidos, recargar) {
   const m = c.marcado || 'codigo';
   const ejemplo = m === 'codigo' ? el('span', { class: 'codigo-paquete', text: pedidos.find((p) => p.codigo_corto)?.codigo_corto || 'TB-01' }) : null;
   return el('div', { class: 'bloque-marcado' },
-    el('p', { class: 'aviso-codigos' }, ejemplo, el('span', {}, el('strong', { text: 'Cada paquete debe ir marcado. ' }), MARCADO_TXT[m][1], ' Sin marca no se recoge: el piloto no sabría cuál es cuál.')),
+    el('p', { class: 'aviso-codigos' }, ejemplo, el('span', {}, el('strong', { text: 'Cada paquete debe ir marcado. ' }), MARCADO_TXT[m][1].replace('TB-01, TB-02', pedidos.map((p) => p.codigo_corto).filter(Boolean).slice(0, 2).join(', ') || 'TB-01, TB-02'), ' Sin marca no se recoge: el piloto no sabría cuál es cuál.')),
     abierta ? el('div', { class: 'marcado-opciones', role: 'radiogroup', 'aria-label': '¿Cómo vas a marcar los paquetes?' },
       el('span', { class: 'etiqueta-campo', text: '¿Cómo vas a marcar los paquetes?' }),
       el('p', { class: 'marcado-recomienda' }, el('strong', { text: 'Recomendado: usar la guía impresa. ' }), 'Si no tienes impresora, usa «Código escrito»: escribes con marcador el código amarillo de cada envío y debajo el nombre del cliente.'),
@@ -690,7 +763,7 @@ async function dialogoEnviar(c, r, recargar) {
     }));
     poner(extra,
       el('h3', { text: '¿Cómo llegan los paquetes a Vaelo?' }),
-      el('div', { class: 'opciones' }, ...[['empresa', 'El piloto los recoge en mi local', r.punto ? r.punto.direccion : 'Primero marca tu local en Tus carpetas'], ['sede', 'Yo los llevo a la sede de Vaelo', r.sede || 'Sede de Vaelo']].map(([k, t, a]) =>
+      el('div', { class: 'opciones' }, ...[['empresa', 'El piloto los recoge en mi local', r.punto ? r.punto.direccion : 'Primero di dónde recoge el piloto (en Tus carpetas)'], ['sede', 'Yo los llevo a la sede de Vaelo', r.sede || 'Sede de Vaelo']].map(([k, t, a]) =>
         el('label', { class: 'opcion' }, el('input', { type: 'radio', name: 'recogida-lote', value: k, checked: recogida === k, onchange: () => { recogida = k; } }), el('span', {}, t, el('small', { text: a }))))),
       modo === 'pickup' ? [el('h3', { style: 'margin-top:1rem', text: '¿Quién paga el pickup?' }),
         el('div', { class: 'opciones' }, ...[['empresa', 'Mi empresa', 'Hablas primero con Vaelo por WhatsApp: precio y promoción. Pagas en efectivo al piloto.'], ['clientes', 'Cada cliente', 'Q35 en zonas preferenciales y Q45 fuera, en efectivo al recibir']].map(([k, t, a]) =>

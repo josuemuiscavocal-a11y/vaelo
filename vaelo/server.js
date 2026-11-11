@@ -3851,8 +3851,26 @@ function recomendar(origen, pedidos) {
   return { ...base, modo: 'motos', motos: k, razon: `${razon} Se recomiendan ${k} motos.` };
 }
 function puntoEmpresa(u) {
-  const f = db.prepare('SELECT empresa_lat, empresa_lng, empresa_direccion, empresa_zona FROM usuarios WHERE id = ?').get(u.id);
-  return f && f.empresa_lat != null ? { lat: f.empresa_lat, lng: f.empresa_lng, direccion: f.empresa_direccion || '', zona: f.empresa_zona || '' } : null;
+  const f = db.prepare('SELECT * FROM usuarios WHERE id = ?').get(u.id);
+  return f && f.empresa_lat != null ? { lat: f.empresa_lat, lng: f.empresa_lng, direccion: f.empresa_direccion || '', zona: f.empresa_zona || '',
+    contacto: f.punto_contacto || f.nombre, telefono: f.punto_telefono || f.telefono || '', fuente: f.punto_fuente || 'mapa', precision: f.punto_precision, actualizado: f.punto_actualizado } : null;
+}
+// Enlace pendiente para que otra persona comparta la ubicación del lugar donde están los paquetes
+function puntoPendiente(u) {
+  const f = db.prepare('SELECT punto_token, punto_token_vence, punto_pend_nombre, punto_pend_telefono FROM usuarios WHERE id = ?').get(u.id);
+  if (!f || !f.punto_token || !f.punto_token_vence || f.punto_token_vence < db.prepare("SELECT datetime('now') AS t").get().t) return null;
+  return { nombre: f.punto_pend_nombre, telefono: f.punto_pend_telefono, enlace: '/punto/' + f.punto_token, vence: f.punto_token_vence };
+}
+const PRECISION_MAX_PUNTO = 250;   // metros: con más error el piloto podría llegar a la cuadra equivocada
+function guardarPuntoGps(uid, body, contacto, telefono, fuente) {
+  const c = coordenada(body.lat, body.lng);
+  if (!c) falla(400, 'No pudimos leer la ubicación. Toca otra vez el botón y permite la ubicación.');
+  const precision = numero(body.precision);
+  if (Number.isFinite(precision) && precision > PRECISION_MAX_PUNTO) falla(400, `La señal del GPS está débil (unos ${Math.round(precision)} m de error). Acércate a una ventana o sal a la puerta y vuelve a intentar.`);
+  const direccion = texto(body.direccion, 300);
+  if (direccion.length < 5) falla(400, 'Escribe la dirección o una referencia del lugar (ej. 5a calle 3-20, portón negro).');
+  db.prepare(`UPDATE usuarios SET empresa_lat = ?, empresa_lng = ?, empresa_direccion = ?, empresa_zona = ?, punto_contacto = ?, punto_telefono = ?, punto_fuente = ?, punto_precision = ?,
+    punto_actualizado = datetime('now') WHERE id = ?`).run(c.lat, c.lng, direccion, zonaDePunto(c) || OTRA_ZONA, contacto, telefono, fuente, Number.isFinite(precision) ? Math.round(precision) : null, uid);
 }
 const origenLote = (l) => l.recogida === 'sede' ? sedeUbicacion() : (l.origen_lat != null ? { lat: l.origen_lat, lng: l.origen_lng } : null);
 
@@ -3881,14 +3899,45 @@ ruta('GET', '/api/empresa/pedidos', ({ req }) => {
     modos: MODOS_LOTE, empresa: u.empresa_nombre || u.nombre, whatsapp: getAjustes().whatsapp || '', sede: getAjustes().sede_direccion || '',
     zonas: [...zonasFijas().map((z) => z.nombre), OTRA_ZONA] };
 });
+// "Usar mi ubicación en tiempo real": la tienda está en el lugar y su celular manda dónde está
 ruta('PUT', '/api/empresa/punto', ({ req, body }) => {
   const u = requiereEmpresa(req);
-  const c = coordenada(body.lat, body.lng);
-  if (!c) falla(400, 'Marca en el mapa dónde recoge el piloto los paquetes.');
-  const direccion = texto(body.direccion, 300), zona = texto(body.zona, 60);
-  if (direccion.length < 5) falla(400, 'Escribe la dirección de tu local.');
-  db.prepare('UPDATE usuarios SET empresa_lat = ?, empresa_lng = ?, empresa_direccion = ?, empresa_zona = ? WHERE id = ?').run(c.lat, c.lng, direccion, zona || zonaDePunto(c) || OTRA_ZONA, u.id);
-  return { ok: true, punto: puntoEmpresa(u) };
+  guardarPuntoGps(u.id, body, u.nombre, u.telefono || '', 'gps');
+  db.prepare('UPDATE usuarios SET punto_token = NULL, punto_token_vence = NULL WHERE id = ?').run(u.id);
+  return { ok: true, punto: puntoEmpresa(u), pendiente: null };
+});
+// "Lo tengo en otro lugar": se le manda un enlace a la persona que está ahí; al abrirlo acepta y comparte su ubicación
+ruta('POST', '/api/empresa/punto/enlace', ({ req, body }) => {
+  const u = requiereEmpresa(req);
+  const nombre = texto(body.nombre, 80), telefono = texto(body.telefono, 30);
+  if (nombre.length < 2) falla(400, 'Escribe el nombre de la persona que va a entregar los paquetes.');
+  if (digitos(telefono).length < 8) falla(400, 'Escribe el WhatsApp de esa persona (8 dígitos).');
+  const token = crypto.randomBytes(16).toString('hex');
+  db.prepare("UPDATE usuarios SET punto_token = ?, punto_token_vence = datetime('now', '+3 days'), punto_pend_nombre = ?, punto_pend_telefono = ? WHERE id = ?").run(token, nombre, telefono, u.id);
+  return { _status: 201, pendiente: puntoPendiente(u) };
+});
+ruta('DELETE', '/api/empresa/punto/enlace', ({ req }) => {
+  const u = requiereEmpresa(req);
+  db.prepare('UPDATE usuarios SET punto_token = NULL, punto_token_vence = NULL WHERE id = ?').run(u.id);
+  return { ok: true };
+});
+const usuarioPorTokenPunto = (token) => {
+  if (!/^[a-f0-9]{32}$/.test(String(token || ''))) falla(404, 'Este enlace no es válido.');
+  const f = db.prepare("SELECT * FROM usuarios WHERE punto_token = ? AND punto_token_vence >= datetime('now')").get(token);
+  return f || falla(404, 'Este enlace ya no sirve: se usó o venció. Pide que te manden uno nuevo.');
+};
+ruta('GET', '/api/punto/:token', ({ params }) => {
+  const f = usuarioPorTokenPunto(params.token);
+  return { tienda: f.empresa_nombre || f.nombre, nombre: f.punto_pend_nombre, quien_pide: f.nombre.split(' ')[0] };
+});
+ruta('POST', '/api/punto/:token', ({ req, params, body }) => {
+  if (limitar(ipDe(req), 'punto', 20, 600_000)) falla(429, 'Demasiados intentos. Espera unos minutos.');
+  const f = usuarioPorTokenPunto(params.token);
+  if (body.acepto !== true) falla(400, 'Acepta que en este lugar vas a entregar los paquetes al piloto.');
+  guardarPuntoGps(f.id, body, f.punto_pend_nombre, f.punto_pend_telefono, 'enlace');
+  db.prepare('UPDATE usuarios SET punto_token = NULL, punto_token_vence = NULL WHERE id = ?').run(f.id);
+  avisar(f.id, { titulo: 'Lugar de recogida listo', cuerpo: `${f.punto_pend_nombre} compartió la ubicación. Ahí pasarán los pilotos por tus paquetes.`, url: '/mi-cuenta?empresa=1', etiqueta: 'punto-recogida' });
+  return { ok: true, tienda: f.empresa_nombre || f.nombre };
 });
 ruta('POST', '/api/empresa/pedidos', ({ req, body }) => {
   const u = requiereEmpresa(req);
@@ -4105,7 +4154,14 @@ function carpetaSalida(c, conPedidos = false) {
     .map((p) => (out.marcado === 'codigo' ? p : { ...p, codigo_corto: null }));   // con etiqueta o nombre no se usa el código
   return out;
 }
-const datosPanelEmpresa = (u) => ({ minimo: minimoLote(u), punto: puntoEmpresa(u), tamanos: TAMANOS, horarios: HORARIOS, modos: MODOS_LOTE, empresa: u.empresa_nombre || u.nombre,
+// Lo que el piloto cobró por los productos de la tienda: lo que Vaelo todavía le tiene que entregar y lo ya entregado
+function cobrosProducto(uid) {
+  const f = db.prepare(`SELECT COALESCE(SUM(CASE WHEN cobro_pagado_en IS NULL THEN cobro_destinatario END), 0) AS pendiente, COUNT(CASE WHEN cobro_pagado_en IS NULL THEN 1 END) AS envios,
+    COALESCE(SUM(CASE WHEN cobro_pagado_en >= datetime('now', '-30 days') THEN cobro_destinatario END), 0) AS pagado_30, MAX(cobro_pagado_en) AS ultimo_pago
+    FROM envios WHERE usuario_id = ? AND estado = 'entregado' AND cobro_destinatario > 0`).get(uid);
+  return { pendiente: redondear(f.pendiente), envios: f.envios, pagado_30: redondear(f.pagado_30), ultimo_pago: f.ultimo_pago };
+}
+const datosPanelEmpresa = (u) => ({ minimo: minimoLote(u), punto: puntoEmpresa(u), punto_pendiente: puntoPendiente(u), cobros_producto: cobrosProducto(u.id), tamanos: TAMANOS, horarios: HORARIOS, modos: MODOS_LOTE, empresa: u.empresa_nombre || u.nombre,
   whatsapp: getAjustes().whatsapp || '', sede: getAjustes().sede_direccion || '', zonas: [...zonasFijas().map((z) => z.nombre), OTRA_ZONA], hoy: hoyGT() });
 ruta('GET', '/api/empresa/carpetas', ({ req }) => {
   const u = requiereEmpresa(req);
@@ -4658,7 +4714,8 @@ ruta('POST', '/api/admin/lotes-empresa/:id/confirmar', ({ req, params, body }) =
             foto_paquete, pedido_id, lote_empresa_id, parada, tamano, horario, grupo, cobro_en_recogida, mensajero_id, asignacion, asignado_en, asignado_por, precio_d_lat, precio_d_lng)
           VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, 'zona', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${piloto ? "datetime('now')" : 'NULL'}, ?, ?, ?)`).run(
           p.codigo, l.usuario_id, vehiculo.id, p.descripcion, l.origen_direccion || '', l.recogida === 'sede' ? (zonaDePunto(origen) || OTRA_ZONA) : (emp.empresa_zona || zonaDePunto(origen) || OTRA_ZONA),
-          emp.telefono || '', origen.lat, origen.lng, l.recogida === 'sede' ? 'sede' : 'cliente', l.recogida === 'sede' ? 'Sede Vaelo' : (emp.empresa_nombre || emp.nombre),
+          l.recogida === 'sede' ? (emp.telefono || '') : (emp.punto_telefono || emp.telefono || ''), origen.lat, origen.lng, l.recogida === 'sede' ? 'sede' : 'cliente',
+          l.recogida === 'sede' ? 'Sede Vaelo' : (emp.empresa_nombre || emp.nombre) + (emp.punto_contacto && emp.punto_contacto !== emp.nombre ? ` (entrega ${emp.punto_contacto})` : ''),
           p.recibe_nombre, p.recibe_telefono, p.direccion, zonaReal(p), p.lat, p.lng, precio, precio, metodo, redondear(Number(p.cobro) || 0), [p.referencias, `Cliente de ${emp.empresa_nombre || emp.nombre}`].filter(Boolean).join('. '),
           String(crypto.randomInt(1000, 10000)), programado, crypto.randomBytes(16).toString('hex'), p.recibe_nombre, p.confirmado_en, p.lat, p.lng, p.confirmado_en, pagoEstado,
           p.foto, p.id, l.id, grupo ? i + 1 : null, p.tamano, p.horario, grupo, pagaEmpresa && metodoEmpresa === 'efectivo' ? precioTotal : null,
@@ -5416,6 +5473,7 @@ const servidor = http.createServer(async (req, res) => {
     if (/^\/(recibe|entrega)\/[a-f0-9]{32}$/.test(limpia)) return servirEstatico(req, res, '/recibe.html');
     if (/^\/flete\/[a-f0-9]{32}$/.test(limpia)) return servirEstatico(req, res, '/flete.html');
     if (/^\/pedido\/[a-f0-9]{32}$/.test(limpia)) return servirEstatico(req, res, '/pedido.html');
+    if (/^\/punto\/[a-f0-9]{32}$/.test(limpia)) return servirEstatico(req, res, '/punto.html');
     if (PIDEN_CUENTA[limpia] && usuarioActual(req)?.rol === 'mensajero') return redirigir(res, RUTA_PILOTO);
     if (PIDEN_CUENTA[limpia]) {
       const u = usuarioActual(req);

@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Lugar de recogida · Vaelo</title>
+  <meta name="theme-color" content="#0e2463">
+  <link rel="icon" href="/img/favicon.png" type="image/png">
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/styles.css?v=20261110b">
+</head>
+<body>
+  <header class="barra"><div class="contenedor"><a href="/" class="marca"><img src="/img/logo-blanco.png" alt="Vaelo" width="139" height="40"></a></div></header>
+  <main class="area"><div class="contenedor" id="app" style="max-width:560px"><p class="pista">Cargando…</p></div></main>
+  <script src="/js/comun.js?v=20261109d"></script>
+  <script>
+    // Quien tiene los paquetes en otro lugar confirma desde ahí: acepta entregarlos y comparte su ubicación real
+    const app = document.getElementById('app');
+    const token = location.pathname.split('/').pop();
+    (async () => {
+      let d;
+      try { d = await api('/api/punto/' + token); } catch (e) { poner(app, el('div', { class: 'bloque' }, el('h1', { text: 'Enlace no disponible' }), el('p', { text: e.message }))); return; }
+      const msg = el('div', { class: 'mensaje', role: 'alert' });
+      const estado = el('p', { class: 'pista', text: 'Toca el botón estando en el lugar donde están los paquetes.' });
+      const dir = el('input', { id: 'dir', maxlength: 300, placeholder: 'Ej. 5a calle 3-20 zona 1, portón negro' });
+      const acepto = el('input', { type: 'checkbox', id: 'acepto', style: 'width:auto' });
+      let pos = null;
+      const guardar = el('button', { class: 'boton boton-grande', type: 'button', text: 'Confirmar este lugar', disabled: true, onclick: async () => {
+        guardar.disabled = true;
+        try {
+          await api('/api/punto/' + token, { body: { ...pos, direccion: dir.value, acepto: acepto.checked } });
+          poner(app, el('div', { class: 'bloque' }, el('h1', { text: 'Listo, gracias' }),
+            el('p', { text: `Este lugar quedó como punto de recogida de ${d.tienda}. Cuando un piloto de Vaelo venga por los paquetes, entrégaselos aquí.` })));
+        } catch (e) { mostrarMensaje(msg, e.message); guardar.disabled = false; }
+      } });
+      const leer = el('button', { class: 'boton boton-grande', type: 'button', text: 'Compartir mi ubicación en tiempo real', onclick: () => {
+        if (!navigator.geolocation) { mostrarMensaje(msg, 'Tu navegador no puede compartir la ubicación. Abre el enlace en Chrome o Safari.'); return; }
+        estado.textContent = 'Leyendo tu ubicación…'; estado.className = 'pista';
+        navigator.geolocation.getCurrentPosition((x) => {
+          pos = { lat: x.coords.latitude, lng: x.coords.longitude, precision: x.coords.accuracy };
+          const debil = pos.precision > 250;
+          estado.textContent = debil ? `La señal está débil (unos ${Math.round(pos.precision)} m de error). Acércate a una ventana y toca otra vez.` : `Ubicación tomada (unos ${Math.round(pos.precision)} m de margen).`;
+          estado.className = debil ? 'error-texto' : 'exito-texto';
+          guardar.disabled = debil;
+          leer.textContent = 'Leer otra vez'; leer.className = 'boton borde';
+        }, (e) => { estado.textContent = e.code === 1 ? 'Necesitamos tu ubicación. Toca el candado junto a la dirección de la página y permite la ubicación.' : 'No pudimos leer tu ubicación. Acércate a una ventana y vuelve a intentar.'; estado.className = 'error-texto'; },
+        { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+      } });
+      poner(app, el('div', { class: 'bloque' },
+        el('h1', { style: 'font-size:1.6rem', text: `Hola${d.nombre ? ', ' + d.nombre : ''}` }),
+        el('p', {}, el('strong', { text: d.tienda }), ' manda sus paquetes con Vaelo y los tiene donde estás tú. Un piloto de Vaelo pasará por ellos.'),
+        el('ol', { class: 'lista-simple' },
+          el('li', { text: 'Estando en el lugar, toca «Compartir mi ubicación en tiempo real».' }),
+          el('li', { text: 'Escribe la dirección o una referencia (color del portón, número de casa).' }),
+          el('li', { text: 'Acepta que aquí vas a entregar los paquetes al piloto.' })),
+        leer, estado,
+        el('div', { class: 'campo' }, el('label', { for: 'dir', text: 'Dirección o referencia' }), dir),
+        el('label', { class: 'casilla', for: 'acepto' }, acepto, el('span', { text: `Acepto que en este lugar voy a entregar los paquetes de ${d.tienda} al piloto de Vaelo.` })),
+        msg, guardar));
+    })();
+  </script>
+</body>
+</html>

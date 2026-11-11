@@ -648,17 +648,20 @@
       }
       return activos;
     }
+    // Lo que el piloto cobra en una parada: el envío (si lo paga quien recibe) más el producto de la tienda
+    const cobroParada = (x) => (x.metodo_pago === 'recibe' ? Number(x.precio) || 0 : 0) + (Number(x.cobro_destinatario) || 0);
     function tarjetaRuta(lista) {
       const e0 = lista[0];
       const abiertos = lista.filter(x => ['pendiente', 'recogido', 'en_camino'].includes(x.estado));
       const cab = (extra) => el('div', { class: 'cab' }, el('strong', { class: 'guia' }, `Ruta de ${e0.empresa}`), extra);
       const paradasResumen = () => el('ol', { class: 'paradas-ruta' }, lista.map(x => el('li', { class: ['entregado', 'a_sede', 'en_sede', 'fallido'].includes(x.estado) ? 'hecha' : '' },
         el('span', { class: 'num', text: String(x.parada || '') }), el('div', {}, valorBusca(x), el('strong', { text: x.destino_nombre }),
-          el('small', { text: `${x.destino_zona} · ${HORARIO_TXT[x.horario] || ''} · ${TAMANO_TXT[x.tamano] || ''}${x.metodo_pago === 'recibe' ? ` · cobra ${dinero(x.precio)}` : ''}` })),
+          el('small', { text: `${x.destino_zona} · ${HORARIO_TXT[x.horario] || ''} · ${TAMANO_TXT[x.tamano] || ''}${cobroParada(x) ? ` · cobra ${dinero(cobroParada(x))}${Number(x.cobro_destinatario) > 0 ? ` (${x.metodo_pago === 'recibe' ? `${dinero(x.precio)} envío + ` : ''}${dinero(x.cobro_destinatario)} producto)` : ''}` : ''}` })),
         x.estado !== 'pendiente' ? chipEstado(x.estado) : null)));
-      const cobros = lista.filter(x => x.metodo_pago === 'recibe');
+      const cobros = lista.filter(x => cobroParada(x) > 0);
+      const conProducto = lista.filter(x => Number(x.cobro_destinatario) > 0).length;
       const notaCobro = e0.cobro_en_recogida ? el('div', { class: 'cobro', text: `Cobra ${dinero(e0.cobro_en_recogida)} a la empresa al recoger` })
-        : cobros.length ? el('p', { class: 'pista', text: `${cobros.length} cliente(s) pagan el envío al recibir (${dinero(cobros.reduce((t, x) => t + x.precio, 0))} en total).` }) : null;
+        : cobros.length ? el(conProducto ? 'div' : 'p', { class: conProducto ? 'cobro' : 'pista', text: `En toda la ruta cobras ${dinero(cobros.reduce((t, x) => t + cobroParada(x), 0))} en efectivo${conProducto ? `: incluye el producto de ${conProducto} cliente(s), que se entrega a la tienda` : ' (el envío de cada cliente)'}.` }) : null;
       // 1) Por aceptar: la ruta completa
       if (e0.asignacion === 'por_aceptar') {
         const km = kmHasta(e0.origen_lat, e0.origen_lng);
@@ -1128,7 +1131,7 @@
         el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: cerrar }),
         el('h2', { style: 'font-size:1.4rem', text: 'Entregar ' + e.guia }),
         e.flete ? null : cajaBusca(e, 'entregar'), msg,
-        Number(e.cobro_destinatario) > 0 ? el('div', { class: 'cobro', text: `Antes de entregar, cobra ${dinero(e.cobro_destinatario)}` }) : '',
+        Number(e.cobro_destinatario) > 0 ? el('div', { class: 'cobro', text: `Antes de entregar, cobra ${dinero(cobroParada(e))}${e.metodo_pago === 'recibe' ? ` (${dinero(e.precio)} del envío + ${dinero(e.cobro_destinatario)} del producto)` : ' del producto'}` }) : '',
         el('div', { class: 'campo' }, el('label', { for: 'en-codigo', text: 'Código de entrega (te lo da quien recibe)' }), codigo),
         el('div', { class: 'campo' }, el('label', { for: 'en-recibio', text: '¿Quién recibió?' }), recibio),
         el('div', { class: 'foto-paquete foto-paquete-chica foto-entrega' }, el('label', { class: 'foto-paquete-boton', for: 'en-foto' }, vista, vacioFoto, foto)),

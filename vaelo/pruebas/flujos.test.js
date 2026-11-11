@@ -1011,3 +1011,25 @@ test('tienda minorista: cuenta normal que se activa sola, manda carpetas con men
   assert.equal((await admin('PUT', `/api/admin/clientes/${otra}/empresa`, { tipo_cuenta: 'personal' })).status, 200);
   assert.equal(db.prepare('SELECT tipo_cuenta, empresa_nombre FROM usuarios WHERE id = ?').get(otra).empresa_nombre, null);
 });
+
+test('lugar de recogida: con el GPS en el lugar o con el enlace de la persona que está en otro lugar', async () => {
+  const beto = cliente();
+  assert.equal((await beto('POST', '/api/login', { email: 'beto@prueba.com', password: 'clave-de-prueba-123' })).status, 200);
+  assert.equal((await beto('PUT', '/api/empresa/punto', { lat: 14.64, lng: -90.51, precision: 900, direccion: 'Bodega 6a av' })).status, 400, 'GPS muy débil');
+  const ok = await beto('PUT', '/api/empresa/punto', { lat: 14.641, lng: -90.512, precision: 25, direccion: 'Bodega 6a av, portón gris' });
+  assert.equal(ok.status, 200, JSON.stringify(ok.j)); assert.equal(ok.j.punto.fuente, 'gps'); assert.equal(ok.j.punto.contacto, db.prepare("SELECT nombre FROM usuarios WHERE email = 'beto@prueba.com'").get().nombre);
+  // Otro lugar: la persona de ahí recibe un enlace
+  assert.equal((await beto('POST', '/api/empresa/punto/enlace', { nombre: 'Marta', telefono: '123' })).status, 400);
+  const en = await beto('POST', '/api/empresa/punto/enlace', { nombre: 'Doña Marta', telefono: '5555 7777' });
+  assert.equal(en.status, 201); const tok = en.j.pendiente.enlace.split('/').pop();
+  assert.equal((await beto('GET', '/api/empresa/carpetas')).j.punto_pendiente.nombre, 'Doña Marta');
+  const anon = cliente();
+  assert.equal((await anon('GET', '/api/punto/' + tok)).j.tienda, 'Tienda Beto');
+  assert.equal((await anon('POST', '/api/punto/' + tok, { lat: 14.62, lng: -90.53, precision: 20, direccion: 'Casa de Marta, zona 7' })).status, 400, 'tiene que aceptar');
+  const conf = await anon('POST', '/api/punto/' + tok, { lat: 14.62, lng: -90.53, precision: 20, direccion: 'Casa de Marta, zona 7', acepto: true });
+  assert.equal(conf.status, 200, JSON.stringify(conf.j));
+  const r = (await beto('GET', '/api/empresa/carpetas')).j;
+  assert.equal(r.punto.contacto, 'Doña Marta'); assert.equal(r.punto.telefono, '5555 7777'); assert.equal(r.punto.fuente, 'enlace'); assert.equal(r.punto_pendiente, null);
+  assert.equal((await anon('GET', '/api/punto/' + tok)).status, 404, 'el enlace se usa una vez');
+  assert.equal((await cliente()('GET', '/punto/' + tok)).status, 200, 'la página existe');
+});
