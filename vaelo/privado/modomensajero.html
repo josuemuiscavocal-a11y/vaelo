@@ -1065,6 +1065,9 @@
     function rutaSugerida() {
       const activos = envios.filter(e => e.asignacion === 'aceptado' && !e.pedido_id && ['pendiente', 'recogido', 'en_camino', 'devolviendo'].includes(e.estado));
       if (activos.length < 2 || !ultimaPos) return '';
+      // Con una ruta de empresa en curso manda el orden de la ruta: los sueltos se hacen cuando queden de paso
+      if (envios.some(e => e.pedido_id && e.asignacion === 'aceptado' && ['pendiente', 'recogido', 'en_camino'].includes(e.estado)))
+        return el('div', { class: 'mensaje aviso' }, el('strong', { text: `Tienes una ruta de empresa y ${activos.length} envíos sueltos. ` }), 'Sigue el orden de tu ruta y haz los sueltos cuando te queden de paso. Cada paquete tiene su recuadro BUSCA.');
       const paradas = [];
       for (const e of activos) {
         if (e.estado === 'devolviendo') { if (e.origen_lat != null) paradas.push({ tipo: 'Devolver', e, lat: e.origen_lat, lng: e.origen_lng }); continue; }
@@ -1082,7 +1085,7 @@
       const url = `https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=${ultimo.lat},${ultimo.lng}` +
         (orden.length > 1 ? '&waypoints=' + encodeURIComponent(orden.slice(0, -1).map(p => `${p.lat},${p.lng}`).join('|')) : '');
       return el('div', { class: 'bloque ruta-sugerida' }, el('h2', { text: 'Ruta sugerida' }),
-        el('ol', {}, orden.map(p => el('li', {}, el('strong', { text: `${p.tipo} ${p.e.guia}` }), ` · ${p.tipo === 'Entregar' ? p.e.destino_zona : p.e.origen_zona}`))),
+        el('ol', {}, orden.map(p => el('li', {}, el('strong', { text: p.tipo + ' ' }), valorBusca(p.e), p.tipo === 'Entregar' ? `${p.e.destino_nombre} · ${p.e.destino_zona}` : `${p.e.origen_zona}`))),
         el('a', { class: 'boton chico', href: url, target: '_blank', rel: 'noopener', text: 'Abrir ruta completa en Google Maps' }));
     }
 
