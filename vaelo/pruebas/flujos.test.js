@@ -1595,3 +1595,87 @@ test('envío que la tienda ya cobró: el piloto no lo cobra, se descuenta de lo 
 const SQL_EFECTIVO_PRUEBA = `(CASE WHEN e.estado != 'cancelado' AND e.metodo_pago = 'efectivo' THEN e.precio + e.cargos_extra ELSE 0 END
   + CASE WHEN e.estado = 'entregado' AND e.sede_llegada IS NULL AND e.metodo_pago = 'recibe' THEN e.precio ELSE 0 END
   + CASE WHEN e.estado = 'entregado' AND e.sede_llegada IS NULL THEN e.cobro_destinatario ELSE 0 END)`;
+
+test('influencers: solicitud pública, código creado en el panel, una sola vez por cuenta y teléfono, puntos al entregar y regalos por metas', async () => {
+  const pub = cliente();
+  const datos = { nombre: 'María Influ', email: 'maria.influ@prueba.com', telefono: '5544 3322', redes: 'tiktok.com/@mariainflu', seguidores: '25 mil', mensaje: 'Me encanta Vaelo', acepto: true };
+  assert.equal((await pub('POST', '/api/influencers/solicitud', { ...datos, redes: '' }, { 'x-real-ip': '10.12.0.1' })).status, 400, 'pide redes');
+  assert.equal((await pub('POST', '/api/influencers/solicitud', { ...datos, acepto: false }, { 'x-real-ip': '10.12.0.1' })).status, 400, 'pide aceptar condiciones');
+  assert.equal((await pub('POST', '/api/influencers/solicitud', datos, { 'x-real-ip': '10.12.0.1' })).status, 201);
+  assert.equal((await pub('POST', '/api/influencers/solicitud', datos, { 'x-real-ip': '10.12.0.1' })).status, 409, 'no repite solicitud');
+  let z = (await admin('GET', '/api/admin/influencers')).j;
+  const sol = z.solicitudes.find((x) => x.email === 'maria.influ@prueba.com');
+  assert.ok(sol); assert.equal(z.regalos.length, 2); assert.equal(z.puntos_por_uso, 10);
+  // Crear su código desde el panel
+  assert.equal((await admin('POST', `/api/admin/influencers/solicitudes/${sol.id}/aprobar`, { codigo: 'mal código', beneficio_tipo: 'precio', beneficio_valor: 31 })).status, 400);
+  const ap = await admin('POST', `/api/admin/influencers/solicitudes/${sol.id}/aprobar`, { codigo: 'vaelo-maria', beneficio_tipo: 'precio', beneficio_valor: 31 });
+  assert.equal(ap.status, 201, JSON.stringify(ap.j)); assert.equal(ap.j.cuenta_nueva, true); assert.equal(ap.j.codigo, 'VAELO-MARIA');
+  const mariaId = db.prepare("SELECT id FROM usuarios WHERE email = 'maria.influ@prueba.com'").get().id;
+  const token = db.prepare('SELECT token FROM tokens_clave WHERE usuario_id = ?').get(mariaId).token;
+  assert.equal((await cliente()('POST', '/api/clave/nueva', { token, password: 'clave-maria-123' })).status, 200);
+  assert.equal(db.prepare('SELECT email_verificado FROM usuarios WHERE id = ?').get(mariaId).email_verificado, 1);
+  const maria = cliente();
+  assert.equal((await maria('POST', '/api/login', { email: 'maria.influ@prueba.com', password: 'clave-maria-123' })).status, 200);
+  let yo = (await maria('GET', '/api/influencer/yo')).j.influencer;
+  assert.equal(yo.codigo, 'VAELO-MARIA'); assert.equal(yo.puntos, 0); assert.match(yo.beneficio, /Q31\.00/); assert.equal(yo.metas.length, 2);
+  assert.equal((await ana('GET', '/api/influencer/yo')).j.influencer, null);
+  // Otra solicitud no puede repetir el código
+  await pub('POST', '/api/influencers/solicitud', { ...datos, email: 'otro.influ@prueba.com' }, { 'x-real-ip': '10.12.0.2' });
+  const sol2 = (await admin('GET', '/api/admin/influencers')).j.solicitudes.find((x) => x.email === 'otro.influ@prueba.com');
+  assert.equal((await admin('POST', `/api/admin/influencers/solicitudes/${sol2.id}/aprobar`, { codigo: 'VAELO-MARIA', beneficio_tipo: 'monto', beneficio_valor: 5 })).status, 409);
+  assert.equal((await admin('POST', `/api/admin/influencers/solicitudes/${sol2.id}/rechazar`, { nota: 'Pocos seguidores' })).status, 200);
+
+  // Un cliente usa el código: su envío queda en Q31 y el piloto gana lo normal
+  const envio = (quien, cupon) => quien('POST', '/api/envios', { vehiculo_id: 1, peso: 2, origen_zona: 'Zona 1', destino_zona: 'Zona 1', origen_lat: 14.636, origen_lng: -90.513,
+    destino_nombre: 'Recibe', destino_telefono: '55554444', destino_direccion: 'Casa', metodo_pago: 'efectivo', foto_paquete: FOTO, cupon });
+  db.exec('UPDATE zonas_fijas SET poligono = NULL');
+  const cot = (await ana('POST', '/api/cotizar', { vehiculo_id: 1, peso: 2, origen_zona: 'Zona 1', destino_zona: 'Zona 1', cupon: 'vaelo-maria' })).j;
+  assert.equal(cot.precio, 31); assert.equal(cot.descuento, 4); assert.equal(cot.promocion, 'Código VAELO-MARIA');
+  assert.match((await maria('POST', '/api/cotizar', { vehiculo_id: 1, peso: 2, origen_zona: 'Zona 1', destino_zona: 'Zona 1', cupon: 'VAELO-MARIA' })).j.error_cupon, /es tuyo/);
+  const e1 = await envio(ana, 'VAELO-MARIA');
+  assert.equal(e1.status, 201, JSON.stringify(e1.j));
+  const f1 = db.prepare('SELECT precio, influencer_id, influencer_puntos, ganancia_acordada FROM envios WHERE id = ?').get(e1.j.id);
+  assert.equal(f1.precio, 31); assert.equal(f1.influencer_puntos, 10); assert.equal(f1.ganancia_acordada, 30); assert.ok(f1.influencer_id);
+  // Una sola vez: la misma cuenta, otra cuenta con su mismo teléfono, y tampoco otro código de influencer
+  const e2 = await envio(ana, 'VAELO-MARIA');
+  assert.equal(e2.status, 400); assert.match(e2.j.error, /una sola vez/);
+  const gemela = cliente();
+  assert.equal((await gemela('POST', '/api/registro', { nombre: 'Ana Dos', email: 'ana.dos@prueba.com', telefono: '5555-1111', password: 'clave-de-prueba-123', acepto_terminos: true }, { 'x-real-ip': '10.12.0.3' })).status, 201);
+  db.prepare("UPDATE usuarios SET email_verificado = 1 WHERE email = 'ana.dos@prueba.com'").run();
+  assert.match((await gemela('POST', '/api/cotizar', { vehiculo_id: 1, peso: 2, origen_zona: 'Zona 1', destino_zona: 'Zona 1', cupon: 'VAELO-MARIA' })).j.error_cupon, /una sola vez/);
+  db.prepare("INSERT INTO influencers (usuario_id, codigo, beneficio_tipo, beneficio_valor) VALUES (?, 'VAELO-LUIS', 'monto', 3)").run(db.prepare("SELECT id FROM usuarios WHERE email = 'beto@prueba.com'").get()?.id ?? pilotoId);
+  assert.match((await ana('POST', '/api/cotizar', { vehiculo_id: 1, peso: 2, origen_zona: 'Zona 1', destino_zona: 'Zona 1', cupon: 'VAELO-LUIS' })).j.error_cupon, /una sola vez/, 'tampoco otro influencer');
+  // Puntos: solo cuando se entrega
+  assert.equal((await maria('GET', '/api/influencer/yo')).j.influencer.en_camino, 1);
+  assert.equal((await maria('GET', '/api/influencer/yo')).j.influencer.puntos, 0);
+  db.prepare("UPDATE envios SET estado = 'entregado', entregado_en = datetime('now') WHERE id = ?").run(e1.j.id);
+  yo = (await maria('GET', '/api/influencer/yo')).j.influencer;
+  assert.equal(yo.puntos, 10); assert.equal(yo.usos, 1); assert.equal(yo.historial[0].cliente, 'Ana');
+  // Regalos editables: la gorra ahora a 10 puntos y 25 puntos por cliente (los ya ganados conservan su valor)
+  z = (await admin('GET', '/api/admin/influencers')).j;
+  const [gorra, paquete] = z.regalos;
+  assert.equal((await admin('PUT', '/api/admin/influencers-regalos', { puntos_por_uso: 25, regalos: [{ id: gorra.id, regalo: 'Gorra Vaelo', puntos: 10 }, { id: paquete.id, regalo: 'Paquete Vaelo', puntos: 150 }, { regalo: 'Playera Vaelo', puntos: 60 }] })).status, 200);
+  yo = (await maria('GET', '/api/influencer/yo')).j.influencer;
+  assert.equal(yo.puntos, 10); assert.equal(yo.puntos_por_uso, 25);
+  assert.deepEqual(yo.metas.map((m) => [m.regalo, m.alcanzado]), [['Gorra Vaelo', true], ['Playera Vaelo', false], ['Paquete Vaelo', false]]);
+  assert.equal((await maria('POST', `/api/influencer/regalos/${paquete.id}/pedir`, {})).status, 400, 'le faltan puntos');
+  assert.equal((await maria('POST', `/api/influencer/regalos/${gorra.id}/pedir`, {})).status, 200);
+  assert.equal((await maria('POST', `/api/influencer/regalos/${gorra.id}/pedir`, {})).status, 400, 'ya lo pidió');
+  z = (await admin('GET', '/api/admin/influencers')).j;
+  const pend = z.por_entregar.find((x) => x.regalo_id === gorra.id);
+  assert.ok(pend); assert.ok(pend.pedido_en);
+  assert.equal((await admin('POST', `/api/admin/influencers/${pend.influencer_id}/regalos/${gorra.id}/entregado`, {})).status, 200);
+  assert.ok(!(await admin('GET', '/api/admin/influencers')).j.por_entregar.some((x) => x.regalo_id === gorra.id));
+  assert.ok((await maria('GET', '/api/influencer/yo')).j.influencer.metas.find((m) => m.id === gorra.id).entregado_en);
+  // Un regalo ya ganado no se borra: se apaga
+  assert.equal((await admin('PUT', '/api/admin/influencers-regalos', { puntos_por_uso: 25, regalos: [{ id: paquete.id, regalo: 'Paquete Vaelo', puntos: 150 }] })).status, 200);
+  assert.equal(db.prepare('SELECT activo FROM influencer_regalos WHERE id = ?').get(gorra.id).activo, 0);
+  // Ajustes de puntos y pausa del código
+  assert.equal((await admin('POST', `/api/admin/influencers/${pend.influencer_id}/puntos`, { puntos: -5, nota: 'Envío devuelto' })).j.puntos, 5);
+  assert.equal((await admin('PUT', `/api/admin/influencers/${pend.influencer_id}`, { activo: false })).status, 200);
+  assert.match((await gemela('POST', '/api/cotizar', { vehiculo_id: 1, peso: 2, origen_zona: 'Zona 1', destino_zona: 'Zona 1', cupon: 'VAELO-MARIA' })).j.error_cupon, /pausado/);
+  // Permisos: oficina sin «Clientes» no entra; nadie más cambia nada
+  assert.equal((await maria('PUT', `/api/admin/influencers/${pend.influencer_id}`, { activo: true })).status, 403);
+  // Historial de la oficina
+  assert.ok(db.prepare("SELECT 1 FROM historial WHERE ruta LIKE '/api/admin/influencers%'").get());
+});

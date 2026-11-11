@@ -668,4 +668,48 @@ agregarColumnas('usuarios', [['tienda_estado', 'TEXT'], ['tienda_red', 'TEXT'], 
 // La tienda ya le cobró el envío a su cliente: el piloto no lo cobra y Vaelo se lo descuenta a la tienda
 agregarColumnas('pedidos_empresa', [['envio_pagado', 'INTEGER NOT NULL DEFAULT 0']]);
 db.prepare("INSERT OR IGNORE INTO ajustes (clave, valor) VALUES ('dias_saldo_tienda', '7')").run();
+// ---------- Influencers Vaelo ----------
+db.exec(`
+  CREATE TABLE IF NOT EXISTS influencer_solicitudes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre TEXT NOT NULL, email TEXT NOT NULL, telefono TEXT NOT NULL,
+    redes TEXT NOT NULL DEFAULT '', seguidores TEXT NOT NULL DEFAULT '', mensaje TEXT NOT NULL DEFAULT '',
+    estado TEXT NOT NULL DEFAULT 'nueva',            -- nueva | aprobada | rechazada
+    usuario_id INTEGER REFERENCES usuarios(id), nota TEXT,
+    creado TEXT NOT NULL DEFAULT (datetime('now')), revisado_en TEXT
+  );
+  CREATE TABLE IF NOT EXISTS influencers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_id INTEGER NOT NULL UNIQUE REFERENCES usuarios(id),
+    codigo TEXT NOT NULL UNIQUE,
+    beneficio_tipo TEXT NOT NULL DEFAULT 'precio',   -- precio (el envío queda en Q__) | monto (Q__ menos)
+    beneficio_valor REAL NOT NULL DEFAULT 0,
+    activo INTEGER NOT NULL DEFAULT 1,
+    solicitud_id INTEGER REFERENCES influencer_solicitudes(id),
+    creado TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS influencer_regalos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    puntos INTEGER NOT NULL, regalo TEXT NOT NULL, activo INTEGER NOT NULL DEFAULT 1,
+    creado TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  -- Metas alcanzadas: los puntos no se gastan, cada regalo se gana una vez
+  CREATE TABLE IF NOT EXISTS influencer_metas (
+    influencer_id INTEGER NOT NULL REFERENCES influencers(id),
+    regalo_id INTEGER NOT NULL REFERENCES influencer_regalos(id),
+    pedido_en TEXT, entregado_en TEXT, entregado_por TEXT,
+    PRIMARY KEY (influencer_id, regalo_id)
+  );
+  CREATE TABLE IF NOT EXISTS influencer_ajustes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    influencer_id INTEGER NOT NULL REFERENCES influencers(id),
+    puntos INTEGER NOT NULL, nota TEXT NOT NULL DEFAULT '',
+    creado TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+`);
+agregarColumnas('envios', [['influencer_id', 'INTEGER'], ['influencer_puntos', 'INTEGER NOT NULL DEFAULT 0']]);
+db.prepare("INSERT OR IGNORE INTO ajustes (clave, valor) VALUES ('influencer_puntos_uso', '10')").run();
+if (!db.prepare('SELECT COUNT(*) AS n FROM influencer_regalos').get().n) {
+  db.prepare("INSERT INTO influencer_regalos (puntos, regalo) VALUES (50, 'Gorra Vaelo'), (150, 'Paquete Vaelo')").run();
+}
 module.exports = { db, DB_PATH, DATA_DIR };

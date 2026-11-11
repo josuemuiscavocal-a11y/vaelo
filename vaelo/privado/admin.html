@@ -10,7 +10,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/vendor/maplibre/maplibre-gl.css?v=4.7.1">
-  <link rel="stylesheet" href="/css/styles.css?v=20261111d">
+  <link rel="stylesheet" href="/css/styles.css?v=20261111e">
   <link rel="stylesheet" href="/css/suave.css?v=20261111a">
 </head>
 <body class="app-panel">
@@ -23,6 +23,7 @@
         <button role="tab" id="tab-clientes" aria-selected="false" aria-controls="panel-clientes" data-icono="clientes">Clientes<span class="insignia" id="insignia-clientes" hidden></span></button>
         <button role="tab" id="tab-empresas" aria-selected="false" aria-controls="panel-empresas" data-icono="tienda">Empresas<span class="insignia" id="insignia-empresas" hidden></span></button>
         <button role="tab" id="tab-planes" aria-selected="false" aria-controls="panel-planes" data-icono="etiqueta">Planes</button>
+        <button role="tab" id="tab-influencers" aria-selected="false" aria-controls="panel-influencers" data-icono="estrella">Influencers</button>
         <button role="tab" id="tab-quejas" aria-selected="false" aria-controls="panel-quejas" data-icono="alerta">Quejas<span class="insignia" id="insignia-quejas" hidden></span></button>
         <button role="tab" id="tab-caja" aria-selected="false" aria-controls="panel-caja" class="solo-admin" data-icono="caja">Caja<span class="insignia" id="insignia-caja" hidden></span></button>
         <button role="tab" id="tab-descuentos" aria-selected="false" aria-controls="panel-descuentos" class="solo-admin" data-icono="etiqueta">Descuentos</button>
@@ -179,6 +180,11 @@
       <section id="panel-planes" role="tabpanel" aria-labelledby="tab-planes" hidden>
         <div id="msg-planes" class="mensaje" role="alert"></div>
         <div id="zona-planes"></div>
+      </section>
+
+      <section id="panel-influencers" role="tabpanel" aria-labelledby="tab-influencers" hidden>
+        <div id="msg-influencers" class="mensaje" role="alert"></div>
+        <div id="zona-influencers"></div>
       </section>
 
       <section id="panel-descuentos" role="tabpanel" aria-labelledby="tab-descuentos" hidden>
@@ -404,9 +410,9 @@
     let filtroEstado = 'activos', temporizador = null, mensajeros = [], vehiculos = [], mapaFlota = null, capaFlota = null;
     const sub = (t) => el('small', { style: 'color:var(--suave)', text: t || '' });
 
-    const tabs = ['envios', 'mensajeros', 'clientes', 'empresas', 'planes', 'quejas', 'caja', 'descuentos', 'reportes', 'historial', 'tarifas'];
+    const tabs = ['envios', 'mensajeros', 'clientes', 'empresas', 'planes', 'influencers', 'quejas', 'caja', 'descuentos', 'reportes', 'historial', 'tarifas'];
     const TITULOS = { envios: ['Envíos', 'Pedidos y su estado'], mensajeros: ['Pilotos', 'Flota en vivo, documentos y aprobaciones'], clientes: ['Clientes', 'Identidad, empresas y calificaciones'],
-      caja: ['Caja', 'Efectivo, pagos a pilotos, reembolsos y cargos'], empresas: ['Empresas', 'Contratos y paquetes en la sede'], planes: ['Planes', 'Lo que recibe cada tienda: precio, mínimo y cobros'], descuentos: ['Descuentos', 'Promociones y cupones'], reportes: ['Reportes', 'Cómo va el negocio'],
+      caja: ['Caja', 'Efectivo, pagos a pilotos, reembolsos y cargos'], empresas: ['Empresas', 'Contratos y paquetes en la sede'], planes: ['Planes', 'Lo que recibe cada tienda: precio, mínimo y cobros'], influencers: ['Zona influencers Vaelo', 'Solicitudes, códigos, puntos y regalos'], descuentos: ['Descuentos', 'Promociones y cupones'], reportes: ['Reportes', 'Cómo va el negocio'],
       tarifas: ['Tarifas y ajustes', 'Precios, zonas, sede y equipo'], quejas: ['Quejas', 'Reportes de clientes y empresas'], historial: ['Historial', 'Qué hizo cada persona en el panel'] };
     function abrirTab(nombre) {
       tabs.forEach(t => { $('tab-' + t).setAttribute('aria-selected', String(t === nombre)); $('panel-' + t).hidden = t !== nombre; });
@@ -421,6 +427,7 @@
       if (nombre === 'caja') cargarCaja();
       if (nombre === 'empresas') cargarEmpresas();
       if (nombre === 'planes') cargarPlanes();
+      if (nombre === 'influencers') cargarInfluencers();
       if (nombre === 'descuentos') cargarDescuentos();
       if (nombre === 'reportes') { cargarReportes(); cargarCierres(); }
     }
@@ -909,6 +916,131 @@ null))));
         } catch (e) { poner(caja, el('div', { class: 'mensaje error', text: e.message })); caja.hidden = false; }
       } });
       return { boton, caja };
+    }
+
+    // ---------- Zona influencers Vaelo ----------
+    async function cargarInfluencers() {
+      const zona = $('zona-influencers');
+      let r;
+      try { r = await api('/api/admin/influencers'); } catch (e) { mostrarMensaje($('msg-influencers'), e.message); return; }
+      const reparto = (tipo, valor) => {
+        const precio = tipo === 'precio' ? Math.min(Number(valor) || 0, r.tarifa_zona) : Math.max(0, r.tarifa_zona - (Number(valor) || 0));
+        const vaelo = Math.round((precio - r.piloto_zona) * 100) / 100;
+        return { texto: `En un envío de zona (${dinero(r.tarifa_zona)}): el cliente paga ${dinero(precio)}, el piloto gana ${dinero(r.piloto_zona)} y a Vaelo le quedan ${dinero(vaelo)}.`, pierde: vaelo < 0 };
+      };
+      // Formulario del código (para crear y para editar)
+      const formCodigo = (ini, alGuardar, textoBoton) => {
+        const codigo = el('input', { maxlength: 24, value: ini.codigo || '', style: 'text-transform:uppercase', placeholder: 'VAELO-NOMBRE', 'aria-label': 'Código' });
+        const tipo = el('select', { 'aria-label': 'Qué le da al cliente' },
+          el('option', { value: 'precio', text: 'Precio fijo de envío (el envío le queda en Q__)' }),
+          el('option', { value: 'monto', text: 'Quetzales de descuento en el envío' }),
+          el('option', { value: 'gratis3', text: 'Envío gratis desde 3 envíos (próximamente)', disabled: true }));
+        tipo.value = ini.beneficio_tipo || 'precio';
+        const valor = el('input', { type: 'number', min: 0, max: 500, step: '0.01', inputmode: 'decimal', value: ini.beneficio_valor ?? 31, 'aria-label': 'Monto' });
+        const nota = el('p', { class: 'reparto-foco' });
+        const ver = () => { const x = reparto(tipo.value, valor.value); nota.textContent = x.texto; nota.className = 'reparto-foco' + (x.pierde ? ' pierde' : ''); };
+        tipo.addEventListener('change', ver); valor.addEventListener('input', ver); ver();
+        const msg = el('div', { class: 'mensaje', role: 'alert' });
+        const boton = el('button', { class: 'boton', type: 'button', text: textoBoton, onclick: async () => {
+          if (nota.classList.contains('pierde') && !confirm('Con este beneficio Vaelo pierde dinero en cada envío (el piloto gana lo normal). ¿Guardar de todos modos?')) return;
+          boton.disabled = true;
+          try { await alGuardar({ codigo: codigo.value, beneficio_tipo: tipo.value, beneficio_valor: valor.value }); } catch (e) { mostrarMensaje(msg, e.message); boton.disabled = false; }
+        } });
+        return el('div', { class: 'form-cond' },
+          el('div', { class: 'fila' }, el('div', { class: 'campo' }, el('label', { text: 'Código' }), codigo), el('div', { class: 'campo' }, el('label', { text: 'Qué le da al cliente' }), tipo),
+            el('div', { class: 'campo' }, el('label', { text: 'Monto (Q)' }), valor)), nota,
+          el('p', { class: 'pista', text: 'Cada cliente puede usar un código de influencer una sola vez (por cuenta y por teléfono). El piloto siempre gana lo de un envío normal.' }), msg, boton);
+      };
+      const nombreCodigo = (n) => 'VAELO-' + String(n || '').split(' ')[0].normalize('NFD').replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(0, 16);
+      const solicitud = (s) => {
+        const caja = el('div');
+        const nota = el('input', { maxlength: 300, placeholder: 'Motivo (opcional)', 'aria-label': 'Motivo del rechazo' });
+        return el('article', { class: 'solicitud-tarjeta' },
+          el('div', { class: 'plan-cabeza' }, el('div', {}, el('h3', { text: s.nombre }), sub(`${s.telefono} · ${s.email}`)), el('span', { class: 'etiqueta-pendiente', text: 'Nueva' })),
+          el('p', { style: 'margin:0' }, el('strong', { text: 'Redes: ' }), s.redes),
+          s.seguidores ? el('p', { style: 'margin:0' }, el('strong', { text: 'Seguidores: ' }), s.seguidores) : null,
+          s.mensaje ? el('p', { class: 'pista', style: 'margin:0', text: s.mensaje }) : null,
+          r.puede_editar ? el('div', { class: 'navegar' },
+            el('button', { class: 'boton cinta', type: 'button', text: 'Crearle un código a este influencer', onclick: (ev) => {
+              ev.target.hidden = true;
+              poner(caja, formCodigo({ codigo: nombreCodigo(s.nombre) }, async (d) => {
+                const x = await api(`/api/admin/influencers/solicitudes/${s.id}/aprobar`, { body: d });
+                window.avisoHecho?.('Código creado', x.codigo + (x.cuenta_nueva ? ': le mandamos un correo para entrar' : ''));
+                cargarInfluencers();
+              }, 'Crear código y dar acceso'));
+            } }),
+            el('div', { class: 'campo', style: 'margin:0;flex:1;min-width:180px' }, nota),
+            el('button', { class: 'boton peligro', type: 'button', text: 'Rechazar', onclick: async () => {
+              if (!confirm(`¿Rechazar la solicitud de ${s.nombre}?`)) return;
+              try { await api(`/api/admin/influencers/solicitudes/${s.id}/rechazar`, { body: { nota: nota.value } }); cargarInfluencers(); } catch (e) { alert(e.message); }
+            } })) : null,
+          caja);
+      };
+      const tarjeta = (i) => {
+        const caja = el('div');
+        return el('article', { class: 'plan-tarjeta' },
+          el('div', { class: 'plan-cabeza' }, el('div', {}, el('h3', { text: i.codigo }), sub(`${i.nombre} · ${i.telefono || ''}`)),
+            el('span', { class: i.activo ? 'etiqueta-completa' : 'etiqueta-gris', text: i.activo ? 'Activo' : 'En pausa' })),
+          el('p', { style: 'margin:0', text: `Da ${i.beneficio}.` }),
+          el('div', { class: 'franja-cifras' },
+            el('div', { class: 'celda-cifra' }, el('span', { text: 'Puntos' }), el('strong', { text: String(i.puntos) })),
+            el('div', { class: 'celda-cifra' }, el('span', { text: 'Clientes' }), el('strong', { text: String(i.usos) })),
+            el('div', { class: 'celda-cifra' }, el('span', { text: 'En camino' }), el('strong', { text: String(i.en_camino) }))),
+          r.puede_editar ? el('div', { class: 'navegar' },
+            el('button', { class: 'boton chico', type: 'button', text: 'Editar código', onclick: () => poner(caja, formCodigo(i, async (d) => { await api('/api/admin/influencers/' + i.id, { method: 'PUT', body: d }); cargarInfluencers(); }, 'Guardar')) }),
+            el('button', { class: 'boton borde chico', type: 'button', text: i.activo ? 'Pausar' : 'Reactivar', onclick: async () => {
+              if (i.activo && !confirm(`¿Pausar el código ${i.codigo}? Los clientes ya no podrán usarlo.`)) return;
+              try { await api('/api/admin/influencers/' + i.id, { method: 'PUT', body: { activo: !i.activo } }); cargarInfluencers(); } catch (e) { alert(e.message); }
+            } }),
+            el('button', { class: 'boton borde chico', type: 'button', text: 'Ajustar puntos', onclick: async () => {
+              const p = prompt(`¿Cuántos puntos sumar a ${i.nombre}? (escribe -5 para quitar 5)`); if (!p) return;
+              const nota = prompt('¿Por qué? (queda en el historial)'); if (!nota) return;
+              try { await api(`/api/admin/influencers/${i.id}/puntos`, { body: { puntos: p, nota } }); cargarInfluencers(); } catch (e) { alert(e.message); }
+            } }),
+            el('button', { class: 'boton borde chico', type: 'button', text: 'Ver quién lo usó', onclick: async () => {
+              try {
+                const d = (await api('/api/admin/influencers/' + i.id)).influencer;
+                poner(caja, el('div', { class: 'vista-tienda' }, d.redes ? el('p', { style: 'margin:0' }, el('strong', { text: 'Redes: ' }), d.redes) : null,
+                  d.historial.length ? el('ul', { class: 'lista-simple' }, d.historial.map((h) => el('li', { text: `${h.guia} · ${h.cliente} · ${fecha(h.creado)} · ${h.estado}${h.estado === 'entregado' ? ` (+${h.influencer_puntos})` : ''}` }))) : el('p', { class: 'pista', text: 'Nadie ha usado su código todavía.' }),
+                  d.ajustes_lista.length ? el('ul', { class: 'lista-simple' }, d.ajustes_lista.map((a) => el('li', { text: `Ajuste ${a.puntos > 0 ? '+' : ''}${a.puntos}: ${a.nota} (${fecha(a.creado, false)})` }))) : null));
+              } catch (e) { alert(e.message); }
+            } })) : null,
+          caja);
+      };
+      // Regalos y puntos por cliente (editables)
+      const filasRegalo = el('div', { class: 'regalos-lista' });
+      const filaRegalo = (g) => {
+        const regalo = el('input', { maxlength: 80, value: g.regalo || '', placeholder: 'Ej. Gorra Vaelo', 'aria-label': 'Regalo' });
+        const puntos = el('input', { type: 'number', min: 1, step: 1, value: g.puntos || '', placeholder: 'Puntos', 'aria-label': 'Puntos' });
+        const fila = el('div', { class: 'fila regalo-fila' }, el('div', { class: 'campo' }, regalo), el('div', { class: 'campo' }, puntos),
+          el('button', { class: 'boton borde chico', type: 'button', text: 'Quitar', onclick: () => fila.remove() }));
+        fila._leer = () => ({ id: g.id || null, regalo: regalo.value, puntos: puntos.value });
+        return fila;
+      };
+      for (const g of r.regalos.filter((x) => x.activo)) filasRegalo.append(filaRegalo(g));
+      const ppu = el('input', { type: 'number', min: 1, max: 1000, step: 1, value: r.puntos_por_uso, 'aria-label': 'Puntos por cliente' });
+      const msgReg = el('div', { class: 'mensaje', role: 'alert' });
+      poner(zona,
+        el('div', { class: 'bloque' }, el('h2', { text: `Solicitudes entrantes${r.solicitudes.length ? ` (${r.solicitudes.length})` : ''}` }),
+          r.solicitudes.length ? el('div', { class: 'planes-grid' }, r.solicitudes.map(solicitud)) : el('p', { class: 'pista', text: 'No hay solicitudes nuevas. Llegan desde la página «Sé influencer Vaelo».' })),
+        r.por_entregar.length ? el('div', { class: 'bloque aviso-ascenso' }, el('h2', { text: 'Regalos por entregar' }),
+          r.por_entregar.map((x) => el('div', { class: 'caja-fila' }, el('div', {}, el('strong', { text: `${x.regalo} para ${x.nombre}` }), el('br'),
+            sub(`${x.codigo} · ${x.telefono || ''} · llegó a ${x.puntos} puntos${x.pedido_en ? ' · lo pidió el ' + fecha(x.pedido_en, false) : ''}`)),
+            r.puede_editar ? el('button', { class: 'boton chico', type: 'button', text: 'Entregado', onclick: async () => {
+              try { await api(`/api/admin/influencers/${x.influencer_id}/regalos/${x.regalo_id}/entregado`, { body: {} }); window.avisoHecho?.('Regalo entregado', x.nombre); cargarInfluencers(); } catch (e) { alert(e.message); }
+            } }) : null))) : null,
+        el('div', { class: 'bloque' }, el('h2', { text: 'Influencers' }),
+          r.influencers.length ? el('div', { class: 'planes-grid' }, r.influencers.map(tarjeta)) : el('p', { class: 'pista', text: 'Todavía no hay influencers. Crea su código desde una solicitud.' })),
+        el('div', { class: 'bloque' }, el('h2', { text: 'Regalos y puntos' }),
+          el('p', { class: 'bloque-nota', text: 'Metas: los puntos no se gastan y cada regalo se gana una vez. Un regalo que alguien ya ganó no se borra: se oculta.' }),
+          el('div', { class: 'campo', style: 'max-width:320px' }, el('label', { text: 'Puntos por cada cliente que use un código' }), ppu),
+          filasRegalo,
+          r.puede_editar ? el('div', { class: 'navegar' },
+            el('button', { class: 'boton borde chico', type: 'button', text: 'Añadir regalo', onclick: () => filasRegalo.append(filaRegalo({})) }),
+            el('button', { class: 'boton', type: 'button', text: 'Guardar regalos', onclick: async () => {
+              try { await api('/api/admin/influencers-regalos', { method: 'PUT', body: { puntos_por_uso: ppu.value, regalos: [...filasRegalo.children].map((f) => f._leer()) } }); window.avisoHecho?.('Regalos guardados'); cargarInfluencers(); }
+              catch (e) { mostrarMensaje(msgReg, e.message); }
+            } })) : el('p', { class: 'pista', text: 'Solo administración cambia los regalos.' }), msgReg));
     }
     let zonasPlan = [];
     async function cargarPlanes() {
@@ -1889,7 +2021,7 @@ null))));
     let rolPanel = 'admin';
     // Pestañas que ve cada empleado según sus permisos (la administración ve todo)
     let permisosPanel = null;
-    const AREA_TAB = { envios: 'envios', mensajeros: 'pilotos', clientes: 'clientes', empresas: 'empresas', planes: 'empresas', quejas: 'envios' };
+    const AREA_TAB = { envios: 'envios', mensajeros: 'pilotos', clientes: 'clientes', influencers: 'clientes', empresas: 'empresas', planes: 'empresas', quejas: 'envios' };
     function aplicarRol(rol, permisos) {
       rolPanel = rol; permisosPanel = permisos || null;
       document.querySelectorAll('.solo-admin').forEach(x => { x.hidden = rol !== 'admin'; });

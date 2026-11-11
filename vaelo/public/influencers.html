@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sé influencer Vaelo · Vaelo</title>
+  <meta name="description" content="Recomienda Vaelo con tu propio código de descuento, suma puntos con cada cliente nuevo y gana regalos.">
+  <meta name="theme-color" content="#0e2463">
+  <link rel="icon" href="/img/favicon.png" type="image/png">
+  <link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/styles.css?v=20261111e">
+  <link rel="stylesheet" href="/css/suave.css?v=20261111a">
+</head>
+<body>
+  <header id="barra" class="barra"><div class="contenedor"><a href="/" class="marca"><img src="/img/logo-blanco.png" alt="Vaelo" width="139" height="40"></a></div></header>
+  <section class="empresas-hero">
+    <div class="contenedor">
+      <div>
+        <h1>Sé influencer Vaelo</h1>
+        <p>Recomienda Vaelo a tus seguidores con tu propio código de descuento. Cada cliente nuevo que lo use te da puntos, y con tus puntos ganas regalos de Vaelo.</p>
+      </div>
+      <ol class="empresas-pasos">
+        <li><strong>Manda tu solicitud</strong><span>Tus datos y tus redes sociales.</span></li>
+        <li><strong>Te damos tu código</strong><span>Revisamos tu perfil y creamos tu código único.</span></li>
+        <li><strong>Comparte y gana</strong><span>Sube tus videos con tu código y suma puntos.</span></li>
+      </ol>
+    </div>
+  </section>
+  <main class="area influencer-pagina">
+    <div class="contenedor" style="max-width:760px">
+      <div class="beneficios-influencer">
+        <div><strong>Tu propio código</strong>Tus seguidores lo escriben en su envío y reciben un descuento (una vez por cliente).</div>
+        <div><strong>Puntos por cada cliente</strong>Sumas puntos cuando el cliente recibe su paquete. Tus puntos no se gastan.</div>
+        <div><strong>Regalos de Vaelo</strong>Al llegar a cada meta ganas un regalo, como una gorra o un paquete Vaelo.</div>
+      </div>
+      <form id="form" class="bloque" novalidate>
+        <h2>Tu solicitud</h2>
+        <div id="msg" class="mensaje" role="alert"></div>
+        <div class="fila">
+          <div class="campo"><label for="nombre">Nombre completo</label><input id="nombre" autocomplete="name" maxlength="100" required></div>
+          <div class="campo"><label for="telefono">Teléfono o WhatsApp</label><input id="telefono" type="tel" autocomplete="tel" maxlength="30" placeholder="0000-0000" required></div>
+        </div>
+        <div class="campo"><label for="email">Correo <span class="ayuda">Ahí te mandamos tu código y el acceso a tu cuenta</span></label><input id="email" type="email" autocomplete="email" maxlength="150" required></div>
+        <div class="campo"><label for="redes">Tus redes sociales <span class="ayuda">Usuario o enlace de TikTok, Instagram, Facebook o YouTube</span></label><textarea id="redes" rows="2" maxlength="500" placeholder="Ej. tiktok.com/@tuusuario, instagram.com/tuusuario"></textarea></div>
+        <div class="campo"><label for="seguidores">¿Cuántos seguidores tienes, más o menos? <span class="ayuda">Opcional</span></label><input id="seguidores" maxlength="60" placeholder="Ej. 12 mil en TikTok"></div>
+        <div class="campo"><label for="mensaje">¿Cómo te gustaría recomendar a Vaelo? <span class="ayuda">Opcional</span></label><textarea id="mensaje" rows="3" maxlength="600"></textarea></div>
+        <label class="casilla" for="acepto"><input type="checkbox" id="acepto" style="width:auto"><span>Acepto las condiciones del programa: Vaelo da regalos y no dinero, los puntos no se cambian por efectivo, y Vaelo puede pausar un código si se usa de forma indebida.</span></label>
+        <button class="boton" type="submit" style="margin-top:1rem">Mandar solicitud</button>
+      </form>
+      <section id="listo" class="bloque" hidden>
+        <h2>Recibimos tu solicitud</h2>
+        <p>Revisamos tu perfil y te escribimos a tu correo. Si te aprobamos, ahí te llega tu código y el acceso a tu cuenta para ver tus puntos.</p>
+        <a class="boton borde" href="/">Volver al inicio</a>
+      </section>
+    </div>
+  </main>
+  <script src="/js/comun.js?v=20261109c"></script>
+  <script src="/js/suave.js?v=20261111a"></script>
+  <script>
+    pintarBarra();
+    const form = document.getElementById('form');
+    form.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const boton = form.querySelector('button[type=submit]');
+      boton.disabled = true;
+      try {
+        await api('/api/influencers/solicitud', { body: { nombre: form.nombre.value, telefono: form.telefono.value, email: form.email.value, redes: form.redes.value,
+          seguidores: form.seguidores.value, mensaje: form.mensaje.value, acepto: form.acepto.checked } });
+        form.hidden = true;
+        const listo = document.getElementById('listo');
+        listo.hidden = false;
+        listo.prepend(checkAnimado());
+        listo.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } catch (e) { mostrarMensaje(document.getElementById('msg'), e.message); boton.disabled = false; }
+    });
+  </script>
+</body>
+</html>

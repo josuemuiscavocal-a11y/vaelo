@@ -375,7 +375,7 @@ function areaDeRuta(url) {
   const p = String(url || '').split('?')[0];
   if (/^\/api\/admin\/(resumen|nuevos)$/.test(p)) return null;   // lo usan todos para los avisos
   if (/^\/api\/admin\/(mensajeros|flota|sueldos)|^\/api\/admin\/usuarios\/\d+\/documento/.test(p)) return 'pilotos';
-  if (/^\/api\/admin\/clientes/.test(p)) return 'clientes';
+  if (/^\/api\/admin\/(clientes|influencers)/.test(p)) return 'clientes';
   if (/^\/api\/admin\/(empresas|lotes-empresa|lotes-sede|pedidos|bonos|planes|tiendas)/.test(p)) return 'empresas';
   if (/^\/api\/admin\/(envios|fletes|buscar|alertas|reclamos)/.test(p)) return 'envios';
   return null;
@@ -500,6 +500,12 @@ const ACCIONES = [
   [/^\/api\/admin\/operadores/, (b) => `Creó o cambió la cuenta de empleado ${b.nombre || b.email || ''}`],
   [/^\/api\/admin\/cargos\/:id$/, (b) => `${b.anular ? 'Anuló' : 'Cambió'} un cargo a cliente`],
   [/^\/api\/admin\/reclamos\/:id$/, () => 'Resolvió un reclamo'],
+  [/^\/api\/admin\/influencers\/solicitudes\/:id\/aprobar$/, (b) => `Creó el código ${String(b.codigo || '').toUpperCase()} para un influencer`],
+  [/^\/api\/admin\/influencers\/solicitudes\/:id\/rechazar$/, (b) => `Rechazó una solicitud de influencer${b.nota ? `: ${b.nota}` : ''}`],
+  [/^\/api\/admin\/influencers\/:id$/, (b) => (b.activo === false ? 'Pausó un código de influencer' : b.activo === true ? 'Reactivó un código de influencer' : `Cambió un código de influencer${b.codigo ? ` a ${String(b.codigo).toUpperCase()}` : ''}`)],
+  [/^\/api\/admin\/influencers\/:id\/puntos$/, (b) => `Ajustó ${b.puntos} puntos a un influencer: ${b.nota || ''}`],
+  [/^\/api\/admin\/influencers\/:id\/regalos\/:regalo\/entregado$/, () => 'Entregó un regalo a un influencer'],
+  [/^\/api\/admin\/influencers-regalos$/, (b) => `Cambió los regalos de influencers (${b.puntos_por_uso} puntos por cliente): ${(b.regalos || []).map((r) => `${r.regalo} ${r.puntos}`).join(', ')}`],
   [/^\/api\/admin\/tiendas\/:id\/aprobar$/, (b) => `Aprobó una tienda minorista${b.foco_zona ? ` con zona foco ${b.foco_zona}` : ''}`],
   [/^\/api\/admin\/tiendas\/:id\/rechazar$/, (b) => `Rechazó una solicitud de tienda${b.nota ? `: ${b.nota}` : ''}`],
   [/^\/api\/admin\/planes$/, (b) => `Creó el plan «${b.nombre || ''}»: ${condicionesEnTexto(b.condiciones || {})}`],
@@ -514,6 +520,8 @@ const nombreUsuario = (id) => db.prepare('SELECT COALESCE(empresa_nombre, nombre
 function contextoAccion(patron, params) {
   if (!params.id) return '';
   if (/\/envios\/:id/.test(patron)) { const e = db.prepare('SELECT guia FROM envios WHERE id = ?').get(Number(params.id)); return e ? `Envío ${e.guia}` : ''; }
+  if (/\/influencers\/:id/.test(patron)) { const i = db.prepare('SELECT i.codigo, u.nombre FROM influencers i JOIN usuarios u ON u.id = i.usuario_id WHERE i.id = ?').get(Number(params.id)); return i ? `${i.nombre} (${i.codigo})` : ''; }
+  if (/\/influencers\/solicitudes\/:id/.test(patron)) { const x = db.prepare('SELECT nombre, redes FROM influencer_solicitudes WHERE id = ?').get(Number(params.id)); return x ? `${x.nombre} (${x.redes})` : ''; }
   if (/\/tiendas\/:id\//.test(patron)) { const u = db.prepare('SELECT nombre, empresa_nombre FROM usuarios WHERE id = ?').get(Number(params.id)); return u ? `${u.empresa_nombre || ''} (${u.nombre})` : ''; }
   if (/\/planes\/:id$/.test(patron)) { const p = db.prepare('SELECT nombre, condiciones FROM planes WHERE id = ?').get(Number(params.id)); return p ? `Plan «${p.nombre}». Antes: ${condicionesEnTexto(jsonSeguro(p.condiciones))}` : ''; }
   if (/\/empresas\/:id\/condiciones$/.test(patron)) { const u = db.prepare('SELECT nombre, empresa_nombre, condiciones_propias, condiciones_vence, plan_id FROM usuarios WHERE id = ?').get(Number(params.id));
@@ -2045,6 +2053,9 @@ function mejorDescuento(precio, usuarioId, cupon) {
   const codigo = texto(cupon, 30).toUpperCase();
   const opciones = [];
   let cuponValido = !codigo, motivoCupon = '';
+  // Código de influencer: una sola vez por cuenta y por teléfono, para siempre
+  const inf = codigo ? descuentoInfluencer(precio, u, codigo) : null;
+  if (inf) { if (inf.motivo) motivoCupon = inf.motivo; else { cuponValido = true; opciones.push(inf); } }
   for (const p of promocionesVigentes()) {
     if (p.usuario_id && p.usuario_id !== u?.id) continue;   // cupón personal (compensación de un reclamo): solo para ese cliente
     const conCodigo = !!p.codigo;
@@ -2065,8 +2076,8 @@ function mejorDescuento(precio, usuarioId, cupon) {
   if (u && u.tipo_cuenta === 'empresa' && u.descuento_empresa > 0) opciones.push({ id: null, nombre: `Precio de empresa (${u.descuento_empresa}%)`, monto: redondear((precio * Math.min(100, u.descuento_empresa)) / 100) });
   opciones.sort((a, b) => b.monto - a.monto);
   const mejor = opciones[0] && opciones[0].monto > 0 ? opciones[0] : null;
-  const errorCupon = codigo && !cuponValido ? (motivoCupon ? `Ese cupón ${motivoCupon}.` : 'Ese cupón no existe o ya venció.') : '';
-  return { descuento: mejor ? mejor.monto : 0, promocion_id: mejor ? mejor.id : null, promocion: mejor ? mejor.nombre : '', precio: redondear(precio - (mejor ? mejor.monto : 0)), errorCupon };
+  const errorCupon = codigo && !cuponValido ? (motivoCupon ? `${inf ? 'Ese código' : 'Ese cupón'} ${motivoCupon}.` : 'Ese cupón no existe o ya venció.') : '';
+  return { descuento: mejor ? mejor.monto : 0, promocion_id: mejor ? mejor.id : null, influencer_id: mejor ? mejor.influencer_id || null : null, promocion: mejor ? mejor.nombre : '', precio: redondear(precio - (mejor ? mejor.monto : 0)), errorCupon };
 }
 // Promoción automática que se anuncia en la página (la de mayor beneficio entre las que no piden código)
 function promocionAnunciada() {
@@ -2074,6 +2085,222 @@ function promocionAnunciada() {
     .sort((a, b) => (b.tipo === 'gratis') - (a.tipo === 'gratis') || b.valor - a.valor)[0];
   return p ? { nombre: p.nombre, tipo: p.tipo, valor: p.valor, hasta: p.hasta } : null;
 }
+
+// ---------- Influencers Vaelo ----------
+// Un influencer promociona a Vaelo con su código. Cada cliente puede usar un código de influencer una sola vez en su vida
+// (por cuenta y por teléfono). El influencer suma puntos cuando ese envío se entrega, y con los puntos gana regalos.
+const telefono8 = (t) => digitos(t).slice(-8);
+const SQL_TEL8 = "substr(replace(replace(replace(replace(COALESCE(u.telefono, ''), '-', ''), ' ', ''), '+', ''), '(', ''), -8)";
+const puntosPorUso = () => Math.max(0, Math.round(ajNum('influencer_puntos_uso', 10)));
+const influencerPorCodigo = (codigo) => (codigo ? db.prepare('SELECT * FROM influencers WHERE upper(codigo) = upper(?)').get(codigo) : null);
+const textoBeneficio = (i) => (i.beneficio_tipo === 'precio' ? `envío a Q${Number(i.beneficio_valor).toFixed(2)}` : `Q${Number(i.beneficio_valor).toFixed(2)} de descuento en el envío`);
+// ¿Este cliente ya usó un código de influencer? (cualquiera, con su cuenta o con su teléfono)
+function yaUsoInfluencer(u) {
+  return !!db.prepare(`SELECT 1 FROM envios e JOIN usuarios u ON u.id = e.usuario_id WHERE e.influencer_id IS NOT NULL AND e.estado != 'cancelado'
+    AND (u.id = ? OR (${SQL_TEL8} = ? AND length(?) = 8)) LIMIT 1`).get(u.id, telefono8(u.telefono), telefono8(u.telefono));
+}
+// Descuento de un código de influencer para este cliente (o el motivo por el que no aplica)
+function descuentoInfluencer(precio, u, codigo) {
+  const i = influencerPorCodigo(codigo);
+  if (!i) return null;
+  if (!i.activo) return { motivo: 'está pausado por ahora' };
+  if (!u) return { motivo: 'necesita que inicies sesión' };
+  const duenio = db.prepare('SELECT id, telefono FROM usuarios WHERE id = ?').get(i.usuario_id);
+  if (u.id === i.usuario_id || (telefono8(u.telefono).length === 8 && telefono8(u.telefono) === telefono8(duenio?.telefono))) return { motivo: 'es tuyo: compártelo con tus seguidores' };
+  if (yaUsoInfluencer(u)) return { motivo: 'no aplica: los códigos de influencer se usan una sola vez por cuenta' };
+  const monto = i.beneficio_tipo === 'precio' ? Math.max(0, redondear(precio - i.beneficio_valor)) : redondear(Math.min(precio, i.beneficio_valor));
+  return { id: null, influencer_id: i.id, nombre: `Código ${i.codigo}`, monto };
+}
+function puntosInfluencer(id) {
+  const entregados = db.prepare("SELECT COALESCE(SUM(influencer_puntos), 0) AS p, COUNT(*) AS n FROM envios WHERE influencer_id = ? AND estado = 'entregado'").get(id);
+  const enCamino = db.prepare("SELECT COUNT(*) AS n FROM envios WHERE influencer_id = ? AND estado NOT IN ('entregado','cancelado','devuelto')").get(id).n;
+  const ajustes = db.prepare('SELECT COALESCE(SUM(puntos), 0) AS p FROM influencer_ajustes WHERE influencer_id = ?').get(id).p;
+  return { puntos: Math.max(0, entregados.p + ajustes), usos: entregados.n, en_camino: enCamino, ajustes };
+}
+function metasInfluencer(inf, puntos) {
+  const hechas = new Map(db.prepare('SELECT * FROM influencer_metas WHERE influencer_id = ?').all(inf.id).map((m) => [m.regalo_id, m]));
+  return db.prepare('SELECT * FROM influencer_regalos WHERE activo = 1 ORDER BY puntos, id').all().map((r) => {
+    const m = hechas.get(r.id);
+    return { id: r.id, regalo: r.regalo, puntos: r.puntos, alcanzado: puntos >= r.puntos, faltan: Math.max(0, r.puntos - puntos), pedido_en: m?.pedido_en || null, entregado_en: m?.entregado_en || null };
+  });
+}
+function influencerSalida(inf, conDetalle = false) {
+  const u = db.prepare('SELECT nombre, email, telefono FROM usuarios WHERE id = ?').get(inf.usuario_id) || {};
+  const p = puntosInfluencer(inf.id);
+  const out = { id: inf.id, usuario_id: inf.usuario_id, nombre: u.nombre, email: u.email, telefono: u.telefono, codigo: inf.codigo, beneficio_tipo: inf.beneficio_tipo, beneficio_valor: inf.beneficio_valor,
+    beneficio: textoBeneficio(inf), activo: !!inf.activo, creado: inf.creado, ...p, metas: metasInfluencer(inf, p.puntos) };
+  if (conDetalle) {
+    out.historial = db.prepare(`SELECT e.guia, e.estado, e.creado, e.entregado_en, e.influencer_puntos, u.nombre AS cliente FROM envios e JOIN usuarios u ON u.id = e.usuario_id
+      WHERE e.influencer_id = ? ORDER BY e.id DESC LIMIT 100`).all(inf.id).map((x) => ({ ...x, cliente: x.cliente.split(' ')[0] }));
+    out.ajustes_lista = db.prepare('SELECT puntos, nota, creado FROM influencer_ajustes WHERE influencer_id = ? ORDER BY id DESC LIMIT 50').all(inf.id);
+    const s = inf.solicitud_id ? db.prepare('SELECT redes, seguidores FROM influencer_solicitudes WHERE id = ?').get(inf.solicitud_id) : null;
+    out.redes = s?.redes || ''; out.seguidores = s?.seguidores || '';
+  }
+  return out;
+}
+// Solicitud pública: no necesita cuenta
+ruta('POST', '/api/influencers/solicitud', ({ req, body }) => {
+  if (limitar(ipDe(req), 'influencer-solicitud', 5, 3600_000)) falla(429, 'Ya mandaste varias solicitudes. Espera una hora.');
+  const nombre = texto(body.nombre, 100), email = texto(body.email, 150).toLowerCase(), telefono = texto(body.telefono, 30);
+  const redes = texto(body.redes, 500), seguidores = texto(body.seguidores, 60), mensaje = texto(body.mensaje, 600);
+  if (nombre.length < 2) falla(400, 'Escribe tu nombre.');
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) falla(400, 'Escribe un correo válido.');
+  if (digitos(telefono).length < 8) falla(400, 'Escribe tu teléfono o WhatsApp de 8 dígitos.');
+  if (redes.length < 4) falla(400, 'Escribe tus redes sociales (por ejemplo, tu usuario de TikTok o Instagram).');
+  if (body.acepto !== true) falla(400, 'Para enviar tu solicitud acepta las condiciones del programa.');
+  if (db.prepare("SELECT 1 FROM influencer_solicitudes WHERE email = ? AND estado = 'nueva'").get(email)) falla(409, 'Ya tenemos tu solicitud. Te escribimos cuando la revisemos.');
+  const u = db.prepare('SELECT id FROM usuarios WHERE email = ?').get(email);
+  if (u && db.prepare('SELECT 1 FROM influencers WHERE usuario_id = ?').get(u.id)) falla(409, 'Ya eres influencer Vaelo: entra a tu cuenta para ver tu código.');
+  db.prepare('INSERT INTO influencer_solicitudes (nombre, email, telefono, redes, seguidores, mensaje) VALUES (?, ?, ?, ?, ?, ?)').run(nombre, email, telefono, redes, seguidores, mensaje);
+  avisarStaff({ titulo: 'Nueva solicitud de influencer', cuerpo: `${nombre} (${redes.slice(0, 60)}) quiere ser influencer Vaelo.`, url: RUTA_ADMIN, etiqueta: 'influencer-solicitud' });
+  return { _status: 201, ok: true };
+});
+// El influencer en su cuenta
+ruta('GET', '/api/influencer/yo', ({ req }) => {
+  const u = requiereRol(req, 'cliente');
+  const inf = db.prepare('SELECT * FROM influencers WHERE usuario_id = ?').get(u.id);
+  if (!inf) return { influencer: null };
+  const out = influencerSalida(inf, true);
+  delete out.ajustes_lista;
+  out.puntos_por_uso = puntosPorUso();
+  return { influencer: out };
+});
+ruta('POST', '/api/influencer/regalos/:id/pedir', ({ req, params }) => {
+  const u = requiereRol(req, 'cliente');
+  const inf = db.prepare('SELECT * FROM influencers WHERE usuario_id = ?').get(u.id) || falla(403, 'Esta sección es para influencers Vaelo.');
+  const meta = metasInfluencer(inf, puntosInfluencer(inf.id).puntos).find((m) => m.id === Number(params.id)) || falla(404, 'Ese regalo ya no está disponible.');
+  if (!meta.alcanzado) falla(400, `Te faltan ${meta.faltan} puntos para este regalo.`);
+  if (meta.pedido_en) falla(400, 'Ya pediste este regalo. Te escribimos para entregártelo.');
+  db.prepare("INSERT INTO influencer_metas (influencer_id, regalo_id, pedido_en) VALUES (?, ?, datetime('now')) ON CONFLICT(influencer_id, regalo_id) DO UPDATE SET pedido_en = datetime('now')").run(inf.id, meta.id);
+  avisarStaff({ titulo: 'Un influencer pidió su regalo', cuerpo: `${u.nombre} (${inf.codigo}) llegó a ${meta.puntos} puntos: ${meta.regalo}.`, url: RUTA_ADMIN, etiqueta: 'influencer-regalo-' + inf.id, urgente: true });
+  return { ok: true };
+});
+// ---------- Zona influencers (panel) ----------
+function leerBeneficio(b) {
+  const tipo = b.beneficio_tipo === 'monto' ? 'monto' : b.beneficio_tipo === 'precio' ? 'precio' : falla(400, 'Elige qué le da el código al cliente.');
+  const valor = redondear(numero(b.beneficio_valor));
+  if (!(valor >= 0 && valor <= 500)) falla(400, 'Revisa el monto del beneficio.');
+  if (tipo === 'monto' && !(valor > 0)) falla(400, 'Escribe de cuánto es el descuento.');
+  return { tipo, valor };
+}
+function leerCodigo(c, excepto = null) {
+  const codigo = texto(c, 24).toUpperCase().replace(/\s+/g, '');
+  if (!/^[A-Z0-9-]{4,24}$/.test(codigo)) falla(400, 'El código lleva de 4 a 24 letras, números o guiones, sin espacios. Ej. VAELO-MARIA');
+  if (db.prepare('SELECT 1 FROM influencers WHERE upper(codigo) = ? AND id IS NOT ?').get(codigo, excepto)) falla(409, 'Ese código ya es de otro influencer.');
+  if (db.prepare('SELECT 1 FROM promociones WHERE upper(codigo) = ?').get(codigo)) falla(409, 'Ese código ya lo usa una promoción.');
+  return codigo;
+}
+ruta('GET', '/api/admin/influencers', ({ req }) => {
+  const quien = requiereStaff(req);
+  const lista = db.prepare('SELECT * FROM influencers ORDER BY activo DESC, id DESC').all().map((i) => influencerSalida(i));
+  const porEntregar = [];
+  for (const i of lista) for (const m of i.metas) if (m.alcanzado && !m.entregado_en) porEntregar.push({ influencer_id: i.id, nombre: i.nombre, codigo: i.codigo, telefono: i.telefono, regalo_id: m.id, regalo: m.regalo, puntos: m.puntos, pedido_en: m.pedido_en });
+  return { solicitudes: db.prepare("SELECT * FROM influencer_solicitudes WHERE estado = 'nueva' ORDER BY id").all(), influencers: lista,
+    regalos: db.prepare('SELECT * FROM influencer_regalos ORDER BY activo DESC, puntos, id').all(), por_entregar: porEntregar, puntos_por_uso: puntosPorUso(), puede_editar: esAdmin(quien),
+    tarifa_zona: vehiculoMoto()?.tarifa_zona ?? 35, piloto_zona: gananciaPiloto(vehiculoMoto()?.tarifa_zona ?? 35) };
+});
+ruta('GET', '/api/admin/influencers/:id', ({ req, params }) => {
+  requiereStaff(req);
+  const i = db.prepare('SELECT * FROM influencers WHERE id = ?').get(Number(params.id)) || falla(404, 'No encontramos ese influencer.');
+  return { influencer: influencerSalida(i, true) };
+});
+// «Crearle un código a este influencer»: crea su cuenta (o usa la que ya tiene con ese correo) y le manda un correo para entrar
+ruta('POST', '/api/admin/influencers/solicitudes/:id/aprobar', async ({ req, params, body }) => {
+  const quien = requiereRol(req, 'admin');
+  const s = db.prepare("SELECT * FROM influencer_solicitudes WHERE id = ? AND estado = 'nueva'").get(Number(params.id)) || falla(404, 'No encontramos esa solicitud.');
+  const codigo = leerCodigo(body.codigo);
+  const ben = leerBeneficio(body);
+  let u = db.prepare('SELECT * FROM usuarios WHERE email = ?').get(s.email);
+  if (u && u.rol !== 'cliente') falla(400, 'Ese correo es de una cuenta del equipo o de un piloto. Pídele otro correo.');
+  if (u && db.prepare('SELECT 1 FROM influencers WHERE usuario_id = ?').get(u.id)) falla(409, 'Esa cuenta ya es de un influencer.');
+  let nueva = false, token = null;
+  db.exec('BEGIN');
+  try {
+    if (!u) {
+      const id = Number(db.prepare("INSERT INTO usuarios (nombre, email, telefono, password_hash, email_verificado, terminos_aceptados, tipo_cuenta) VALUES (?, ?, ?, ?, 0, datetime('now'), 'personal')")
+        .run(s.nombre, s.email, s.telefono, hashPassword(crypto.randomBytes(24).toString('hex'))).lastInsertRowid);
+      u = db.prepare('SELECT * FROM usuarios WHERE id = ?').get(id); nueva = true;
+      token = crypto.randomBytes(32).toString('hex');
+      db.prepare('INSERT INTO tokens_clave (token, usuario_id, expira) VALUES (?, ?, ?)').run(token, u.id, Date.now() + 7 * 86400_000);
+    }
+    db.prepare('INSERT INTO influencers (usuario_id, codigo, beneficio_tipo, beneficio_valor, solicitud_id) VALUES (?, ?, ?, ?, ?)').run(u.id, codigo, ben.tipo, ben.valor, s.id);
+    db.prepare("UPDATE influencer_solicitudes SET estado = 'aprobada', usuario_id = ?, revisado_en = datetime('now'), nota = ? WHERE id = ?").run(u.id, `Aprobada por ${quien.nombre.split(' ')[0]}`, s.id);
+    db.exec('COMMIT');
+  } catch (err) { db.exec('ROLLBACK'); throw err; }
+  const parrafos = [`Ya eres influencer Vaelo. Tu código es ${codigo}: quien lo use en su envío recibe ${textoBeneficio({ beneficio_tipo: ben.tipo, beneficio_valor: ben.valor })}.`,
+    'Cada vez que un cliente nuevo use tu código y su envío se entregue, sumas puntos. Con tus puntos ganas regalos de Vaelo.'];
+  if (nueva) await enviarCorreo(u.email, 'Ya eres influencer Vaelo', correoVaelo(`Hola, ${u.nombre.split(' ')[0]}`, [...parrafos, 'Crea tu contraseña para entrar a tu cuenta y ver tus puntos (el enlace dura 7 días).'],
+    { texto: 'Crear mi contraseña', url: `/recuperar?t=${token}` }), `Ya eres influencer Vaelo. Tu código: ${codigo}. Crea tu contraseña: ${URL_SITIO}/recuperar?t=${token}`).catch(() => {});
+  else enviarCorreo(u.email, 'Ya eres influencer Vaelo', correoVaelo(`Hola, ${u.nombre.split(' ')[0]}`, [...parrafos, 'Entra a tu cuenta de Vaelo para ver tus puntos.'], { texto: 'Ver mi cuenta', url: '/mi-cuenta?influencer=1' }),
+    `Ya eres influencer Vaelo. Tu código: ${codigo}. ${URL_SITIO}/mi-cuenta?influencer=1`).catch(() => {});
+  avisar(u.id, { titulo: 'Ya eres influencer Vaelo', cuerpo: `Tu código es ${codigo}. Mira tus puntos en tu cuenta.`, url: '/mi-cuenta?influencer=1', etiqueta: 'influencer' });
+  return { _status: 201, ok: true, cuenta_nueva: nueva, codigo };
+});
+ruta('POST', '/api/admin/influencers/solicitudes/:id/rechazar', ({ req, params, body }) => {
+  requiereRol(req, 'admin');
+  const s = db.prepare("SELECT * FROM influencer_solicitudes WHERE id = ? AND estado = 'nueva'").get(Number(params.id)) || falla(404, 'No encontramos esa solicitud.');
+  db.prepare("UPDATE influencer_solicitudes SET estado = 'rechazada', revisado_en = datetime('now'), nota = ? WHERE id = ?").run(texto(body.nota, 300) || null, s.id);
+  return { ok: true };
+});
+ruta('PUT', '/api/admin/influencers/:id', ({ req, params, body }) => {
+  requiereRol(req, 'admin');
+  const i = db.prepare('SELECT * FROM influencers WHERE id = ?').get(Number(params.id)) || falla(404, 'No encontramos ese influencer.');
+  const codigo = body.codigo !== undefined ? leerCodigo(body.codigo, i.id) : i.codigo;
+  const ben = body.beneficio_tipo !== undefined ? leerBeneficio(body) : { tipo: i.beneficio_tipo, valor: i.beneficio_valor };
+  const activo = body.activo === undefined ? i.activo : body.activo ? 1 : 0;
+  db.prepare('UPDATE influencers SET codigo = ?, beneficio_tipo = ?, beneficio_valor = ?, activo = ? WHERE id = ?').run(codigo, ben.tipo, ben.valor, activo, i.id);
+  return { ok: true, influencer: influencerSalida(db.prepare('SELECT * FROM influencers WHERE id = ?').get(i.id)) };
+});
+ruta('POST', '/api/admin/influencers/:id/puntos', ({ req, params, body }) => {
+  requiereRol(req, 'admin');
+  const i = db.prepare('SELECT * FROM influencers WHERE id = ?').get(Number(params.id)) || falla(404, 'No encontramos ese influencer.');
+  const puntos = Math.round(numero(body.puntos)), nota = texto(body.nota, 200);
+  if (!Number.isFinite(puntos) || puntos === 0 || Math.abs(puntos) > 100000) falla(400, 'Escribe cuántos puntos sumar (o restar con un signo menos).');
+  if (nota.length < 3) falla(400, 'Escribe el motivo del ajuste.');
+  db.prepare('INSERT INTO influencer_ajustes (influencer_id, puntos, nota) VALUES (?, ?, ?)').run(i.id, puntos, nota);
+  return { ok: true, ...puntosInfluencer(i.id) };
+});
+ruta('POST', '/api/admin/influencers/:id/regalos/:regalo/entregado', ({ req, params }) => {
+  const quien = requiereRol(req, 'admin');
+  const i = db.prepare('SELECT * FROM influencers WHERE id = ?').get(Number(params.id)) || falla(404, 'No encontramos ese influencer.');
+  const meta = metasInfluencer(i, puntosInfluencer(i.id).puntos).find((m) => m.id === Number(params.regalo)) || falla(404, 'Ese regalo ya no existe.');
+  if (!meta.alcanzado) falla(400, 'Todavía no llega a los puntos de este regalo.');
+  db.prepare(`INSERT INTO influencer_metas (influencer_id, regalo_id, entregado_en, entregado_por) VALUES (?, ?, datetime('now'), ?)
+    ON CONFLICT(influencer_id, regalo_id) DO UPDATE SET entregado_en = datetime('now'), entregado_por = excluded.entregado_por`).run(i.id, meta.id, quien.nombre.split(' ')[0]);
+  avisar(i.usuario_id, { titulo: 'Tu regalo de Vaelo va en camino', cuerpo: `${meta.regalo}: gracias por recomendarnos.`, url: '/mi-cuenta?influencer=1', etiqueta: 'influencer-regalo' });
+  return { ok: true };
+});
+// Regalos y puntos por uso
+ruta('PUT', '/api/admin/influencers-regalos', ({ req, body }) => {
+  requiereRol(req, 'admin');
+  const lista = Array.isArray(body.regalos) ? body.regalos : falla(400, 'Faltan los regalos.');
+  if (lista.length > 30) falla(400, 'Son demasiados regalos.');
+  const ppu = Math.round(numero(body.puntos_por_uso));
+  if (!(ppu >= 1 && ppu <= 1000)) falla(400, 'Los puntos por cada cliente van de 1 a 1000.');
+  const limpios = lista.map((r) => {
+    const regalo = texto(r.regalo, 80), puntos = Math.round(numero(r.puntos));
+    if (regalo.length < 2) falla(400, 'Escribe el nombre de cada regalo.');
+    if (!(puntos >= 1 && puntos <= 1000000)) falla(400, `Revisa los puntos de «${regalo}».`);
+    return { id: Number(r.id) || null, regalo, puntos, activo: r.activo === false ? 0 : 1 };
+  });
+  db.exec('BEGIN');
+  try {
+    // Los regalos que ya alguien ganó no se borran (se apagan) para no perder su historial
+    const ids = new Set(limpios.filter((r) => r.id).map((r) => r.id));
+    for (const r of db.prepare('SELECT id FROM influencer_regalos').all()) {
+      if (ids.has(r.id)) continue;
+      if (db.prepare('SELECT 1 FROM influencer_metas WHERE regalo_id = ?').get(r.id)) db.prepare('UPDATE influencer_regalos SET activo = 0 WHERE id = ?').run(r.id);
+      else db.prepare('DELETE FROM influencer_regalos WHERE id = ?').run(r.id);
+    }
+    for (const r of limpios) {
+      if (r.id && db.prepare('SELECT 1 FROM influencer_regalos WHERE id = ?').get(r.id)) db.prepare('UPDATE influencer_regalos SET regalo = ?, puntos = ?, activo = ? WHERE id = ?').run(r.regalo, r.puntos, r.activo, r.id);
+      else db.prepare('INSERT INTO influencer_regalos (regalo, puntos, activo) VALUES (?, ?, ?)').run(r.regalo, r.puntos, r.activo);
+    }
+    db.prepare("INSERT INTO ajustes (clave, valor) VALUES ('influencer_puntos_uso', ?) ON CONFLICT(clave) DO UPDATE SET valor = excluded.valor").run(String(ppu));
+    db.exec('COMMIT');
+  } catch (err) { db.exec('ROLLBACK'); throw err; }
+  return { ok: true };
+});
 
 // ---------- Crear envíos (uno o por archivo) ----------
 // fecha y hora de Guatemala "AAAA-MM-DDTHH:MM" -> texto UTC de la base
@@ -2136,6 +2363,8 @@ function insertarEnvio(u, body, d, c, desc, programado, grupo = null) {
   // Foto del paquete que tomó el cliente: muestra qué lleva desde antes de recogerlo
   if (body.foto_paquete) guardarArchivoEnvio(Number(r.lastInsertRowid), 'paquete', body.foto_paquete);
   const id = Number(r.lastInsertRowid);
+  // Código de influencer: suma puntos cuando se entregue; el piloto gana lo de un envío sin descuento
+  if (desc.influencer_id) db.prepare('UPDATE envios SET influencer_id = ?, influencer_puntos = ?, ganancia_acordada = ? WHERE id = ?').run(desc.influencer_id, puntosPorUso(), gananciaPiloto(c.precio), id);
   const codigoCorto = codigoCortoEnvio(id);
   if (body._extras && body._extras.length) guardarExtras(id, body._extras);
   // Los cargos pendientes del cliente (cancelación, devolución, sede) se cobran junto con este envío
@@ -2357,7 +2586,9 @@ async function revisarPrecio(id) {
   const base = redondear(viaje + (e.recargo_fragil || 0) + (e.seguro || 0));
   let descuento = 0;
   const p = e.promocion_id ? db.prepare('SELECT * FROM promociones WHERE id = ?').get(e.promocion_id) : null;
+  const infl = e.influencer_id ? db.prepare('SELECT * FROM influencers WHERE id = ?').get(e.influencer_id) : null;
   if (p) descuento = montoPromo(p, base);
+  else if (infl) descuento = infl.beneficio_tipo === 'precio' ? Math.max(0, redondear(base - infl.beneficio_valor)) : redondear(Math.min(base, infl.beneficio_valor));
   else if (e.descuento > 0) {
     const u = db.prepare('SELECT tipo_cuenta, descuento_empresa FROM usuarios WHERE id = ?').get(e.usuario_id);
     if (u && u.tipo_cuenta === 'empresa' && u.descuento_empresa > 0) descuento = redondear((base * Math.min(100, u.descuento_empresa)) / 100);
@@ -2366,6 +2597,7 @@ async function revisarPrecio(id) {
   const r = db.prepare(`UPDATE envios SET tipo_tarifa = ?, km = ?, precio_base = ?, descuento = ?, precio = ?, precio_por_confirmar = 0,
       precio_o_lat = ?, precio_o_lng = ?, precio_d_lat = ?, precio_d_lng = ? WHERE id = ? AND estado IN ('pendiente','recogido','en_camino')`)
     .run(fija ? 'zona' : 'km', km, base, descuento, precio, o.lat, o.lng, d.lat, d.lng, id);
+  if (r.changes && infl) db.prepare('UPDATE envios SET ganancia_acordada = ? WHERE id = ?').run(gananciaPiloto(base), id);
   if (!r.changes || Math.abs(precio - e.precio) < 0.01) return;
   const razon = e.tipo_tarifa === 'zona' && !fija ? 'La entrega queda fuera de las zonas preferenciales' : fija && e.tipo_tarifa !== 'zona' ? 'La entrega está en una zona preferencial' : 'Cambió el punto de recogida o de entrega';
   db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(id, e.estado, `${razon}: ${'Q' + precio.toFixed(2)}`);
@@ -3123,7 +3355,7 @@ ruta('POST', '/api/clave/nueva', ({ req, body }) => {
   const nueva = String(body.password || '');
   if (nueva.length < 8) falla(400, 'La contraseña debe tener al menos 8 caracteres.');
   const u = db.prepare('SELECT id, rol FROM usuarios WHERE id = ?').get(fila.usuario_id);
-  db.prepare('UPDATE usuarios SET password_hash = ? WHERE id = ?').run(hashPassword(nueva), u.id);
+  db.prepare('UPDATE usuarios SET password_hash = ?, email_verificado = 1 WHERE id = ?').run(hashPassword(nueva), u.id);
   db.prepare('DELETE FROM tokens_clave WHERE usuario_id = ?').run(u.id);
   db.prepare('DELETE FROM sesiones WHERE usuario_id = ?').run(u.id);
   return { ok: true, destino: u.rol === 'mensajero' ? RUTA_PILOTO : '/entrar' };
@@ -6036,7 +6268,7 @@ const TIPOS = {
 };
 const PAGINAS = { '/': 'index.html', '/entrar': 'entrar.html', '/registro': 'registro.html', '/mi-cuenta': 'cliente.html', '/tienda': 'cliente.html',
   '/enviar': 'cliente.html', '/rastreo': 'rastreo.html', '/recuperar': 'recuperar.html', '/terminos': 'terminos.html', '/privacidad': 'privacidad.html',
-  '/empresas': 'empresas.html', '/politica-pilotos': 'politica-pilotos.html', '/politicas-empresas': 'politicas-empresas.html' };
+  '/empresas': 'empresas.html', '/influencers': 'influencers.html', '/politica-pilotos': 'politica-pilotos.html', '/politicas-empresas': 'politicas-empresas.html' };
 // Páginas que piden cuenta: si no has iniciado sesión, el servidor te manda a entrar antes de mostrar nada
 const PIDEN_CUENTA = { '/enviar': ['cliente', 'admin'], '/mi-cuenta': ['cliente', 'admin'], '/tienda': ['cliente', 'admin'] };
 

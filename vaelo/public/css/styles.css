@@ -1697,3 +1697,21 @@ fieldset { min-width: 0; } .recientes { max-width: 100%; min-width: 0; }
 .solicitud-tarjeta .recomienda.si { background: #e7f6ee; }
 .saldo-tienda { border-left: 5px solid #d99a00; }
 .saldo-tienda.vencido { border-left-color: var(--alerta); }
+
+/* Influencer Vaelo */
+.influencer-codigo { text-align: center; }
+.influencer-codigo > span { color: var(--suave); font-weight: 700; font-size: .9rem; }
+.codigo-grande { display: block; font-size: 2rem; letter-spacing: .06em; font-stretch: 112%; margin: .2rem 0 .5rem; color: var(--azul-hondo); }
+.influencer-codigo .navegar { justify-content: center; }
+.metas-influencer { list-style: none; padding: 0; margin: .5rem 0 0; display: grid; gap: .7rem; }
+.metas-influencer li { display: flex; align-items: center; justify-content: space-between; gap: .8rem; border: 1.5px solid var(--linea); border-radius: 10px; padding: .7rem .9rem; }
+.metas-influencer li > div { flex: 1; min-width: 0; }
+.metas-influencer li small { display: block; color: var(--suave); }
+.metas-influencer li.alcanzado { border-color: #ecd98a; background: #fffbea; }
+.metas-influencer li.entregado { border-color: #b6dfc8; background: #f1faf5; }
+.influencer-pagina .beneficios-influencer { display: grid; gap: .8rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); margin: 1rem 0 1.5rem; }
+.influencer-pagina .beneficios-influencer div { border: 1.5px solid var(--linea); border-radius: 12px; padding: 1rem; background: #fff; }
+.influencer-pagina .beneficios-influencer strong { display: block; margin-bottom: .3rem; }
+.regalos-lista { display: grid; gap: .3rem; margin: .5rem 0; }
+.regalo-fila { align-items: center; }
+.regalo-fila .campo { margin: 0; }

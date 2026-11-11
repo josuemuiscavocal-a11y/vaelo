@@ -11,7 +11,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/vendor/maplibre/maplibre-gl.css?v=4.7.1">
-  <link rel="stylesheet" href="/css/styles.css?v=20261111d">
+  <link rel="stylesheet" href="/css/styles.css?v=20261111e">
   <link rel="stylesheet" href="/css/suave.css?v=20261111a">
 </head>
 <body>
@@ -36,9 +36,11 @@
         <button role="tab" id="tab-nuevo" aria-selected="true" aria-controls="panel-nuevo">Enviar paquete</button>
         <button role="tab" id="tab-lista" aria-selected="false" aria-controls="panel-lista">Mis envíos <span id="conteo"></span></button>
         <button role="tab" id="tab-empresa" aria-selected="false" aria-controls="panel-empresa" hidden>Mi empresa</button>
+        <button role="tab" id="tab-influencer" aria-selected="false" aria-controls="panel-influencer" hidden>Influencer</button>
         <button role="tab" id="tab-cuenta" aria-selected="false" aria-controls="panel-cuenta">Mis datos</button>
       </div>
       <section id="panel-empresa" role="tabpanel" aria-labelledby="tab-empresa" hidden><div id="zona-empresa"></div></section>
+      <section id="panel-influencer" role="tabpanel" aria-labelledby="tab-influencer" hidden><div id="zona-influencer"></div></section>
 
       <section id="panel-nuevo" role="tabpanel" aria-labelledby="tab-nuevo">
         <form id="form-envio" class="bloque" novalidate>
@@ -195,7 +197,7 @@
   <script src="/js/comun.js?v=20261109c"></script>
   <script src="/js/suave.js?v=20261111a"></script>
   <script src="/js/qr.js?v=1"></script>
-  <script src="/js/empresa.js?v=20261111b"></script>
+  <script src="/js/empresa.js?v=20261111c"></script>
   <script>
     const tarifaFueraDe = (id) => { const v = (cfg?.vehiculos || []).find((x) => String(x.id) === String(id)); return v ? Math.max(v.tarifa_zona, v.tarifa_base || 0) : 45; };
     let cfg = null, envios = [], selOrigen = null, selDestino = null, refresco = null;
@@ -214,13 +216,48 @@
     }
 
     // Pestañas
-    const tabs = ['nuevo', 'lista', 'empresa', 'cuenta'];
+    const tabs = ['nuevo', 'lista', 'empresa', 'influencer', 'cuenta'];
     function abrirTab(nombre) {
       tabs.forEach(t => { $('tab-' + t).setAttribute('aria-selected', String(t === nombre)); $('panel-' + t).hidden = t !== nombre; });
       const pest = $('tab-' + nombre).parentElement, b = $('tab-' + nombre);
       if (b.offsetLeft < pest.scrollLeft || b.offsetLeft + b.offsetWidth > pest.scrollLeft + pest.clientWidth) pest.scrollTo({ left: b.offsetLeft - 8, behavior: 'smooth' });
       if (nombre === 'lista') cargarEnvios();
       if (nombre === 'empresa') pintarEmpresa($('zona-empresa'), { alCrear: () => { abrirTab('lista'); } });
+      if (nombre === 'influencer') pintarInfluencer();
+    }
+    // ---------- Influencer Vaelo: su código, sus puntos y sus regalos ----------
+    async function pintarInfluencer() {
+      const caja = $('zona-influencer');
+      let i;
+      try { i = (await api('/api/influencer/yo')).influencer; } catch (e) { poner(caja, el('div', { class: 'mensaje error', text: e.message })); return; }
+      if (!i) { poner(caja, el('p', { class: 'pista', text: 'Esta sección es para influencers Vaelo.' })); return; }
+      const siguiente = i.metas.find((m) => !m.alcanzado);
+      const msg = el('div', { class: 'mensaje', role: 'alert' });
+      const copiar = el('button', { class: 'boton borde chico', type: 'button', text: 'Copiar código', onclick: async () => { try { await navigator.clipboard.writeText(i.codigo); copiar.textContent = 'Código copiado'; } catch { prompt('Tu código:', i.codigo); } } });
+      poner(caja,
+        el('section', { class: 'bloque influencer-codigo' },
+          el('span', { text: 'Tu código Vaelo' }), el('strong', { class: 'codigo-grande', text: i.codigo }),
+          el('p', { text: `Quien lo use en su envío recibe ${i.beneficio}. Cada cliente nuevo que lo use y reciba su paquete te da ${i.puntos_por_uso} puntos.` }),
+          i.activo ? null : el('div', { class: 'mensaje error', text: 'Tu código está en pausa. Escríbenos por WhatsApp para reactivarlo.' }),
+          el('div', { class: 'navegar' }, copiar)),
+        el('section', { class: 'bloque' },
+          el('div', { class: 'franja-cifras' },
+            el('div', { class: 'celda-cifra' }, el('span', { text: 'Tus puntos' }), el('strong', { text: String(i.puntos) })),
+            el('div', { class: 'celda-cifra' }, el('span', { text: 'Clientes entregados' }), el('strong', { text: String(i.usos) })),
+            el('div', { class: 'celda-cifra' }, el('span', { text: 'En camino' }), el('strong', { text: String(i.en_camino) }))),
+          siguiente ? el('p', { class: 'pista', text: `Te faltan ${siguiente.faltan} puntos para: ${siguiente.regalo}.` }) : null),
+        el('section', { class: 'bloque' }, el('h2', { text: 'Tus regalos' }), msg,
+          i.metas.length ? el('ul', { class: 'metas-influencer' }, i.metas.map((m) => el('li', { class: m.entregado_en ? 'entregado' : m.alcanzado ? 'alcanzado' : '' },
+            el('div', {}, el('strong', { text: m.regalo }), el('small', { text: `${m.puntos} puntos` }),
+              el('div', { class: 'progreso-barra' + (m.alcanzado ? ' completo' : '') }, el('i', { style: `width:${Math.min(100, Math.round((i.puntos / m.puntos) * 100))}%` }))),
+            m.entregado_en ? el('span', { class: 'etiqueta-completa', text: 'Entregado' })
+              : m.pedido_en ? el('span', { class: 'etiqueta-azul', text: 'Pedido: te escribimos' })
+              : m.alcanzado ? el('button', { class: 'boton cinta chico', type: 'button', text: 'Pedir regalo', onclick: async (ev) => {
+                ev.target.disabled = true;
+                try { await api(`/api/influencer/regalos/${m.id}/pedir`, { body: {} }); window.avisoHecho?.('Regalo pedido', m.regalo); pintarInfluencer(); } catch (e) { mostrarMensaje(msg, e.message); ev.target.disabled = false; }
+              } }) : el('span', { class: 'pista', text: `Faltan ${m.faltan}` })))) : el('p', { class: 'pista', text: 'Pronto anunciamos los regalos.' })),
+        i.historial.length ? el('section', { class: 'bloque' }, el('h2', { text: 'Quién usó tu código' }),
+          el('ul', { class: 'lista-simple' }, i.historial.map((h) => el('li', { text: `${h.cliente} · ${fecha(h.creado, false)} · ${h.estado === 'entregado' ? `entregado, +${h.influencer_puntos} puntos` : h.estado === 'cancelado' ? 'cancelado' : 'en camino'}` })))) : null);
     }
     tabs.forEach(t => $('tab-' + t).addEventListener('click', () => abrirTab(t)));
 
@@ -693,6 +730,7 @@
         $('campo-paquetes').hidden = yoCliente.tipo_cuenta !== 'empresa';
         $('tab-empresa').hidden = !['empresa', 'minorista'].includes(yoCliente.tipo_cuenta);
         $('tab-empresa').textContent = yoCliente.tipo_cuenta === 'minorista' ? 'Mi tienda' : 'Mi empresa';
+        api('/api/influencer/yo').then((x) => { $('tab-influencer').hidden = !x.influencer; if (x.influencer && new URLSearchParams(location.search).get('influencer')) abrirTab('influencer'); }).catch(() => {});
         pintarTienda();
         if (yoCliente.tipo_cuenta === 'empresa' && yoCliente.descuento_empresa > 0) avisos.push(el('div', { class: 'mensaje exito', text: `Tu empresa tiene ${yoCliente.descuento_empresa}% de descuento en sus envíos.` }));
         const reenviar = el('button', { class: 'boton chico borde', type: 'button', text: 'Reenviar correo', onclick: async (ev) => {
