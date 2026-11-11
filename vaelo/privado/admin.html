@@ -282,7 +282,8 @@
           <p class="bloque-nota">Dibuja cada zona en el mapa. Con zonas dibujadas, la tarifa fija solo se cobra cuando la recogida y la entrega reales caen dentro de alguna; si no, se cobra la tarifa de fuera de zonas. Sin ninguna dibujada, la zona preferencial vale hasta el máximo de km de abajo.</p>
           <div class="importar-zonas">
             <div><strong>No las dibujes a mano</strong><small>Traemos los límites de las zonas de la capital y de los municipios desde el mapa (OpenStreetMap) y llenamos las zonas de tu lista que se llamen igual.</small></div>
-            <button class="boton" type="button" id="boton-importar-zonas">Traer las formas desde el mapa</button>
+            <div style="display:flex;gap:.5rem;flex-wrap:wrap"><button class="boton" type="button" id="boton-importar-zonas">Traer las formas desde el mapa</button>
+              <button class="boton borde" type="button" id="boton-descargar-zonas">Descargar zonas (archivo)</button></div>
           </div>
           <div id="resultado-importar"></div>
           <div class="mapa" id="mapa-zonas"></div>
@@ -1504,6 +1505,16 @@ null))));
       finally { boton.disabled = false; boton.textContent = antes; }
     }
     $('boton-importar-zonas').addEventListener('click', () => importarZonas());
+    // Copia de las zonas dibujadas en un archivo (para revisarlas o guardarlas)
+    $('boton-descargar-zonas').addEventListener('click', async () => {
+      try {
+        const t = await api('/api/admin/tarifas');
+        const datos = { exportado: new Date().toISOString(), zonas: t.zonas.map((z) => ({ id: z.id, nombre: z.nombre, activa: !!z.activa, poligono: z.poligono ? JSON.parse(z.poligono) : null })),
+          vehiculos: t.vehiculos, km_max_tarifa_fija: t.ajustes?.km_max_tarifa_fija ?? null };
+        const a = el('a', { href: URL.createObjectURL(new Blob([JSON.stringify(datos, null, 1)], { type: 'application/json' })), download: `vaelo-zonas-${new Date().toISOString().slice(0, 10)}.json` });
+        document.body.append(a); a.click(); a.remove();
+      } catch (e) { mostrarMensaje($('msg-tarifas'), e.message); }
+    });
 
     // ---------- Zonas dibujadas en el mapa ----------
     const CAMPOS_AJUSTES = ['cargo_devolucion', 'cargo_bodega_dia', 'cargo_reentrega', 'horas_decidir_fallido', 'cargo_cancelacion', 'pct_piloto_cancelacion', 'sede_direccion',

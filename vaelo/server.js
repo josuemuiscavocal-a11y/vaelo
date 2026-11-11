@@ -297,6 +297,9 @@ function areaDePeticion(req) {
   const deRuta = (p) => (p.startsWith(RUTA_ADMIN) ? 'panel' : p.startsWith(RUTA_PILOTO) ? 'piloto' : 'cliente');
   const ruta = String(req.url || '').split('?')[0];
   if (!ruta.startsWith('/api/')) return deRuta(ruta);
+  // Las consultas propias del panel y de los pilotos usan siempre su sesión (también si se abren escribiendo la dirección)
+  if (ruta.startsWith('/api/admin/')) return 'panel';
+  if (ruta.startsWith('/api/piloto/')) return 'piloto';
   try { const ref = req.headers.referer; if (ref) return deRuta(new URL(ref).pathname); } catch { /* sin referencia */ }
   return null;   // sin página de origen (pruebas, herramientas): vale cualquier sesión
 }
@@ -315,6 +318,7 @@ function usuarioActual(req) {
   // Primero la sesión de esta parte; la antigua (vaelo_sesion) sirve mientras tanto en el panel y con los pilotos.
   // En la parte de clientes la administración también puede entrar con su sesión del panel.
   const orden = area === 'panel' ? ['panel', 'cliente'] : area === 'piloto' ? ['piloto', 'cliente'] : area === 'cliente' ? ['cliente', 'panel'] : ['cliente', 'panel', 'piloto'];
+  let respaldo = null;
   for (const a of orden) {
     const token = cookies[COOKIES_SESION[a]];
     if (!token || !/^[a-f0-9]{64}$/.test(token)) continue;
@@ -323,11 +327,12 @@ function usuarioActual(req) {
       JOIN usuarios u ON u.id = s.usuario_id
       WHERE s.token = ? AND s.expira > ? AND u.activo = 1`).get(token, Date.now());
     if (!u) continue;
-    // La sesión antigua solo vale en la parte que le corresponde a su rol
-    if (a === 'cliente' && area && area !== 'cliente' && areaDeRol(u.rol) !== area) continue;
+    // La sesión antigua solo vale en la parte que le corresponde a su rol (si no hay otra, se usa para responder "sin permiso")
+    if (a === 'cliente' && area && area !== 'cliente' && areaDeRol(u.rol) !== area) { respaldo = respaldo || { u, token, a }; continue; }
     req._token = token; req._cookieArea = a; req._usuario = u;
     return u;
   }
+  if (respaldo && /^\/api\/(admin|piloto)\//.test(String(req.url || ''))) { req._token = respaldo.token; req._cookieArea = respaldo.a; req._usuario = respaldo.u; return respaldo.u; }
   req._usuario = null;
   return null;
 }

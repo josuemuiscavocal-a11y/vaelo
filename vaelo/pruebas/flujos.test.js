@@ -1071,6 +1071,9 @@ test('sesiones separadas: la tienda, el panel y el piloto abiertos en el mismo n
   assert.equal((await yo('/tienda')).email, 'lupe@prueba.com');
   assert.equal((await yo('/familiatecun')).rol, 'admin');
   assert.equal((await yo('/modomensajero')).email, 'carlos@prueba.com');
+  // Abrir una dirección del panel escribiéndola (sin página de origen) usa la sesión del panel
+  assert.equal((await fetch(BASE + '/api/admin/tarifas', { headers: { Cookie: todas } })).status, 200);
+  assert.equal((await fetch(BASE + '/api/admin/tarifas', { headers: { Cookie: tienda } })).status, 403, 'la tienda sola no entra al panel');
   // La tienda sigue con sus carpetas aunque el panel esté abierto en otra pestaña
   const r = await fetch(BASE + '/api/empresa/solicitud', { headers: { Cookie: todas, Referer: BASE + '/mi-cuenta' } });
   assert.equal(r.status, 200);
