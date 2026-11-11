@@ -51,6 +51,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/styles.css?v=20261109b">
+  <link rel="stylesheet" href="/css/premium.css?v=20261111a">
 </head>
 <body>
   <header id="barra" class="barra"><div class="contenedor"><a href="/" class="marca"><img src="/img/logo-blanco.png" alt="Vaelo" width="139" height="40"></a></div></header>
@@ -68,6 +69,15 @@
           <a class="enlace-lives" href="#lives">¿Vendes en lives o por redes? Mira cómo te ayudamos</a>
         </div>
 
+        <div class="escena">
+        <svg class="ruta" aria-hidden="true" focusable="false">
+          <rect class="calle" x="0" y="0" width="100%" height="100%" rx="26" pathLength="100"></rect>
+          <rect class="estela" x="0" y="0" width="100%" height="100%" rx="26" pathLength="100"></rect>
+          <rect class="moto" x="0" y="0" width="100%" height="100%" rx="26" pathLength="100"></rect>
+          <circle class="onda" cx="100%" cy="66%" r="9"></circle>
+          <circle class="punto" cx="0" cy="34%" r="7"></circle>
+          <circle class="punto b" cx="100%" cy="66%" r="7"></circle>
+        </svg>
         <form class="etiqueta" id="form-rastreo" action="/rastreo" method="get">
           <div class="franja"><img src="/img/logo-negro.png" alt="Vaelo" height="26" style="height:26px;width:auto"><span>Guía de envío</span></div>
           <div class="cuerpo">
@@ -83,6 +93,7 @@
             <div>Vehículos<strong>Moto y pickup</strong></div>
           </div>
         </form>
+        </div>
       </div>
     </section>
 
@@ -170,6 +181,7 @@
   </footer>
 
   <script src="/js/comun.js?v=20261109c"></script>
+  <script src="/js/premium.js?v=20261111a" defer></script>
   <script>
     pintarBarra();
 
