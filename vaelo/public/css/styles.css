@@ -1713,5 +1713,9 @@ fieldset { min-width: 0; } .recientes { max-width: 100%; min-width: 0; }
 .influencer-pagina .beneficios-influencer div { border: 1.5px solid var(--linea); border-radius: 12px; padding: 1rem; background: #fff; }
 .influencer-pagina .beneficios-influencer strong { display: block; margin-bottom: .3rem; }
 .regalos-lista { display: grid; gap: .3rem; margin: .5rem 0; }
-.regalo-fila { align-items: center; }
+.regalo-fila { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto; gap: .6rem; align-items: center; }
 .regalo-fila .campo { margin: 0; }
+.campo-ancho { grid-column: 1 / -1; }
+.opcion-chica { white-space: nowrap; }
+.franja-cifras.cifras-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.franja-cifras.cifras-3 .celda-cifra span { font-size: .8rem; }

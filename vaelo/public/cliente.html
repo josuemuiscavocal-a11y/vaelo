@@ -11,7 +11,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/vendor/maplibre/maplibre-gl.css?v=4.7.1">
-  <link rel="stylesheet" href="/css/styles.css?v=20261111e">
+  <link rel="stylesheet" href="/css/styles.css?v=20261111f">
   <link rel="stylesheet" href="/css/suave.css?v=20261111a">
 </head>
 <body>
@@ -237,11 +237,11 @@
       poner(caja,
         el('section', { class: 'bloque influencer-codigo' },
           el('span', { text: 'Tu código Vaelo' }), el('strong', { class: 'codigo-grande', text: i.codigo }),
-          el('p', { text: `Quien lo use en su envío recibe ${i.beneficio}. Cada cliente nuevo que lo use y reciba su paquete te da ${i.puntos_por_uso} puntos.` }),
+          el('p', { text: `Tus seguidores lo escriben al pedir su envío y con tu código tienen ${i.beneficio}. Cada cliente nuevo que lo use y reciba su paquete te da ${i.puntos_por_uso} puntos.` }),
           i.activo ? null : el('div', { class: 'mensaje error', text: 'Tu código está en pausa. Escríbenos por WhatsApp para reactivarlo.' }),
           el('div', { class: 'navegar' }, copiar)),
         el('section', { class: 'bloque' },
-          el('div', { class: 'franja-cifras' },
+          el('div', { class: 'franja-cifras cifras-3' },
             el('div', { class: 'celda-cifra' }, el('span', { text: 'Tus puntos' }), el('strong', { text: String(i.puntos) })),
             el('div', { class: 'celda-cifra' }, el('span', { text: 'Clientes entregados' }), el('strong', { text: String(i.usos) })),
             el('div', { class: 'celda-cifra' }, el('span', { text: 'En camino' }), el('strong', { text: String(i.en_camino) }))),

@@ -2093,7 +2093,7 @@ const telefono8 = (t) => digitos(t).slice(-8);
 const SQL_TEL8 = "substr(replace(replace(replace(replace(COALESCE(u.telefono, ''), '-', ''), ' ', ''), '+', ''), '(', ''), -8)";
 const puntosPorUso = () => Math.max(0, Math.round(ajNum('influencer_puntos_uso', 10)));
 const influencerPorCodigo = (codigo) => (codigo ? db.prepare('SELECT * FROM influencers WHERE upper(codigo) = upper(?)').get(codigo) : null);
-const textoBeneficio = (i) => (i.beneficio_tipo === 'precio' ? `envío a Q${Number(i.beneficio_valor).toFixed(2)}` : `Q${Number(i.beneficio_valor).toFixed(2)} de descuento en el envío`);
+const textoBeneficio = (i) => (i.beneficio_tipo === 'precio' ? `su envío a Q${Number(i.beneficio_valor).toFixed(2)}` : `Q${Number(i.beneficio_valor).toFixed(2)} de descuento en su envío`);
 // ¿Este cliente ya usó un código de influencer? (cualquiera, con su cuenta o con su teléfono)
 function yaUsoInfluencer(u) {
   return !!db.prepare(`SELECT 1 FROM envios e JOIN usuarios u ON u.id = e.usuario_id WHERE e.influencer_id IS NOT NULL AND e.estado != 'cancelado'

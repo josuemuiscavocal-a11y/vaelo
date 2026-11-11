@@ -11,7 +11,7 @@
   <link rel="manifest" href="/manifest-piloto.webmanifest">
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/vendor/maplibre/maplibre-gl.css?v=4.7.1">
-  <link rel="stylesheet" href="/css/styles.css?v=20261111e">
+  <link rel="stylesheet" href="/css/styles.css?v=20261111f">
   <link rel="stylesheet" href="/css/suave.css?v=20261111a">
 </head>
 <body class="modo-piloto app-piloto">
@@ -701,7 +701,7 @@
       const paradasResumen = () => el('ol', { class: 'paradas-ruta' }, lista.map(x => el('li', { class: ['entregado', 'a_sede', 'en_sede', 'fallido'].includes(x.estado) ? 'hecha' : '' },
         el('span', { class: 'num', text: String(x.parada || '') }), el('div', {}, valorBusca(x), el('strong', { text: x.destino_nombre }),
           x.tarifa_foco ? el('span', { class: 'chip-foco', text: 'Zona foco' }) : null,
-          el('small', { text: `${x.destino_zona} · ${HORARIO_TXT[x.horario] || ''} · ${TAMANO_TXT[x.tamano] || ''}${cobroParada(x) ? ` · cobra ${dinero(cobroParada(x))}${Number(x.cobro_destinatario) > 0 ? ` (${x.metodo_pago === 'recibe' ? `${dinero(x.precio)} envío + ` : ''}${dinero(x.cobro_destinatario)} producto)` : ''}` : ''}` })),
+          el('small', { text: `${x.destino_zona} · ${HORARIO_TXT[x.horario] || ''} · ${TAMANO_TXT[x.tamano] || ''}${x.metodo_pago === 'tienda' ? ' · envío ya pagado' : ''}${cobroParada(x) ? ` · cobra ${dinero(cobroParada(x))}${Number(x.cobro_destinatario) > 0 ? ` (${x.metodo_pago === 'recibe' ? `${dinero(x.precio)} envío + ` : ''}${dinero(x.cobro_destinatario)} producto)` : ''}` : ''}` })),
         x.estado !== 'pendiente' ? chipEstado(x.estado) : null)));
       const cobros = lista.filter(x => cobroParada(x) > 0);
       const conProducto = lista.filter(x => Number(x.cobro_destinatario) > 0).length;

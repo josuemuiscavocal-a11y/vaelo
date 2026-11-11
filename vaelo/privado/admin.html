@@ -10,7 +10,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/vendor/maplibre/maplibre-gl.css?v=4.7.1">
-  <link rel="stylesheet" href="/css/styles.css?v=20261111e">
+  <link rel="stylesheet" href="/css/styles.css?v=20261111f">
   <link rel="stylesheet" href="/css/suave.css?v=20261111a">
 </head>
 <body class="app-panel">
@@ -808,7 +808,8 @@ null))));
       const v = valores || {};
       const g = generales || {};
       const pista = (k, dineroQ = true) => {
-        const b = base ? base[k] : generales ? ({ precio_zona: generales.precio_zona, precio_fuera: generales.precio_fuera, minimo: tipo === 'minorista' ? generales.minimo_minorista : generales.minimo_empresa, bodega_dia: generales.bodega_dia, bodega_dias_gratis: 0 })[k] : null;
+        const defFoco = { foco_min_solo: 3, foco_min_mixto: 5, foco_mayoria: 50 };
+        const b = base ? (base[k] ?? defFoco[k] ?? null) : generales ? ({ precio_zona: generales.precio_zona, precio_fuera: generales.precio_fuera, minimo: tipo === 'minorista' ? generales.minimo_minorista : generales.minimo_empresa, bodega_dia: generales.bodega_dia, bodega_dias_gratis: 0, ...defFoco })[k] : null;
         if (b == null) return excepcion ? 'Como el plan' : 'Sin definir';
         return `${excepcion ? 'Plan' : 'General'}: ${dineroQ ? dinero(b) : b}`;
       };
@@ -842,7 +843,7 @@ null))));
       focoModo.value = v.foco_modo && (excepcion || v.foco_modo !== 'solo') ? v.foco_modo : '';
       const marcadas = new Set(v.foco_vecinas || []);
       const vecinas = el('div', { class: 'vecinas-lista' }, zonas.map((z) => el('label', { class: 'opcion-chica' }, el('input', { type: 'checkbox', value: z, checked: marcadas.has(z) }), z)));
-      const cajaVecinas = el('div', { class: 'campo' }, el('label', { text: 'Zonas vecinas que también llevan el descuento' }), vecinas);
+      const cajaVecinas = el('div', { class: 'campo campo-ancho' }, el('label', { text: 'Zonas vecinas que también llevan el descuento' }), vecinas);
       const reparto = el('p', { class: 'reparto-foco' });
       const verFoco = () => {
         const modo = focoModo.value || (excepcion ? baseFoco('foco_modo') : '') || 'solo';
@@ -981,7 +982,7 @@ null))));
         return el('article', { class: 'plan-tarjeta' },
           el('div', { class: 'plan-cabeza' }, el('div', {}, el('h3', { text: i.codigo }), sub(`${i.nombre} · ${i.telefono || ''}`)),
             el('span', { class: i.activo ? 'etiqueta-completa' : 'etiqueta-gris', text: i.activo ? 'Activo' : 'En pausa' })),
-          el('p', { style: 'margin:0', text: `Da ${i.beneficio}.` }),
+          el('p', { style: 'margin:0', text: `Quien lo usa recibe ${i.beneficio}.` }),
           el('div', { class: 'franja-cifras' },
             el('div', { class: 'celda-cifra' }, el('span', { text: 'Puntos' }), el('strong', { text: String(i.puntos) })),
             el('div', { class: 'celda-cifra' }, el('span', { text: 'Clientes' }), el('strong', { text: String(i.usos) })),
@@ -1012,7 +1013,7 @@ null))));
       const filaRegalo = (g) => {
         const regalo = el('input', { maxlength: 80, value: g.regalo || '', placeholder: 'Ej. Gorra Vaelo', 'aria-label': 'Regalo' });
         const puntos = el('input', { type: 'number', min: 1, step: 1, value: g.puntos || '', placeholder: 'Puntos', 'aria-label': 'Puntos' });
-        const fila = el('div', { class: 'fila regalo-fila' }, el('div', { class: 'campo' }, regalo), el('div', { class: 'campo' }, puntos),
+        const fila = el('div', { class: 'regalo-fila' }, el('div', { class: 'campo' }, regalo), el('div', { class: 'campo' }, puntos),
           el('button', { class: 'boton borde chico', type: 'button', text: 'Quitar', onclick: () => fila.remove() }));
         fila._leer = () => ({ id: g.id || null, regalo: regalo.value, puntos: puntos.value });
         return fila;
