@@ -1681,3 +1681,48 @@ test('influencers: solicitud pública, código creado en el panel, una sola vez 
   // Historial de la oficina
   assert.ok(db.prepare("SELECT 1 FROM historial WHERE ruta LIKE '/api/admin/influencers%'").get());
 });
+
+test('juntar carpetas: los pedidos que quedaron sueltos pasan a otra carpeta y la vieja se cierra', async () => {
+  const { t } = await tiendaLista('junta@prueba.com', 'Junta Lives');
+  const hoy = new Date(Date.now() - 6 * 3600_000).toISOString().slice(0, 10);
+  const manana = new Date(Date.now() - 6 * 3600_000 + 86400_000).toISOString().slice(0, 10);
+  const a = (await t('POST', '/api/empresa/carpetas', { dia: hoy, nombre: 'Sueltos' })).j.carpeta.id;
+  const b = (await t('POST', '/api/empresa/carpetas', { dia: manana, nombre: 'Live de mañana' })).j.carpeta.id;
+  const ids = [];
+  for (let i = 0; i < 2; i++) ids.push((await t('POST', `/api/empresa/carpetas/${a}/pedidos`, { descripcion: 'Blusa ' + i, tamano: 'pequeno', cliente_nombre: 'Suelta ' + i, cliente_telefono: '5588000' + i, foto: FOTO, llenar: true,
+    dia: hoy, horario: 'cualquiera', direccion: 'Casa ' + i + ', zona 1', zona: 'Zona 1', lat: 14.633, lng: -90.52, recibe_nombre: 'Suelta ' + i, recibe_telefono: '5588000' + i, metodo_pago: 'efectivo' })).j.pedido.id);
+  const tok = db.prepare('SELECT token FROM pedidos_empresa WHERE id = ?').get(ids[1]).token;
+  assert.equal((await cliente()('POST', '/api/pedido/' + tok, { dia: hoy, horario: 'tarde', direccion: 'Casa 1, zona 1', zona: 'Zona 1', lat: 14.633, lng: -90.52, recibe_nombre: 'Suelta 1', recibe_telefono: '55880001' })).status, 200);
+  assert.equal((await t('POST', `/api/empresa/carpetas/${a}/juntar`, { carpeta_id: a })).status, 400, 'no se junta consigo misma');
+  const r = await t('POST', `/api/empresa/carpetas/${a}/juntar`, { carpeta_id: b });
+  assert.equal(r.status, 200, JSON.stringify(r.j)); assert.equal(r.j.movidos, 2);
+  assert.deepEqual(r.j.reconfirmar, ['Suelta 1'], 'la que confirmó para hoy confirma de nuevo para mañana');
+  assert.equal(db.prepare('SELECT estado FROM carpetas_empresa WHERE id = ?').get(a).estado, 'cancelada');
+  assert.equal(r.j.carpeta.total, 2);
+  for (const id of ids) assert.equal(db.prepare('SELECT carpeta_id, dia FROM pedidos_empresa WHERE id = ?').get(id).dia, manana);
+  assert.equal((await t('POST', `/api/empresa/carpetas/${a}/juntar`, { carpeta_id: b })).status, 400, 'la carpeta vieja ya está cerrada');
+});
+
+test('paquete que la tienda retira en la sede: no se le debe el producto, porque nadie lo pagó', async () => {
+  const { t, id } = await tiendaLista('retira@prueba.com', 'Retira Lives');
+  const hoy = new Date(Date.now() - 6 * 3600_000).toISOString().slice(0, 10);
+  const c = (await t('POST', '/api/empresa/carpetas', { dia: hoy })).j.carpeta.id;
+  const ids = [];
+  for (let i = 0; i < 3; i++) ids.push((await t('POST', `/api/empresa/carpetas/${c}/pedidos`, { descripcion: 'Vestido ' + i, tamano: 'pequeno', cliente_nombre: 'Compra ' + i, cliente_telefono: '5599100' + i, cobro: 200, foto: FOTO, llenar: true,
+    dia: hoy, horario: 'cualquiera', direccion: 'Casa ' + i + ', zona 1', zona: 'Zona 1', lat: 14.633 + i * 0.002, lng: -90.52, recibe_nombre: 'Compra ' + i, recibe_telefono: '5599100' + i, metodo_pago: 'efectivo' })).j.pedido.id);
+  const env = await t('POST', `/api/empresa/carpetas/${c}/enviar`, { modo: 'una_moto', recogida: 'sede' });
+  assert.equal(env.status, 201, JSON.stringify(env.j));
+  await admin('POST', `/api/admin/lotes-empresa/${env.j.lote}/recibido`, {});
+  const calc = await admin('POST', `/api/admin/lotes-empresa/${env.j.lote}/calcular`, { modo: 'una_moto', motos: 1 });
+  assert.equal((await admin('POST', `/api/admin/lotes-empresa/${env.j.lote}/confirmar`, { modo: 'una_moto', rutas: calc.j.rutas.map((x) => ({ pedidos: x.pedidos, piloto_id: null })) })).status, 200);
+  const e = ids.map((p) => db.prepare('SELECT id FROM envios WHERE pedido_id = ?').get(p).id);
+  // Uno se entrega (la clienta paga Q200 de producto), otro no estaba y queda en la sede
+  db.prepare("UPDATE envios SET estado = 'entregado', entregado_en = datetime('now'), piloto_cerro_en = datetime('now') WHERE id = ?").run(e[0]);
+  db.prepare("UPDATE envios SET estado = 'en_sede', sede_llegada = datetime('now', '-1 day'), piloto_cerro_en = datetime('now') WHERE id = ?").run(e[1]);
+  assert.equal((await admin('POST', `/api/admin/envios/${e[1]}/fallido`, { accion: 'retirar', recibio: 'La dueña' })).status, 200);
+  assert.equal(db.prepare('SELECT estado FROM envios WHERE id = ?').get(e[1]).estado, 'entregado');
+  const cuenta = (await t('GET', '/api/empresa/carpetas')).j.cobros_producto;
+  assert.equal(cuenta.pendiente, 200, 'solo el producto que sí se cobró'); assert.equal(cuenta.envios, 1);
+  const fila = (await admin('GET', '/api/admin/caja')).j.cobros.find((x) => x.id === id);
+  assert.equal(fila.monto, 200);
+});

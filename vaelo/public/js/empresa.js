@@ -544,7 +544,8 @@ async function vistaCarpeta(caja, yo, id) {
   const estadoCaja = abierta
     ? el('section', { class: 'bloque carpeta-estado' + (listo ? ' lista' : '') },
       el('div', {}, el('strong', { class: 'carpeta-cifra', text: `${c.confirmados}` }), el('span', { text: ` de ${c.minimo} confirmados` }), progresoCarpeta(c),
-        c.dia < r.hoy ? el('small', { class: 'error-texto', text: 'El día de entrega ya pasó. Toca «Cambiar día o nombre» y tus clientes confirman la nueva fecha.' }) : null,
+        c.dia < r.hoy ? el('small', { class: 'error-texto', text: 'El día de entrega ya pasó. Toca «Cambiar día o nombre» o junta estos pedidos con otra carpeta; tus clientes confirman la nueva fecha.' }) : null,
+        c.total && (c.dia < r.hoy || c.confirmados < c.minimo) ? el('button', { class: 'boton borde chico', type: 'button', style: 'margin-top:.6rem', text: 'Juntar con otra carpeta', onclick: () => dialogoJuntar(c, r, recargar) }) : null,
         !r.punto ? el('small', { class: 'error-texto', text: 'Falta el lugar donde el piloto recoge tus paquetes (abajo).' }) : null,
         c.sin_foto && !listo ? el('small', { text: c.sin_foto === 1 ? 'Falta la foto de 1 paquete.' : `Falta la foto de ${c.sin_foto} paquetes.` }) : null,
         estadoFoco(c.foco, false)),
@@ -658,6 +659,29 @@ async function dialogoMover(p, r, c, recargar) {
     otras.length ? el('div', { class: 'lista-mover' }, otras.map((x) => el('button', { class: 'opcion-mover', type: 'button', onclick: mover(x.id) },
       el('strong', { text: x.nombre }), el('small', { text: `Entrega ${diaEmp(x.dia)} · ${x.total} envío(s)` })))) : el('p', { text: 'No tienes otra carpeta abierta.' }),
     el('button', { class: 'boton borde', type: 'button', style: 'margin-top:1rem', text: '+ Crear carpeta nueva y mover', onclick: () => { dlg.close(); dialogoCarpeta(null, r, async (nueva) => { try { const x = await api(`/api/empresa/pedidos/${p.id}/carpeta`, { method: 'PUT', body: { carpeta_id: nueva.id } }); recargar(); if (x.reconfirmar) alert(`Listo. Mándale el enlace otra vez a ${p.cliente_nombre} para que confirme la nueva fecha.`); } catch (e) { alert(e.message); } }); } }));
+  dlg.addEventListener('close', () => dlg.remove());
+  document.body.append(dlg); dlg.showModal();
+}
+// Juntar: los pedidos de esta carpeta (pocos o de un día que pasó) se van a otra carpeta abierta
+async function dialogoJuntar(c, r, recargar) {
+  let lista;
+  try { lista = await api('/api/empresa/carpetas'); } catch (e) { alert(e.message); return; }
+  const otras = lista.abiertas.filter((x) => x.id !== c.id && x.dia >= r.hoy);
+  const dlg = el('dialog', { class: 'dialogo' });
+  const msg = el('div', { class: 'mensaje', role: 'alert' });
+  const juntar = (x) => async (ev) => {
+    ev.target.disabled = true;
+    try {
+      const res = await api(`/api/empresa/carpetas/${c.id}/juntar`, { method: 'POST', body: { carpeta_id: x.id } });
+      dlg.close();
+      if (res.reconfirmar.length) alert(`Listo: ${res.movidos} pedido(s) pasaron a «${x.nombre}». Mándales el enlace otra vez para que confirmen la nueva fecha: ${res.reconfirmar.join(', ')}.`);
+      recargar();
+    } catch (e) { mostrarMensaje(msg, e.message); ev.target.disabled = false; }
+  };
+  dlg.append(el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: () => dlg.close() }),
+    el('h2', { text: 'Juntar con otra carpeta' }), el('p', { class: 'pista', text: `Los ${c.total} pedido(s) de «${c.nombre}» pasan a la carpeta que elijas y esta se cierra.` }), msg,
+    otras.length ? el('div', { class: 'lista-mover' }, otras.map((x) => el('button', { class: 'opcion-mover', type: 'button', onclick: juntar(x) },
+      el('strong', { text: x.nombre }), el('small', { text: `Entrega ${diaEmp(x.dia)} · ${x.total} envío(s)` })))) : el('p', { text: 'No tienes otra carpeta abierta de hoy en adelante. Crea la de tu próximo live y vuelve aquí.' }));
   dlg.addEventListener('close', () => dlg.remove());
   document.body.append(dlg); dlg.showModal();
 }

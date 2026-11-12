@@ -2785,7 +2785,7 @@ ruta('GET', '/api/admin/caja', ({ req }) => {
     FROM usuarios u WHERE u.rol = 'mensajero' ORDER BY u.nombre`).all().filter((p) => p.efectivo > 0 || p.ganancia > 0);
   const detalle = (id) => db.prepare(`SELECT e.id, e.guia, e.entregado_en, e.precio, e.metodo_pago, e.cobro_destinatario, ${SQL_EFECTIVO} AS efectivo
     FROM envios e WHERE e.mensajero_id = ? AND e.piloto_cerro_en IS NOT NULL AND e.liquidado_id IS NULL AND ${SQL_EFECTIVO} > 0 ORDER BY e.id`).all(id);
-  const cobros = db.prepare(`SELECT u.id, u.nombre, u.telefono, u.empresa_nombre, COUNT(*) AS envios, SUM(${SQL_NETO_TIENDA}) AS monto, SUM(e.comision_cobro) AS comision,
+  const cobros = db.prepare(`SELECT u.id, u.nombre, u.telefono, u.empresa_nombre, COUNT(*) AS envios, SUM(${SQL_NETO_TIENDA}) AS monto, SUM(CASE WHEN ${SQL_COBRO_HECHO} THEN e.comision_cobro ELSE 0 END) AS comision,
       SUM(CASE WHEN e.metodo_pago = 'tienda' THEN e.precio ELSE 0 END) AS envios_tienda
     FROM envios e JOIN usuarios u ON u.id = e.usuario_id WHERE ${SQL_CUENTA_TIENDA} AND e.cobro_pagado_en IS NULL
     GROUP BY u.id ORDER BY monto DESC`).all();
@@ -4927,11 +4927,13 @@ function carpetaSalida(c, conPedidos = false) {
 // Lo que el piloto cobró por los productos de la tienda: lo que Vaelo todavía le tiene que entregar y lo ya entregado
 // Cuentas con la tienda: lo cobrado de sus productos (menos la comisión) menos los envíos que ella ya le cobró a sus clientes.
 // Si da negativo, la tienda le debe a Vaelo (saldo).
-const SQL_NETO_TIENDA = "(e.cobro_destinatario - e.comision_cobro - CASE WHEN e.metodo_pago = 'tienda' THEN e.precio ELSE 0 END)";
-const SQL_CUENTA_TIENDA = "e.estado = 'entregado' AND (e.cobro_destinatario > 0 OR e.metodo_pago = 'tienda')";
+// Lo que Vaelo le debe a la tienda por cada envío. Un paquete que la tienda retiró en la sede no se le cobró a nadie: ahí no hay producto que entregarle
+const SQL_COBRO_HECHO = 'e.cobro_destinatario > 0 AND e.sede_llegada IS NULL';
+const SQL_NETO_TIENDA = `(CASE WHEN ${SQL_COBRO_HECHO} THEN e.cobro_destinatario - e.comision_cobro ELSE 0 END - CASE WHEN e.metodo_pago = 'tienda' THEN e.precio ELSE 0 END)`;
+const SQL_CUENTA_TIENDA = `e.estado = 'entregado' AND ((${SQL_COBRO_HECHO}) OR e.metodo_pago = 'tienda')`;
 function cobrosProducto(uid) {
-  const f = db.prepare(`SELECT COALESCE(SUM(CASE WHEN e.cobro_pagado_en IS NULL THEN ${SQL_NETO_TIENDA} END), 0) AS neto, COUNT(CASE WHEN e.cobro_pagado_en IS NULL AND e.cobro_destinatario > 0 THEN 1 END) AS envios,
-    COALESCE(SUM(CASE WHEN e.cobro_pagado_en IS NULL THEN e.comision_cobro END), 0) AS comision,
+  const f = db.prepare(`SELECT COALESCE(SUM(CASE WHEN e.cobro_pagado_en IS NULL THEN ${SQL_NETO_TIENDA} END), 0) AS neto, COUNT(CASE WHEN e.cobro_pagado_en IS NULL AND ${SQL_COBRO_HECHO} THEN 1 END) AS envios,
+    COALESCE(SUM(CASE WHEN e.cobro_pagado_en IS NULL AND ${SQL_COBRO_HECHO} THEN e.comision_cobro END), 0) AS comision,
     COALESCE(SUM(CASE WHEN e.cobro_pagado_en IS NULL AND e.metodo_pago = 'tienda' THEN e.precio END), 0) AS envios_tienda, COUNT(CASE WHEN e.cobro_pagado_en IS NULL AND e.metodo_pago = 'tienda' THEN 1 END) AS n_tienda,
     MIN(CASE WHEN e.cobro_pagado_en IS NULL AND e.metodo_pago = 'tienda' THEN e.entregado_en END) AS saldo_desde,
     COALESCE(SUM(CASE WHEN e.cobro_pagado_en >= datetime('now', '-30 days') THEN ${SQL_NETO_TIENDA} END), 0) AS pagado_30, MAX(e.cobro_pagado_en) AS ultimo_pago
@@ -5034,13 +5036,38 @@ ruta('PUT', '/api/empresa/pedidos/:id/carpeta', ({ req, params, body }) => {
   const c = carpetaDeEmpresa(u, body.carpeta_id);
   carpetaAbierta(c);
   if (c.id === p.carpeta_id) return { pedido: pedidoSalida(p) };
+  const { f, reconfirmar } = moverPedidoACarpeta(p, c);
+  return { pedido: pedidoSalida(f), reconfirmar };
+});
+// Pasa un pedido a otra carpeta: si cambia el día, su cliente confirma de nuevo
+function moverPedidoACarpeta(p, c) {
   const datos = { carpeta_id: c.id, dia: c.dia };
   if (c.dia !== p.dia && (p.confirmado_por === 'cliente' || ['no_puede', 'vencido'].includes(p.estado))) Object.assign(datos, { estado: 'pendiente', confirmado_en: null, no_puede_nota: null, recordado_en: null });
   else if (['no_puede', 'vencido'].includes(p.estado)) Object.assign(datos, { estado: 'pendiente', no_puede_nota: null });
   const reconfirmar = datos.estado === 'pendiente';
   let f = guardarPedido(p.id, datos);
   if (!reconfirmar) f = revisarConfirmado(f, 'empresa');
-  return { pedido: pedidoSalida(f), reconfirmar };
+  return { f, reconfirmar };
+}
+// Juntar dos carpetas: los pedidos que quedaron sueltos (pocos, o de un día que ya pasó) pasan a otra carpeta y esta se cierra
+ruta('POST', '/api/empresa/carpetas/:id/juntar', ({ req, params, body }) => {
+  const u = requiereEmpresa(req);
+  const origen = carpetaDeEmpresa(u, params.id);
+  carpetaAbierta(origen);
+  const destino = carpetaDeEmpresa(u, body.carpeta_id);
+  carpetaAbierta(destino);
+  if (destino.id === origen.id) falla(400, 'Elige otra carpeta.');
+  if (destino.dia < hoyGT()) falla(400, 'El día de esa carpeta ya pasó. Elige una de hoy o de otro día que venga.');
+  const pedidos = db.prepare("SELECT * FROM pedidos_empresa WHERE carpeta_id = ? AND lote_id IS NULL AND estado IN ('pendiente','confirmado','vencido','no_puede')").all(origen.id);
+  if (db.prepare("SELECT COUNT(*) AS n FROM pedidos_empresa WHERE carpeta_id = ? AND estado != 'cancelado'").get(destino.id).n + pedidos.length > 300) falla(400, 'Una carpeta lleva hasta 300 envíos.');
+  const reconfirmar = [];
+  db.exec('BEGIN');
+  try {
+    for (const p of pedidos) if (moverPedidoACarpeta(p, destino).reconfirmar) reconfirmar.push(p.cliente_nombre);
+    db.prepare("UPDATE carpetas_empresa SET estado = 'cancelada', actualizado = datetime('now') WHERE id = ? AND NOT EXISTS (SELECT 1 FROM pedidos_empresa WHERE carpeta_id = ? AND estado != 'cancelado')").run(origen.id, origen.id);
+    db.exec('COMMIT');
+  } catch (err) { db.exec('ROLLBACK'); throw err; }
+  return { ok: true, movidos: pedidos.length, reconfirmar, carpeta: carpetaSalida(carpetaDeEmpresa(u, destino.id)) };
 });
 ruta('GET', '/api/empresa/carpetas/:id/recomendacion', ({ req, params }) => {
   const u = requiereEmpresa(req);
@@ -5302,7 +5329,7 @@ ruta('GET', '/api/admin/empresas/:id/estado-cuenta', ({ req, res, params, query 
   const u = db.prepare("SELECT * FROM usuarios WHERE id = ? AND tipo_cuenta = 'empresa'").get(Number(params.id));
   if (!u) falla(404, 'No encontramos esa empresa.');
   const mes = /^\d{4}-\d{2}$/.test(query.get('mes') || '') ? query.get('mes') : hoyGT().slice(0, 7);
-  const filas = db.prepare(`SELECT e.guia, e.creado, e.entregado_en, e.destino_nombre, e.destino_zona, e.estado, e.metodo_pago, e.precio, e.cobro_destinatario,
+  const filas = db.prepare(`SELECT e.guia, e.creado, e.entregado_en, e.destino_nombre, e.destino_zona, e.estado, e.metodo_pago, e.precio, e.cobro_destinatario, e.sede_llegada,
       (SELECT monto FROM bonos_empresa b WHERE b.envio_id = e.id) AS bono
     FROM envios e WHERE e.usuario_id = ? AND e.estado != 'cancelado' AND strftime('%Y-%m', COALESCE(e.entregado_en, e.creado), '-6 hours') = ? ORDER BY e.id`).all(u.id, mes);
   const cargos = db.prepare("SELECT tipo, monto, creado, pagado_en FROM cargos WHERE usuario_id = ? AND anulado_en IS NULL AND strftime('%Y-%m', creado, '-6 hours') = ?").all(u.id, mes);
@@ -5311,8 +5338,8 @@ ruta('GET', '/api/admin/empresas/:id/estado-cuenta', ({ req, res, params, query 
     { nombre: 'Resumen', titulo: `${u.empresa_nombre || u.nombre} · estado de cuenta ${mes}`, columnas: [{ titulo: 'Concepto', ancho: 40 }, { titulo: 'Valor', ancho: 26 }],
       filas: [['Empresa', u.empresa_nombre || u.nombre], ['NIT', u.fact_nit || 'Falta'], ['Nombre para la factura', u.fact_nombre || u.empresa_nombre || u.nombre], ['Dirección fiscal', u.fact_direccion || 'Ciudad'],
         ['Mes', mes], ['Envíos', filas.length], ['Entregados', filas.filter((f) => f.estado === 'entregado').length],
-        ['Envíos pagados por la empresa (Q)', redondear(pagaEmpresa)], ['Envíos pagados por quien recibe (Q)', redondear(filas.filter((f) => f.metodo_pago === 'recibe' && f.estado === 'entregado').reduce((t, f) => t + (f.precio || 0), 0))],
-        ['Cobrado a sus clientes por su producto (Q)', redondear(filas.filter((f) => f.estado === 'entregado').reduce((t, f) => t + (f.cobro_destinatario || 0), 0))],
+        ['Envíos pagados por la empresa (Q)', redondear(pagaEmpresa)], ['Envíos pagados por quien recibe (Q)', redondear(filas.filter((f) => f.metodo_pago === 'recibe' && f.estado === 'entregado' && !f.sede_llegada).reduce((t, f) => t + (f.precio || 0), 0))],
+        ['Cobrado a sus clientes por su producto (Q)', redondear(filas.filter((f) => f.estado === 'entregado' && !f.sede_llegada).reduce((t, f) => t + (f.cobro_destinatario || 0), 0))],
         ['Cargos (bodega, devoluciones, etc.) (Q)', redondear(cargos.reduce((t, c) => t + c.monto, 0))], ['Bono ganado por la empresa (Q)', redondear(filas.reduce((t, f) => t + (f.bono || 0), 0))]] },
     { nombre: 'Envíos', columnas: [{ titulo: 'Guía', ancho: 14 }, { titulo: 'Creado', ancho: 17 }, { titulo: 'Entregado', ancho: 17 }, { titulo: 'Recibe', ancho: 24 }, { titulo: 'Zona', ancho: 14 },
       { titulo: 'Estado', ancho: 14 }, { titulo: 'Paga', ancho: 16 }, { titulo: 'Precio', tipo: 'dinero' }, { titulo: 'Cobro producto', tipo: 'dinero' }, { titulo: 'Bono', tipo: 'dinero' }],
