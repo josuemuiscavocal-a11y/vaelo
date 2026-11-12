@@ -11,7 +11,7 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/vendor/maplibre/maplibre-gl.css?v=4.7.1">
-  <link rel="stylesheet" href="/css/styles.css?v=20261111f">
+  <link rel="stylesheet" href="/css/styles.css?v=20261111g">
   <link rel="stylesheet" href="/css/suave.css?v=20261111a">
 </head>
 <body>
@@ -126,7 +126,24 @@
         } catch { precio.hidden = true; }
       };
       zona.addEventListener('change', actualizarPrecio);
-      const mapaCaja = el('div');
+      // El lugar se toma de la ubicación en tiempo real; marcar a mano existe pero no se recomienda
+      let fuente = d.lat != null ? (d.ubicacion_manual ? 'mano' : 'gps') : null;
+      const mapaCaja = el('div', { hidden: d.lat == null });
+      const estadoGps = el('p', { class: 'pista', 'aria-live': 'polite' });
+      const avisoMano = el('div', { class: 'mensaje aviso', hidden: fuente !== 'mano' }, el('strong', { text: 'Marcaste el lugar a mano (no recomendado). ' }),
+        'El piloto puede confundirse y tu pedido puede atrasarse. Si puedes, comparte tu ubicación en tiempo real cuando estés donde vas a recibir.');
+      const compartir = () => {
+        if (!navigator.geolocation) { estadoGps.textContent = 'Este navegador no deja compartir la ubicación. Abre el enlace en Chrome o Safari.'; return; }
+        estadoGps.textContent = 'Obteniendo tu ubicación…';
+        navigator.geolocation.getCurrentPosition((x) => {
+          mapaCaja.hidden = false; sel.refrescar(); sel.poner(x.coords.latitude, x.coords.longitude, 'gps'); estadoGps.textContent = '';
+        }, () => { estadoGps.textContent = 'No pudimos obtener tu ubicación. Activa la ubicación de tu teléfono, dale permiso a esta página y vuelve a tocar el botón.'; },
+        { enableHighAccuracy: true, timeout: 15000 });
+      };
+      const confirmarMano = el('div', { class: 'mensaje aviso', hidden: true },
+        el('p', { style: 'margin:0 0 .6rem' }, el('strong', { text: 'No recomendado. ' }), 'Si marcas el lugar a mano, el piloto se puede perder y tu pedido se puede atrasar. Lo mejor es abrir este enlace cuando estés donde vas a recibir y compartir tu ubicación en tiempo real.'),
+        el('button', { class: 'boton borde chico', type: 'button', text: 'Marcar a mano de todos modos', onclick: () => { confirmarMano.hidden = true; mapaCaja.hidden = false; sel.refrescar(); } }));
+      const aMano = el('button', { class: 'enlace-discreto', type: 'button', text: 'No estoy donde voy a recibir', onclick: () => { confirmarMano.hidden = false; } });
       // 3. Quién recibe y pago
       const nombre = el('input', { id: 'recibe_nombre', maxlength: 100, value: d.recibe_nombre || '', autocomplete: 'name' });
       const tel = el('input', { id: 'recibe_telefono', type: 'tel', maxlength: 30, value: d.recibe_telefono || '', autocomplete: 'tel' });
@@ -137,9 +154,9 @@
         : sec('1', '¿Qué día puedes recibir?', chipsDia, el('div', { class: 'campo', style: 'margin-top:.75rem;max-width:240px' }, el('label', { text: 'Otro día' }), otro),
           el('h3', { style: 'margin-top:1.1rem', text: '¿En qué horario?' }), chipsHora),
         sec('2', '¿Dónde lo entregamos?', el('div', { class: 'recomendacion' },
-            el('p', {}, el('strong', { text: 'Te recomendamos usar tu ubicación en tiempo real. ' }), 'Si estás donde vas a recibir, compártela y el piloto llega directo, sin perderse. Si recibes en otro lugar, búscalo en el mapa.'),
-            el('button', { class: 'boton', type: 'button', text: 'Usar mi ubicación en tiempo real', onclick: () => { const b = [...mapaCaja.querySelectorAll('button')].find((x) => /Usar mi ubicaci/.test(x.textContent)); if (b) b.click(); } })),
-          mapaCaja,
+            el('p', {}, el('strong', { text: 'Comparte tu ubicación en tiempo real. ' }), 'Hazlo desde el lugar donde vas a recibir: así el piloto llega directo, sin perderse.'),
+            el('button', { class: 'boton', type: 'button', text: 'Compartir mi ubicación en tiempo real', onclick: compartir }), estadoGps, aMano),
+          confirmarMano, mapaCaja, avisoMano,
           el('div', { class: 'fila' }, el('div', { class: 'campo' }, el('label', { for: 'zona', text: 'Zona o municipio' }), zona), el('div', { class: 'campo' }, el('label', { for: 'direccion', text: 'Dirección' }), direccion)),
           el('div', { class: 'campo' }, el('label', { for: 'referencias' }, 'Referencias', el('span', { class: 'ayuda', text: ' Opcional' })), referencias), precio),
         sec('3', '¿Quién recibe?', el('div', { class: 'fila' }, el('div', { class: 'campo' }, el('label', { for: 'recibe_nombre', text: 'Nombre' }), nombre), el('div', { class: 'campo' }, el('label', { for: 'recibe_telefono', text: 'Teléfono' }), tel)),
@@ -153,9 +170,9 @@
         try {
           if (!dia) throw new Error('Elige el día en que puedes recibir.');
           if (!horario) throw new Error('Elige el horario.');
-          if (!punto) throw new Error('Marca en el mapa dónde se entrega: busca la dirección o toca el mapa.');
+          if (!punto) throw new Error('Comparte tu ubicación en tiempo real desde el lugar donde vas a recibir.');
           await api('/api/pedido/' + token, { body: { dia, horario, lat: punto.lat, lng: punto.lng, zona: zona.value, direccion: direccion.value, referencias: referencias.value,
-            recibe_nombre: nombre.value, recibe_telefono: tel.value } });
+            recibe_nombre: nombre.value, recibe_telefono: tel.value, ubicacion_manual: fuente === 'mano' } });
           editando = false;
           window.avisoHecho?.('Pedido confirmado', 'Te avisamos cuando vaya en camino.');
           await cargar();
@@ -167,8 +184,10 @@
         d.estado === 'no_puede' ? el('div', { class: 'mensaje aviso', text: `Le avisamos a ${d.empresa} que no puedes ese día${d.no_puede_nota ? ' (' + d.no_puede_nota + ')' : ''}. Si sí puedes, confirma abajo.` }) : null,
         el('p', { class: 'pista', text: d.dia_fijo ? `${d.empresa} te envía tu pedido con Vaelo. Confirma el horario, dónde lo recibes y quién lo recibe; el piloto llega ahí.` : `${d.empresa} te envía tu pedido con Vaelo. Elige el día, el horario y el lugar; el piloto llega ahí.` }), form);
       const sel = selectorPunto(mapaCaja, { letra: 'B', clase: 'entrega', conMiUbicacion: true,
-        alCambiar: async (p) => {
+        alCambiar: async (p, origen) => {
           punto = p;
+          if (origen === 'gps' || origen === 'mano') fuente = origen;
+          avisoMano.hidden = fuente !== 'mano';
           try {
             const z = await api(`/api/zona?lat=${p.lat}&lng=${p.lng}`);
             if (z.zona && [...zona.options].some((o) => o.value === z.zona)) zona.value = z.zona;

@@ -1719,3 +1719,7 @@ fieldset { min-width: 0; } .recientes { max-width: 100%; min-width: 0; }
 .opcion-chica { white-space: nowrap; }
 .franja-cifras.cifras-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .franja-cifras.cifras-3 .celda-cifra span { font-size: .8rem; }
+
+/* Opción secundaria que no se recomienda (ej. marcar el lugar a mano) */
+.enlace-discreto { display: block; margin-top: .7rem; padding: 0; border: 0; background: none; color: var(--suave); font: inherit; font-size: .85rem; text-decoration: underline; cursor: pointer; }
+.enlace-discreto:hover { color: var(--tinta); }

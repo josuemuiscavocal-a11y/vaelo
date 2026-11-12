@@ -4294,7 +4294,7 @@ function estadoPedido(p) { return p.estado === 'pendiente' && p.enlace_enviado_e
 function pedidoSalida(p, conDinero = false) {
   const out = { id: p.id, codigo: p.codigo, codigo_corto: p.estado === 'cancelado' ? p.codigo_corto : codigoCortoPedido(p), descripcion: p.descripcion, tamano: p.tamano, tamano_texto: TAMANOS[p.tamano]?.nombre || p.tamano,
     cliente_nombre: p.cliente_nombre, cliente_telefono: p.cliente_telefono, dia: p.dia, horario: p.horario, horario_texto: HORARIOS[p.horario] || '',
-    direccion: p.direccion, zona: p.zona, lat: p.lat, lng: p.lng, referencias: p.referencias, recibe_nombre: p.recibe_nombre, recibe_telefono: p.recibe_telefono,
+    direccion: p.direccion, zona: p.zona, lat: p.lat, lng: p.lng, referencias: p.referencias, recibe_nombre: p.recibe_nombre, recibe_telefono: p.recibe_telefono, ubicacion_manual: !!p.ubicacion_manual,
     metodo_pago: p.metodo_pago, cobro: Number(p.cobro) || 0, envio_pagado: !!p.envio_pagado, estado: estadoPedido(p), estado_texto: ESTADOS_PEDIDO[estadoPedido(p)], tiene_foto: !!p.foto, enlace: '/pedido/' + p.token,
     confirmado_por: p.confirmado_por, confirmado_en: p.confirmado_en, enlace_enviado_en: p.enlace_enviado_en, lote_id: p.lote_id, creado: p.creado,
     transferencia_ok: !!p.transferencia_ok, avisos: db.prepare('SELECT COUNT(*) AS n FROM push_pedidos WHERE pedido_id = ?').get(p.id).n };
@@ -5084,7 +5084,7 @@ ruta('GET', '/api/pedido/:token', ({ params }) => {
   const aj = getAjustes();
   const out = { codigo: p.codigo, empresa: nombreEmpresa(p.usuario_id), descripcion: p.descripcion, tamano: TAMANOS[p.tamano]?.nombre, cliente_nombre: p.cliente_nombre,
     estado: estadoPedido(p), dia: p.dia, horario: p.horario, direccion: p.direccion, zona: p.zona, lat: p.lat, lng: p.lng, referencias: p.referencias,
-    recibe_nombre: p.recibe_nombre || p.cliente_nombre, recibe_telefono: p.recibe_telefono || p.cliente_telefono, metodo_pago: p.metodo_pago, cobro: Number(p.cobro) || 0, envio_pagado: !!p.envio_pagado,
+    recibe_nombre: p.recibe_nombre || p.cliente_nombre, recibe_telefono: p.recibe_telefono || p.cliente_telefono, ubicacion_manual: !!p.ubicacion_manual, metodo_pago: p.metodo_pago, cobro: Number(p.cobro) || 0, envio_pagado: !!p.envio_pagado,
     editable: ['pendiente', 'confirmado', 'vencido', 'no_puede'].includes(p.estado) && !p.lote_id, en_lote: !!p.lote_id,
     dia_fijo: p.carpeta_id ? carpetaDe(p)?.dia || null : null, no_puede_nota: p.no_puede_nota,
     precio: p.lat != null || p.zona ? precioPedido(p) : null, tarifa_zona: preciosDe(condicionesDe(p.usuario_id)).zona, tarifa_fuera: preciosDe(condicionesDe(p.usuario_id)).fuera,
@@ -5115,6 +5115,7 @@ ruta('POST', '/api/pedido/:token', ({ req, params, body }) => {
   if (cp) body.dia = cp.dia;   // en una carpeta el día lo pone la empresa: el cliente confirma que puede
   const d = leerDatosEntrega(body);
   d.no_puede_nota = null;
+  d.ubicacion_manual = body.ubicacion_manual === true ? 1 : 0;   // sin ubicación en tiempo real: el piloto llama antes
   if (!d.referencias) d.referencias = null;
   const antes = p.estado;
   let f = guardarPedido(p.id, { ...d, estado: 'pendiente' });
@@ -5510,7 +5511,7 @@ ruta('POST', '/api/admin/lotes-empresa/:id/confirmar', ({ req, params, body }) =
           p.codigo, l.usuario_id, vehiculo.id, p.descripcion, l.origen_direccion || '', l.recogida === 'sede' ? (zonaDePunto(origen) || OTRA_ZONA) : (emp.empresa_zona || zonaDePunto(origen) || OTRA_ZONA),
           l.recogida === 'sede' ? (emp.telefono || '') : (emp.punto_telefono || emp.telefono || ''), origen.lat, origen.lng, l.recogida === 'sede' ? 'sede' : 'cliente',
           l.recogida === 'sede' ? 'Sede Vaelo' : (emp.empresa_nombre || emp.nombre) + (emp.punto_contacto && emp.punto_contacto !== emp.nombre ? ` (entrega ${emp.punto_contacto})` : ''),
-          p.recibe_nombre, p.recibe_telefono, p.direccion, zonaReal(p), p.lat, p.lng, precio, precio, metodo, redondear(Number(p.cobro) || 0), [p.referencias, `Cliente de ${emp.empresa_nombre || emp.nombre}`].filter(Boolean).join('. '),
+          p.recibe_nombre, p.recibe_telefono, p.direccion, zonaReal(p), p.lat, p.lng, precio, precio, metodo, redondear(Number(p.cobro) || 0), [p.ubicacion_manual ? 'Ubicación marcada a mano, no en tiempo real: llama a quien recibe antes de llegar' : null, p.referencias, `Cliente de ${emp.empresa_nombre || emp.nombre}`].filter(Boolean).join('. '),
           String(crypto.randomInt(1000, 10000)), programado, crypto.randomBytes(16).toString('hex'), p.recibe_nombre, p.confirmado_en, p.lat, p.lng, p.confirmado_en, pagoEstado,
           p.foto, p.id, l.id, grupo ? i + 1 : null, p.tamano, p.horario, grupo, pagaEmpresa && metodoEmpresa === 'efectivo' ? precioTotal : null,
           piloto ? piloto.id : null, piloto ? 'por_aceptar' : null, piloto ? 'oficina' : null, p.lat, p.lng);

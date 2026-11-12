@@ -457,8 +457,9 @@ test('carpetas de empresa: añadir envíos, enlace del cliente, enviar a Vaelo, 
   const token = rosa.enlace.split('/').pop();
   const vistaRosa = (await anon('GET', `/api/pedido/${token}`)).j;
   assert.equal(vistaRosa.empresa, 'Tienda Beto'); assert.equal(vistaRosa.dia_fijo, hoy);
-  const conf = await anon('POST', `/api/pedido/${token}`, { dia: '2099-01-01', horario: 'manana', direccion: 'Colonia lejana', zona: 'Otra zona o municipio', lat: CERCA.lat, lng: CERCA.lng, recibe_nombre: 'Rosa Díaz', recibe_telefono: '55557001' });
+  const conf = await anon('POST', `/api/pedido/${token}`, { dia: '2099-01-01', horario: 'manana', direccion: 'Colonia lejana', zona: 'Otra zona o municipio', lat: CERCA.lat, lng: CERCA.lng, recibe_nombre: 'Rosa Díaz', recibe_telefono: '55557001', ubicacion_manual: true });
   assert.equal(conf.status, 200, JSON.stringify(conf.j)); assert.equal(conf.j.precio.precio, 45);
+  assert.equal((await anon('GET', `/api/pedido/${token}`)).j.ubicacion_manual, true, 'marcó el lugar a mano');
   assert.equal(db.prepare('SELECT dia, metodo_pago FROM pedidos_empresa WHERE id = ?').get(rosa.id).dia, hoy);
   assert.equal((await beto('POST', `/api/empresa/carpetas/${carpeta}/enviar`, { modo: 'una_moto' })).status, 400, 'falta la foto del pedido de Rosa');
   assert.equal((await beto('POST', `/api/empresa/pedidos/${rosa.id}/foto`, { foto: FOTO })).status, 200);
@@ -485,6 +486,7 @@ test('carpetas de empresa: añadir envíos, enlace del cliente, enviar a Vaelo, 
   const ok = await admin('POST', `/api/admin/lotes-empresa/${env.j.lote}/confirmar`, { modo: 'motos', rutas });
   assert.equal(ok.status, 200, JSON.stringify(ok.j)); assert.equal(ok.j.envios, 10);
   const rosaEnvio = db.prepare('SELECT * FROM envios WHERE pedido_id = ?').get(rosa.id);
+  assert.match(rosaEnvio.notas, /llama a quien recibe antes de llegar/, 'el piloto sabe que el punto es a mano');
   assert.equal(rosaEnvio.guia, rosa.codigo, 'el código del pedido es la guía'); assert.equal(rosaEnvio.precio, 45); assert.equal(rosaEnvio.metodo_pago, 'recibe');
   // Ruta del piloto: la acepta completa, recoge escaneando y entrega en orden
   const ruta1 = db.prepare('SELECT * FROM envios WHERE lote_empresa_id = ? AND mensajero_id = ? ORDER BY parada').all(env.j.lote, pilotoId);

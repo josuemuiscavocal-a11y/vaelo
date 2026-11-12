@@ -599,7 +599,6 @@ function filaPedido(p, r, c, recargar) {
   const opciones = editable ? [
     p.tiene_foto && p.estado !== 'confirmado' ? null : el('a', { href: wa, target: '_blank', rel: 'noopener', onclick: mandar, text: p.estado === 'confirmado' ? 'Mandar enlace otra vez' : 'Mandar enlace por WhatsApp' }),
     el('button', { type: 'button', text: 'Copiar enlace', onclick: async (ev) => { mandar(); try { await navigator.clipboard.writeText(enlace); ev.target.textContent = 'Enlace copiado'; } catch { prompt('Enlace:', enlace); } } }),
-    el('button', { type: 'button', text: p.estado === 'confirmado' ? 'Editar datos de entrega' : 'Llenar yo los datos', onclick: () => dialogoLlenar(p, r, c, recargar) }),
     p.tiene_foto ? el('label', { class: 'doc-boton' }, 'Cambiar foto', fotoInput) : null,
     el('button', { type: 'button', text: p.envio_pagado ? 'Mi cliente no me ha pagado el envío' : 'Mi cliente ya me pagó el envío', onclick: async () => {
       if (!p.envio_pagado && !confirm(`¿${p.cliente_nombre} ya te pagó el envío? El piloto no se lo cobra y Vaelo te descuenta ese envío de lo que te entrega por tus productos.`)) return;
@@ -759,25 +758,20 @@ function dialogoNuevoEnvio(c, r, recargar) {
   const vistaFoto = el('img', { alt: '', hidden: true });
   const vacio = el('span', { class: 'foto-paquete-vacio' }, el('strong', { text: 'Foto del paquete' }), el('small', { text: 'Tócala para tomarla' }));
   foto.addEventListener('change', () => { if (foto.files[0]) { vistaFoto.src = URL.createObjectURL(foto.files[0]); vistaFoto.hidden = false; vacio.hidden = true; } });
-  const datosEntrega = camposEntrega({}, r, c);
-  datosEntrega.nodo.hidden = true;
-  let llenar = false;
-  const recomendacion = el('p', { class: 'recomendacion' }, el('strong', { text: 'Te recomendamos mandar el enlace exclusivo. ' }),
-    'Tu cliente confirma con su ubicación en tiempo real y el piloto llega directo, sin errores de dirección. Llénalo tú solo si ya tienes su ubicación exacta.');
-  const modos = el('div', { class: 'opciones' }, ...[[false, 'Le mando el enlace (recomendado)', 'Tu cliente confirma horario, ubicación y quién recibe'], [true, 'Lo lleno yo', 'Solo si ya tengo su ubicación exacta']].map(([v, t, a]) =>
-    el('label', { class: 'opcion' }, el('input', { type: 'radio', name: 'np-modo', checked: llenar === v, onchange: () => { llenar = v; datosEntrega.nodo.hidden = !v; if (v) datosEntrega.refrescar(); guardar.textContent = v ? 'Guardar envío' : 'Guardar y mandar enlace'; } }),
-      el('span', {}, t, el('small', { text: a })))));
+  // Siempre con enlace exclusivo: la clienta confirma con su ubicación en tiempo real (la tienda ya no marca el lugar a mano)
+  const llenar = false;
+  const recomendacion = el('p', { class: 'recomendacion' }, el('strong', { text: 'Al guardar se abre WhatsApp con su enlace exclusivo. ' }),
+    'Tu cliente confirma el horario, quién recibe y su ubicación en tiempo real, y el piloto llega directo.');
   const guardar = el('button', { class: 'boton accion-principal', type: 'submit', text: 'Guardar y mandar enlace' });
   const otroChk = el('input', { type: 'checkbox', id: 'np-otro', style: 'width:auto', checked: true });
   const otro = el('label', { class: 'casilla', for: 'np-otro' }, otroChk, el('span', { text: 'Después de guardar, añadir otro' }));
   // Pegar el mensaje del cliente (nombre, teléfono, dirección) y se llenan solos los campos
-  const pegado = el('textarea', { rows: 3, placeholder: 'Pega aquí lo que te mandó tu cliente por WhatsApp, ej.\nMaría López\n5555 1234\n7a avenida 10-25, zona 1' });
+  const pegado = el('textarea', { rows: 3, placeholder: 'Pega aquí lo que te mandó tu cliente por WhatsApp, ej.\nMaría López\n5555 1234' });
   const cajaPegar = el('div', { class: 'pegar-mensaje', hidden: true }, pegado, el('small', { class: 'pista', text: 'Revisa que los datos queden bien.' }));
   pegado.addEventListener('input', () => {
     const d = leerMensajeCliente(pegado.value);
     if (d.nombre) nombre.value = d.nombre;
     if (d.telefono) tel.value = d.telefono;
-    if (d.direccion || d.zona) { datosEntrega.prellenar(d); if (!llenar) modos.querySelectorAll('input')[1].click(); }
   });
   const form = el('form', { novalidate: true },
     el('button', { class: 'boton borde chico', type: 'button', style: 'margin-bottom:.6rem', text: 'Pegar datos de WhatsApp', onclick: () => { cajaPegar.hidden = !cajaPegar.hidden; if (!cajaPegar.hidden) pegado.focus(); } }), cajaPegar,
@@ -789,7 +783,7 @@ function dialogoNuevoEnvio(c, r, recargar) {
     el('div', { class: 'campo' }, el('label', { text: 'Tamaño' }), tamanos),
     el('div', { class: 'campo' }, el('label', { for: 'np-foto' }, 'Foto del paquete', el('span', { class: 'ayuda', text: ' Puedes tomarla después, al empacar' })),
       el('div', { class: 'foto-paquete foto-paquete-chica' }, el('label', { class: 'foto-paquete-boton', for: 'np-foto' }, vistaFoto, vacio, foto))),
-    el('div', { class: 'campo' }, el('label', { text: 'Datos de entrega' }), modos, recomendacion), datosEntrega.nodo, msg, otro, guardar);
+    recomendacion, msg, otro, guardar);
   form.addEventListener('submit', async (ev) => {
     ev.preventDefault();
     guardar.disabled = true;
@@ -798,7 +792,6 @@ function dialogoNuevoEnvio(c, r, recargar) {
     try {
       const body = { descripcion: desc.value, tamano, cliente_nombre: nombre.value, cliente_telefono: tel.value, cobro: cobro.value, envio_pagado: pagadoChk.checked };
       if (foto.files[0]) body.foto = await prepararArchivo(foto.files[0], false);
-      if (llenar) Object.assign(body, datosEntrega.leer(), { llenar: true });
       const p = (await api(`/api/empresa/carpetas/${c.id}/pedidos`, { body })).pedido;
       if (ventana) { ventana.location.href = `https://wa.me/${waNum(p.cliente_telefono)}?text=${encodeURIComponent(textoEnlace(p, r, c.dia))}`; api(`/api/empresa/pedidos/${p.id}/enlace`, { body: {} }).catch(() => {}); }
       if (otroChk.checked) {
@@ -812,53 +805,6 @@ function dialogoNuevoEnvio(c, r, recargar) {
     el('h2', { text: 'Nuevo pedido' }), el('p', { class: 'pista', text: `Se entrega el ${diaEmp(c.dia)}` }), form);
   dlg.addEventListener('close', () => { dlg.remove(); if (dlg.dataset.cambios) recargar(); });
   document.body.append(dlg); dlg.showModal(); nombre.focus();
-}
-
-// Campos de entrega cuando la empresa los llena (el día es el de la carpeta)
-function camposEntrega(p, r, c) {
-  let horario = p.horario || 'cualquiera';
-  const horarios = el('div', { class: 'opciones' }, ...Object.entries(r.horarios).map(([k, t]) => el('label', { class: 'opcion' },
-    el('input', { type: 'radio', name: 'ce-horario-' + (p.id || 'n'), value: k, checked: horario === k, onchange: () => { horario = k; } }), el('span', { text: t }))));
-  const zona = el('select', {}, el('option', { value: '', text: 'Elige…' }), ...(r.zonas || []).map((z) => el('option', { value: z, text: z, selected: p.zona === z })));
-  const direccion = el('input', { maxlength: 300, value: p.direccion || '' });
-  const referencias = el('input', { maxlength: 300, value: p.referencias || '', placeholder: 'Opcional' });
-  const rn = el('input', { maxlength: 100, value: p.recibe_nombre || p.cliente_nombre || '' });
-  const rt = el('input', { type: 'tel', maxlength: 30, value: p.recibe_telefono || p.cliente_telefono || '' });
-  const mapa = el('div');
-  let punto = p.lat != null ? { lat: p.lat, lng: p.lng } : null, sel = null;
-  const nodo = el('div', { class: 'campos-entrega' },
-    el('p', { class: 'pista', text: `Se entrega el ${diaEmp(c.dia)}. Quien recibe paga el envío en efectivo al piloto.` }),
-    el('div', { class: 'campo' }, el('label', { text: 'Horario' }), horarios),
-    mapa,
-    el('div', { class: 'fila' }, el('div', { class: 'campo' }, el('label', { text: 'Zona o municipio' }), zona), el('div', { class: 'campo' }, el('label', { text: 'Dirección' }), direccion)),
-    el('div', { class: 'campo' }, el('label', { text: 'Referencias' }), referencias),
-    el('div', { class: 'fila' }, el('div', { class: 'campo' }, el('label', { text: 'Quién recibe' }), rn), el('div', { class: 'campo' }, el('label', { text: 'Su teléfono' }), rt)));
-  const asegurarMapa = () => {
-    if (sel) { sel.refrescar(); return; }
-    sel = selectorPunto(mapa, { letra: 'B', clase: 'entrega', alCambiar: async (x) => {
-      punto = x;
-      try { const z = await api(`/api/zona?lat=${x.lat}&lng=${x.lng}`); if (z.zona) zona.value = z.zona; } catch { /* vacío */ }
-    }, alDireccion: (t, usar) => { if (usar || !direccion.value) direccion.value = t; } });
-    if (punto) sel.poner(punto.lat, punto.lng);
-  };
-  return { nodo, refrescar: asegurarMapa,
-    prellenar: (d) => { if (d.direccion) direccion.value = d.direccion; if (d.zona && [...zona.options].some((o) => o.value === d.zona)) zona.value = d.zona; if (d.nombre) rn.value = d.nombre; if (d.telefono) rt.value = d.telefono; },
-    leer: () => {
-      if (!punto) throw new Error('Marca en el mapa dónde se entrega.');
-      return { dia: c.dia, horario, lat: punto.lat, lng: punto.lng, zona: zona.value, direccion: direccion.value, referencias: referencias.value, recibe_nombre: rn.value, recibe_telefono: rt.value };
-    } };
-}
-function dialogoLlenar(p, r, c, recargar) {
-  const dlg = el('dialog', { class: 'dialogo hoja' });
-  const msg = el('div', { class: 'mensaje', role: 'alert' });
-  const campos = camposEntrega(p, r, c);
-  dlg.append(el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: () => dlg.close() }),
-    el('h2', { text: `Envío de ${p.cliente_nombre}` }), el('p', { class: 'pista', text: `${p.codigo} · ${p.descripcion}` }), campos.nodo, msg,
-    el('button', { class: 'boton', type: 'button', text: 'Guardar', onclick: async () => {
-      try { await api(`/api/empresa/pedidos/${p.id}`, { method: 'PUT', body: campos.leer() }); dlg.close(); recargar(); } catch (e) { mostrarMensaje(msg, e.message); }
-    } }));
-  dlg.addEventListener('close', () => dlg.remove());
-  document.body.append(dlg); dlg.showModal(); campos.refrescar();
 }
 
 // "Enviar a Vaelo": recomendación y las tres formas de repartir

@@ -667,6 +667,8 @@ agregarColumnas('usuarios', [['tienda_estado', 'TEXT'], ['tienda_red', 'TEXT'], 
   ['condiciones_vistas', 'TEXT']]);
 // La tienda ya le cobró el envío a su cliente: el piloto no lo cobra y Vaelo se lo descuenta a la tienda
 agregarColumnas('pedidos_empresa', [['envio_pagado', 'INTEGER NOT NULL DEFAULT 0']]);
+// La clienta marcó el punto a mano en vez de compartir su ubicación en tiempo real (no recomendado: el piloto llama antes de llegar)
+agregarColumnas('pedidos_empresa', [['ubicacion_manual', 'INTEGER NOT NULL DEFAULT 0']]);
 db.prepare("INSERT OR IGNORE INTO ajustes (clave, valor) VALUES ('dias_saldo_tienda', '7')").run();
 // ---------- Influencers Vaelo ----------
 db.exec(`

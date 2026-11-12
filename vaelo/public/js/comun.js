@@ -463,16 +463,16 @@ function selectorPunto(contenedor, { letra, clase, alCambiar, alDireccion, conMi
       alDireccion ? el('button', { class: 'boton borde chico', type: 'button', text: 'Usar esta dirección', onclick: () => alDireccion(texto, true) }) : null);
     if (alDireccion) alDireccion(texto, false);
   };
-  const fijar = (lat, lng, centrar) => {
+  const fijar = (lat, lng, centrar, origen = 'mano') => {
     punto = { lat, lng };
     if (mapa) {
       if (marcador) marcador.mover(lat, lng);
-      else marcador = mapa.marcador(lat, lng, { html: htmlPin(letra, clase), arrastrable: true, alMover: (la, ln) => { punto = { lat: la, lng: ln }; alCambiar && alCambiar(punto); pintarDireccion(la, ln); } });
+      else marcador = mapa.marcador(lat, lng, { html: htmlPin(letra, clase), arrastrable: true, alMover: (la, ln) => { punto = { lat: la, lng: ln }; alCambiar && alCambiar(punto, 'mano'); pintarDireccion(la, ln); } });
       if (centrar) mapa.centrar(lat, lng, 17);
     }
-    estado.textContent = 'Punto marcado. Puedes arrastrar el pin para ajustarlo.';
+    estado.textContent = origen === 'gps' ? 'Listo: usamos tu ubicación en tiempo real.' : 'Punto marcado. Puedes arrastrar el pin para ajustarlo.';
     estado.classList.add('ok');
-    alCambiar && alCambiar(punto);
+    alCambiar && alCambiar(punto, origen);
     pintarDireccion(lat, lng);
   };
   const mostrarResultados = (lista) => {
@@ -497,7 +497,7 @@ function selectorPunto(contenedor, { letra, clase, alCambiar, alDireccion, conMi
     controles.append(el('button', { class: 'boton borde chico', type: 'button', text: 'Usar mi ubicación', onclick: () => {
       estado.textContent = 'Obteniendo tu ubicación…';
       navigator.geolocation.getCurrentPosition(
-        (p) => fijar(p.coords.latitude, p.coords.longitude, true),
+        (p) => fijar(p.coords.latitude, p.coords.longitude, true, 'gps'),
         () => { estado.textContent = 'No pudimos obtener tu ubicación. Busca el lugar o toca el mapa.'; },
         { enableHighAccuracy: true, timeout: 10000 });
     } }));
@@ -507,7 +507,7 @@ function selectorPunto(contenedor, { letra, clase, alCambiar, alDireccion, conMi
   if (mapa) mapa.alTocar((lat, lng) => fijar(lat, lng, false));
   return {
     obtener: () => punto,
-    poner: (lat, lng) => fijar(lat, lng, true),
+    poner: (lat, lng, origen = 'guardado') => fijar(lat, lng, true, origen),
     limpiar: () => { punto = null; if (marcador) { marcador.quitar(); marcador = null; } buscar.value = ''; direccion.hidden = true; estado.textContent = 'Busca el lugar o toca el mapa para marcar el punto exacto.'; estado.classList.remove('ok'); },
     refrescar: () => mapa && mapa.refrescar(),
   };
