@@ -14,7 +14,7 @@ const HOST = process.env.HOST || '127.0.0.1';
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const PRIVADO_DIR = path.join(__dirname, 'privado');   // páginas que solo se entregan con permiso (panel de administración)
 const SESION_DIAS = 30;
-const SESION_ADMIN_HORAS = 12;                         // la sesión del administrador vence más rápido
+const SESION_ADMIN_HORAS = 16;                         // la sesión del administrador vence más rápido
 // Único correo con permiso para entrar al panel. La contraseña NO va en el código: se crea en el servidor
 // con deploy/actualizar.sh (la pide la primera vez) o con herramientas/crear-admin.js
 const ADMIN_EMAIL = String(process.env.VAELO_ADMIN_EMAIL_UNICO || 'administracionvaelo@vaelomensajeria.com').toLowerCase();
@@ -1160,6 +1160,18 @@ function registrarUbicacion(piloto, c, precision, forzar = false) {
   }
   if (!(precision > 200)) automatizarEnvios(piloto.id, c);   // con una lectura muy imprecisa no se cambia nada
 }
+// Avisos para que el piloto escanee los paquetes de la tienda (una vez por ruta y por momento)
+const avisosEscanear = new Set();
+function avisoEscanear(pilotoId, grupo, momento) {
+  const k = `${pilotoId}|${grupo}|${momento}`;
+  if (avisosEscanear.has(k)) return false;
+  avisosEscanear.add(k);
+  if (avisosEscanear.size > 5000) avisosEscanear.clear();
+  avisar(pilotoId, momento === 'llego'
+    ? { titulo: 'Escanea antes de salir', cuerpo: 'Escanea cada paquete de la ruta antes de irte. Si olvidas uno, puedes perderlo y se descuenta de tu saldo.', url: RUTA_PILOTO, etiqueta: 'escanear-' + grupo }
+    : { titulo: 'Saliste sin escanear los paquetes', cuerpo: 'Regresa o escanéalos ahora. Un paquete perdido se descuenta de tu saldo.', url: RUTA_PILOTO, etiqueta: 'escanear-' + grupo });
+  return true;
+}
 function automatizarEnvios(pilotoId, c) {
   const envios = db.prepare("SELECT * FROM envios WHERE mensajero_id = ? AND asignacion = 'aceptado' AND estado IN ('pendiente','recogido','en_camino')").all(pilotoId);
   for (const e of envios) {
@@ -1168,9 +1180,14 @@ function automatizarEnvios(pilotoId, c) {
     let estado = e.estado;
     if (estado === 'pendiente' && o) {
       const km = distanciaRecta(c, o);
+      const rutaTienda = !!(e.grupo && e.pedido_id);
       if (!e.llego_origen && km <= 0.12) {
         db.prepare('UPDATE envios SET llego_origen = 1 WHERE id = ?').run(e.id);
         db.prepare('INSERT INTO eventos (envio_id, estado, nota, lat, lng) VALUES (?, ?, ?, ?, ?)').run(e.id, 'pendiente', 'El piloto llegó al punto de recogida', c.lat, c.lng);
+        if (rutaTienda) avisoEscanear(pilotoId, e.grupo, 'llego');
+      } else if (rutaTienda && e.llego_origen && km >= 0.3) {
+        // Ruta de tienda: no se da por recogida sola; el piloto tiene que escanear cada paquete
+        if (avisoEscanear(pilotoId, e.grupo, 'salio')) db.prepare('INSERT INTO eventos (envio_id, estado, nota, lat, lng) VALUES (?, ?, ?, ?, ?)').run(e.id, 'pendiente', 'El piloto salió del punto de recogida sin escanear los paquetes', c.lat, c.lng);
       } else if (e.llego_origen && km >= 0.3 && receptorListo(e)) {
         cambiarEstado(e.id, 'recogido', 'Paquete recogido (detectado por GPS)', c.lat, c.lng);
         estado = 'recogido';
@@ -1505,7 +1522,12 @@ ruta('POST', '/api/piloto/envios/:id/no-entregado', ({ req, params, body }) => {
   registrarUbicacion(p, c, numero(body.precision), true);
   cambiarEstado(e.id, 'fallido', `No se pudo entregar: ${MOTIVOS_FALLO[motivo]}${nota ? '. ' + nota : ''}`, c.lat, c.lng);
   // Pedido de empresa: no hay devolución, el paquete se guarda en la sede y la empresa lo recoge ahí
-  if (e.pedido_id) { decidirFallido(db.prepare('SELECT * FROM envios WHERE id = ?').get(e.id), 'sede', 'automático (pedido de empresa)'); return { ok: true, sede: true }; }
+  if (e.pedido_id) {
+    // El intento lo paga la tienda: el piloto fue y gastó gasolina
+    crearCargo(e.usuario_id, e.id, 'intento_fallido', Number(e.precio) || 0, `${e.codigo_corto || e.guia}: ${MOTIVOS_FALLO[motivo].toLowerCase()}`);
+    decidirFallido(db.prepare('SELECT * FROM envios WHERE id = ?').get(e.id), 'sede', 'automático (pedido de empresa)');
+    return { ok: true, sede: true };
+  }
   return { ok: true, horas: horasDecidir() };
 }, { limite: 1_500_000 });
 
@@ -2785,10 +2807,12 @@ ruta('GET', '/api/admin/caja', ({ req }) => {
     FROM usuarios u WHERE u.rol = 'mensajero' ORDER BY u.nombre`).all().filter((p) => p.efectivo > 0 || p.ganancia > 0);
   const detalle = (id) => db.prepare(`SELECT e.id, e.guia, e.entregado_en, e.precio, e.metodo_pago, e.cobro_destinatario, ${SQL_EFECTIVO} AS efectivo
     FROM envios e WHERE e.mensajero_id = ? AND e.piloto_cerro_en IS NOT NULL AND e.liquidado_id IS NULL AND ${SQL_EFECTIVO} > 0 ORDER BY e.id`).all(id);
-  const cobros = db.prepare(`SELECT u.id, u.nombre, u.telefono, u.empresa_nombre, COUNT(*) AS envios, SUM(${SQL_NETO_TIENDA}) AS monto, SUM(CASE WHEN ${SQL_COBRO_HECHO} THEN e.comision_cobro ELSE 0 END) AS comision,
-      SUM(CASE WHEN e.metodo_pago = 'tienda' THEN e.precio ELSE 0 END) AS envios_tienda
-    FROM envios e JOIN usuarios u ON u.id = e.usuario_id WHERE ${SQL_CUENTA_TIENDA} AND e.cobro_pagado_en IS NULL
-    GROUP BY u.id ORDER BY monto DESC`).all();
+  const conCuenta = db.prepare(`SELECT DISTINCT e.usuario_id AS id FROM envios e WHERE ${SQL_CUENTA_TIENDA} AND e.cobro_pagado_en IS NULL
+    UNION SELECT DISTINCT c.usuario_id FROM cargos c JOIN usuarios u ON u.id = c.usuario_id WHERE u.tipo_cuenta = 'minorista' AND ${SQL_CARGO_TIENDA}`).all();
+  const cobros = conCuenta.map(({ id }) => {
+    const u = db.prepare('SELECT id, nombre, telefono, empresa_nombre FROM usuarios WHERE id = ?').get(id); const cp = cobrosProducto(id);
+    return { ...u, envios: cp.envios, monto: redondear(cp.pendiente - cp.saldo), comision: cp.comision, envios_tienda: cp.envios_tienda, cargos: cp.cargos, cargos_detalle: cp.cargos_detalle, debe_cargos: cp.debe_cargos };
+  }).filter((x) => x.monto !== 0 || x.envios || x.cargos).sort((a, b) => b.monto - a.monto);
   const credito = db.prepare(`SELECT u.id, u.nombre, u.empresa_nombre, COUNT(*) AS envios, SUM(e.precio + e.cargos_extra) AS monto, MIN(e.creado) AS desde
     FROM envios e JOIN usuarios u ON u.id = e.usuario_id WHERE e.metodo_pago = 'credito' AND ${SQL_VIAJE_HECHO} AND e.credito_pagado_en IS NULL
     GROUP BY u.id ORDER BY monto DESC`).all();
@@ -2800,7 +2824,7 @@ ruta('GET', '/api/admin/caja', ({ req }) => {
   return { reembolsos, pilotos: pilotos.map((p) => { const desc = descuentosPiloto(p.id); const d = redondear(desc.reduce((t, x) => t + x.monto_piloto, 0));
       return { ...p, efectivo: redondear(p.efectivo), ganancia: redondear(p.ganancia), descuentos: d, descuentos_detalle: desc, a_pagar: redondear(Math.max(0, p.ganancia - d)), detalle: detalle(p.id),
         deuda_vencida: deudaVencida(p.id) }; }),
-    cobros: cobros.map((c) => ({ ...c, monto: redondear(c.monto) })), credito: credito.map((c) => ({ ...c, monto: redondear(c.monto) })), historial };
+    cobros, credito: credito.map((c) => ({ ...c, monto: redondear(c.monto) })), historial };
 });
 ruta('POST', '/api/admin/caja/liquidar', ({ req, body }) => {
   requiereRol(req, 'admin');
@@ -2841,8 +2865,15 @@ ruta('POST', '/api/admin/caja/pagar-piloto', ({ req, body }) => {
 });
 ruta('POST', '/api/admin/caja/pagar-cobros', ({ req, body }) => {
   requiereRol(req, 'admin');
-  const r = db.prepare(`UPDATE envios AS e SET cobro_pagado_en = datetime('now') WHERE e.usuario_id = ? AND ${SQL_CUENTA_TIENDA} AND e.cobro_pagado_en IS NULL`).run(numero(body.cliente_id));
-  return { ok: true, envios: Number(r.changes) };
+  const id = numero(body.cliente_id);
+  db.exec('BEGIN');
+  try {
+    const r = db.prepare(`UPDATE envios AS e SET cobro_pagado_en = datetime('now') WHERE e.usuario_id = ? AND ${SQL_CUENTA_TIENDA} AND e.cobro_pagado_en IS NULL`).run(id);
+    const c = db.prepare(`UPDATE cargos AS c SET pagado_en = datetime('now'), pagado_como = 'cuenta de tienda' WHERE c.usuario_id = ? AND ${SQL_CARGO_TIENDA}
+      AND (SELECT tipo_cuenta FROM usuarios WHERE id = c.usuario_id) = 'minorista'`).run(id);
+    db.exec('COMMIT');
+    return { ok: true, envios: Number(r.changes), cargos: Number(c.changes) };
+  } catch (err) { db.exec('ROLLBACK'); throw err; }
 });
 ruta('POST', '/api/admin/caja/cobrar-credito', ({ req, body }) => {
   requiereRol(req, 'admin');
@@ -3118,14 +3149,15 @@ ruta('POST', '/api/push/probar', async ({ req }) => {
 });
 
 // ---------- Cargos al cliente ----------
-const TIPOS_CARGO = { cancelacion: 'Cancelación con el piloto en camino', devolucion: 'Devolución del paquete', bodega: 'Días en la sede', reentrega: 'Nueva entrega desde la sede', bodega_empresa: 'Paquetes guardados en la sede' };
+const TIPOS_CARGO = { cancelacion: 'Cancelación con el piloto en camino', devolucion: 'Devolución del paquete', bodega: 'Días en la sede', reentrega: 'Nueva entrega desde la sede', bodega_empresa: 'Paquetes guardados en la sede', intento_fallido: 'Entrega fallida' };
 function crearCargo(usuarioId, envioId, tipo, monto, nota) {
   if (!(monto > 0)) return;
   db.prepare('INSERT INTO cargos (usuario_id, envio_id, tipo, monto, nota) VALUES (?, ?, ?, ?, ?)').run(usuarioId, envioId, tipo, redondear(monto), nota || TIPOS_CARGO[tipo]);
 }
 // Al crear un envío, los cargos pendientes se cobran con él
 function sumarCargosPendientes(usuarioId, envioId) {
-  const r = db.prepare("UPDATE cargos SET cobrado_envio_id = ? WHERE usuario_id = ? AND cobrado_envio_id IS NULL AND pagado_en IS NULL AND anulado_en IS NULL AND tipo != 'bodega_empresa'").run(envioId, usuarioId);
+  const r = db.prepare(`UPDATE cargos SET cobrado_envio_id = ? WHERE usuario_id = ? AND cobrado_envio_id IS NULL AND pagado_en IS NULL AND anulado_en IS NULL AND tipo NOT IN ('bodega_empresa','intento_fallido')
+    AND (envio_id IS NULL OR envio_id NOT IN (SELECT id FROM envios WHERE pedido_id IS NOT NULL))`).run(envioId, usuarioId);
   if (!r.changes) return 0;
   const total = redondear(db.prepare('SELECT COALESCE(SUM(monto), 0) AS t FROM cargos WHERE cobrado_envio_id = ?').get(envioId).t);
   db.prepare('UPDATE envios SET cargos_extra = ? WHERE id = ?').run(total, envioId);
@@ -3202,8 +3234,8 @@ function retirarDeSede(e, recibio, quien) {
     db.prepare("UPDATE envios SET sede_salida = datetime('now'), recibio = ? WHERE id = ?").run(recibio, e.id);
     const f = db.prepare('SELECT * FROM envios WHERE id = ?').get(e.id);
     crearCargo(e.usuario_id, e.id, e.pedido_id ? 'bodega_empresa' : 'bodega', cargoBodega(f), `${diasEnSede(f)} día(s) en la sede`);
-    // Lo pendiente del cliente se paga en la sede al retirar
-    db.prepare("UPDATE cargos SET pagado_en = datetime('now'), pagado_como = 'en la sede' WHERE usuario_id = ? AND pagado_en IS NULL AND anulado_en IS NULL AND cobrado_envio_id IS NULL").run(e.usuario_id);
+    // Lo pendiente del cliente se paga en la sede al retirar (a las tiendas se les carga a su cuenta)
+    if (!e.pedido_id) db.prepare("UPDATE cargos SET pagado_en = datetime('now'), pagado_como = 'en la sede' WHERE usuario_id = ? AND pagado_en IS NULL AND anulado_en IS NULL AND cobrado_envio_id IS NULL").run(e.usuario_id);
     cambiarEstado(e.id, 'entregado', `Retirado en la sede por ${recibio} (${quien})`);
     db.exec('COMMIT');
   } catch (err) { db.exec('ROLLBACK'); throw err; }
@@ -4818,6 +4850,7 @@ ruta('GET', '/api/empresa/recomendacion', ({ req, query }) => {
 });
 ruta('POST', '/api/empresa/enviar', ({ req, body }) => {
   const u = requiereEmpresa(req);
+  revisarDeudaTienda(u);
   const dia = texto(body.dia, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dia) || dia < hoyGT()) falla(400, 'Elige un día de hoy en adelante.');
   const pedidos = db.prepare("SELECT * FROM pedidos_empresa WHERE usuario_id = ? AND dia = ? AND estado = 'confirmado' AND lote_id IS NULL").all(u.id, dia);
@@ -4929,20 +4962,36 @@ function carpetaSalida(c, conPedidos = false) {
 // Si da negativo, la tienda le debe a Vaelo (saldo).
 // Lo que Vaelo le debe a la tienda por cada envío. Un paquete que la tienda retiró en la sede no se le cobró a nadie: ahí no hay producto que entregarle
 const SQL_COBRO_HECHO = 'e.cobro_destinatario > 0 AND e.sede_llegada IS NULL';
-const SQL_NETO_TIENDA = `(CASE WHEN ${SQL_COBRO_HECHO} THEN e.cobro_destinatario - e.comision_cobro ELSE 0 END - CASE WHEN e.metodo_pago = 'tienda' THEN e.precio ELSE 0 END)`;
-const SQL_CUENTA_TIENDA = `e.estado = 'entregado' AND ((${SQL_COBRO_HECHO}) OR e.metodo_pago = 'tienda')`;
+const SQL_ENVIO_TIENDA = "e.metodo_pago = 'tienda' AND e.sede_llegada IS NULL";   // si no se entregó, se cobra como intento fallido (cargo)
+const SQL_NETO_TIENDA = `(CASE WHEN ${SQL_COBRO_HECHO} THEN e.cobro_destinatario - e.comision_cobro ELSE 0 END - CASE WHEN ${SQL_ENVIO_TIENDA} THEN e.precio ELSE 0 END)`;
+const SQL_CUENTA_TIENDA = `e.estado = 'entregado' AND ((${SQL_COBRO_HECHO}) OR (${SQL_ENVIO_TIENDA}))`;
+// Cargos que van a la cuenta de la tienda (no al próximo envío): entregas fallidas, bodega y nuevas entregas de sus pedidos
+const SQL_CARGO_TIENDA = "c.pagado_en IS NULL AND c.anulado_en IS NULL AND c.cobrado_envio_id IS NULL AND (c.tipo IN ('bodega_empresa','intento_fallido') OR c.envio_id IN (SELECT id FROM envios WHERE pedido_id IS NOT NULL))";
 function cobrosProducto(uid) {
   const f = db.prepare(`SELECT COALESCE(SUM(CASE WHEN e.cobro_pagado_en IS NULL THEN ${SQL_NETO_TIENDA} END), 0) AS neto, COUNT(CASE WHEN e.cobro_pagado_en IS NULL AND ${SQL_COBRO_HECHO} THEN 1 END) AS envios,
     COALESCE(SUM(CASE WHEN e.cobro_pagado_en IS NULL AND ${SQL_COBRO_HECHO} THEN e.comision_cobro END), 0) AS comision,
-    COALESCE(SUM(CASE WHEN e.cobro_pagado_en IS NULL AND e.metodo_pago = 'tienda' THEN e.precio END), 0) AS envios_tienda, COUNT(CASE WHEN e.cobro_pagado_en IS NULL AND e.metodo_pago = 'tienda' THEN 1 END) AS n_tienda,
-    MIN(CASE WHEN e.cobro_pagado_en IS NULL AND e.metodo_pago = 'tienda' THEN e.entregado_en END) AS saldo_desde,
+    COALESCE(SUM(CASE WHEN e.cobro_pagado_en IS NULL AND ${SQL_ENVIO_TIENDA} THEN e.precio END), 0) AS envios_tienda, COUNT(CASE WHEN e.cobro_pagado_en IS NULL AND ${SQL_ENVIO_TIENDA} THEN 1 END) AS n_tienda,
+    MIN(CASE WHEN e.cobro_pagado_en IS NULL AND ${SQL_ENVIO_TIENDA} THEN e.entregado_en END) AS saldo_desde,
     COALESCE(SUM(CASE WHEN e.cobro_pagado_en >= datetime('now', '-30 days') THEN ${SQL_NETO_TIENDA} END), 0) AS pagado_30, MAX(e.cobro_pagado_en) AS ultimo_pago
     FROM envios e WHERE e.usuario_id = ? AND ${SQL_CUENTA_TIENDA}`).get(uid);
-  const neto = redondear(f.neto), saldo = neto < 0 ? redondear(-neto) : 0;
+  // Solo las tiendas minoristas: a las empresas con contrato se les cobra en su estado de cuenta del mes
+  const cargos = db.prepare(`SELECT c.tipo, COUNT(*) AS n, COALESCE(SUM(c.monto), 0) AS monto FROM cargos c JOIN usuarios u ON u.id = c.usuario_id
+    WHERE c.usuario_id = ? AND u.tipo_cuenta = 'minorista' AND ${SQL_CARGO_TIENDA} GROUP BY c.tipo`).all(uid);
+  const totalCargos = redondear(cargos.reduce((t, c) => t + c.monto, 0));
+  const neto = redondear(f.neto - totalCargos), saldo = neto < 0 ? redondear(-neto) : 0;
   const dias = ajNum('dias_saldo_tienda', 7);
   const limite = saldo > 0 && f.saldo_desde ? new Date(fechaMs(f.saldo_desde) + dias * 86400_000 - 6 * 3600_000).toISOString().slice(0, 10) : null;
+  // Con cargos (entrega fallida, bodega, nueva entrega) que no alcanza a cubrir lo que Vaelo le debe: paga antes de enviar otra carpeta
+  const debeCargos = saldo > 0 && totalCargos > 0;
   return { pendiente: Math.max(0, neto), saldo, comision: redondear(f.comision), envios: f.envios, envios_tienda: redondear(f.envios_tienda), n_envios_tienda: f.n_tienda,
-    saldo_limite: limite, saldo_vencido: !!limite && limite < hoyGT(), pagado_30: Math.max(0, redondear(f.pagado_30)), ultimo_pago: f.ultimo_pago };
+    cargos: totalCargos, cargos_detalle: cargos.map((c) => ({ tipo: c.tipo, nombre: TIPOS_CARGO[c.tipo] || c.tipo, n: c.n, monto: redondear(c.monto) })), debe_cargos: debeCargos,
+    saldo_limite: debeCargos ? null : limite, saldo_vencido: debeCargos || (!!limite && limite < hoyGT()), pagado_30: Math.max(0, redondear(f.pagado_30)), ultimo_pago: f.ultimo_pago };
+}
+function revisarDeudaTienda(u) {
+  const c = cobrosProducto(u.id);
+  if (!c.saldo_vencido) return;
+  if (c.debe_cargos) falla(403, `Debes Q${c.saldo.toFixed(2)} a Vaelo (${c.cargos_detalle.map((x) => x.nombre.toLowerCase()).join(', ')}). Págalo y avísanos por WhatsApp para poder enviar esta carpeta.`);
+  falla(403, `Tienes un saldo de Q${c.saldo.toFixed(2)} por envíos que tus clientes te pagaron a ti. Págalo por transferencia y avísanos para poder enviar esta carpeta.`);
 }
 const datosPanelEmpresa = (u) => ({ minorista: u.tipo_cuenta === 'minorista', condiciones: condicionesTienda(u), minimo: minimoLote(u), punto: puntoEmpresa(u), punto_pendiente: puntoPendiente(u), cobros_producto: cobrosProducto(u.id), tamanos: TAMANOS, horarios: HORARIOS, modos: MODOS_LOTE, empresa: u.empresa_nombre || u.nombre,
   whatsapp: getAjustes().whatsapp || '', sede: getAjustes().sede_direccion || '', zonas: [...zonasFijas().map((z) => z.nombre), OTRA_ZONA], hoy: hoyGT() });
@@ -5082,8 +5131,7 @@ ruta('POST', '/api/empresa/carpetas/:id/enviar', ({ req, params, body }) => {
   const u = requiereEmpresa(req);
   if (u.tienda_estado === 'pendiente') falla(403, 'Tu tienda está en revisión. Puedes preparar tu carpeta y tus clientes pueden confirmar: en cuanto Vaelo la apruebe, la envías.');
   if (u.tienda_estado === 'rechazada') falla(403, 'Tu solicitud de tienda no fue aprobada. Escríbenos por WhatsApp para revisarla.');
-  const cuentas = cobrosProducto(u.id);
-  if (cuentas.saldo_vencido) falla(403, `Tienes un saldo de Q${cuentas.saldo.toFixed(2)} por envíos que tus clientes te pagaron a ti. Págalo por transferencia y avísanos para poder enviar esta carpeta.`);
+  revisarDeudaTienda(u);
   const c = carpetaDeEmpresa(u, params.id);
   carpetaAbierta(c);
   if (c.dia < hoyGT()) falla(400, 'El día de esta carpeta ya pasó. Cámbialo y pide a tus clientes que confirmen de nuevo.');

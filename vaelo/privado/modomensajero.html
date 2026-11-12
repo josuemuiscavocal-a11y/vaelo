@@ -776,6 +776,7 @@
           bloquePersona(e0, { titulo: 'Recoges en', nombre: e0.origen_quien === 'sede' ? 'Sede de Vaelo' : e0.empresa, telefono: e0.origen_telefono, chip: null,
             zona: e0.origen_zona, referencias: e0.origen_direccion, punto: 'origen', accion: 'Ir a recoger' }),
           notaCobro,
+          el('div', { class: 'mensaje error' }, el('strong', { text: 'Escanea cada paquete antes de salir. ' }), 'Si olvidas uno, puedes perderlo y se descuenta de tu saldo.'),
           el('div', { class: 'mensaje aviso' }, el('strong', { text: 'Marca cada paquete que tengas en la mano y que diga lo del recuadro BUSCA. ' }), 'Si a alguno le falta, pídele a la empresa que lo marque antes de llevártelo.',
             el('br'), el('small', { text: 'Consejo: mete primero los de las últimas paradas; así el de la parada 1 te queda arriba.' })),
           el('div', { class: 'recoger-lista' }, el('div', { class: 'recoger-cab' }, el('p', {}, 'Recogidos: ', contador), todos), ...filas),

@@ -331,13 +331,16 @@ async function panelPedidos(caja, yo, abrirId) {
       el('li', {}, el('strong', { text: 'Tus clientes confirman' }), el('span', { text: 'su horario, dónde lo reciben y quién lo recibe.' })),
       el('li', {}, el('strong', { text: `Con ${r.minimo} confirmados, envíala a Vaelo` }), el('span', { text: 'y nosotros armamos las rutas.' }))));
   const cp = r.cobros_producto;
+  const detalleCargos = cp && cp.cargos > 0 ? cp.cargos_detalle.map((x) => `${x.nombre.toLowerCase()} ${dinero(x.monto)}`).join(', ') : '';
   const cajaSaldo = cp && cp.saldo > 0 ? el('section', { class: 'bloque cobros-tienda saldo-tienda' + (cp.saldo_vencido ? ' vencido' : '') },
-    el('div', {}, el('span', { text: 'Saldo por pagar a Vaelo' }), el('strong', { text: dinero(cp.saldo) }),
-      el('small', { text: `Son ${cp.n_envios_tienda} envío(s) que tus clientes te pagaron a ti (${dinero(cp.envios_tienda)}), menos lo que Vaelo te debía por tus productos. ${cp.saldo_vencido ? 'Ya venció: págalo por transferencia y avísanos para poder enviar tu próxima carpeta.' : `Págalo por transferencia antes del ${fecha(cp.saldo_limite + ' 12:00:00', false)}.`}` })),
+    el('div', {}, el('span', { text: cp.debe_cargos ? 'Debes a Vaelo' : 'Saldo por pagar a Vaelo' }), el('strong', { text: dinero(cp.saldo) }),
+      el('small', { text: cp.debe_cargos
+        ? `Por ${detalleCargos}${cp.envios_tienda > 0 ? ` y ${dinero(cp.envios_tienda)} de envíos que tus clientes te pagaron a ti` : ''}, menos lo que Vaelo te debía por tus productos. Págalo por transferencia y avísanos: hasta entonces no puedes enviar otra carpeta.`
+        : `Son ${cp.n_envios_tienda} envío(s) que tus clientes te pagaron a ti (${dinero(cp.envios_tienda)}), menos lo que Vaelo te debía por tus productos. ${cp.saldo_vencido ? 'Ya venció: págalo por transferencia y avísanos para poder enviar tu próxima carpeta.' : `Págalo por transferencia antes del ${fecha(cp.saldo_limite + ' 12:00:00', false)}.`}` })),
     r.whatsapp ? el('a', { class: 'boton cinta chico', href: `https://wa.me/${String(r.whatsapp).replace(/\D/g, '').replace(/^(\d{8})$/, '502$1')}?text=${encodeURIComponent(`Hola Vaelo, soy de ${r.empresa || 'mi tienda'}. Quiero pagar mi saldo de ${dinero(cp.saldo)}.`)}`, target: '_blank', rel: 'noopener', text: 'Avisar que ya pagué' }) : null) : null;
   const cajaCobros = cp && (cp.pendiente > 0 || cp.pagado_30 > 0) ? el('section', { class: 'bloque cobros-tienda' },
     el('div', {}, el('span', { text: 'Dinero de tus productos que Vaelo te tiene' }), el('strong', { text: dinero(cp.pendiente) }),
-      el('small', { text: cp.pendiente > 0 ? `De ${cp.envios} entrega(s) ya cobrada(s)${cp.comision > 0 ? `, ya descontada la comisión de ${dinero(cp.comision)}` : ''}${cp.envios_tienda > 0 ? ` y ${dinero(cp.envios_tienda)} de envíos que tus clientes te pagaron a ti` : ''}. Vaelo te lo entrega y aquí queda marcado.` : 'Estás al día: ya te entregamos todo.' })),
+      el('small', { text: cp.pendiente > 0 ? `De ${cp.envios} entrega(s) ya cobrada(s)${cp.comision > 0 ? `, ya descontada la comisión de ${dinero(cp.comision)}` : ''}${cp.envios_tienda > 0 ? ` y ${dinero(cp.envios_tienda)} de envíos que tus clientes te pagaron a ti` : ''}${cp.cargos > 0 ? `; también se descuentan ${detalleCargos}` : ''}. Vaelo te lo entrega y aquí queda marcado.` : 'Estás al día: ya te entregamos todo.' })),
     cp.pagado_30 > 0 ? el('div', {}, el('span', { text: 'Ya te entregamos (30 días)' }), el('strong', { text: dinero(cp.pagado_30) }), cp.ultimo_pago ? el('small', { text: 'Último: ' + fecha(cp.ultimo_pago, false) }) : null) : null) : null;
   poner(caja, bloqueRevision(r.condiciones), bloqueAppTiendas(), bloqueServicios(r.minorista ? 'minorista' : 'empresa', !(r.abiertas.length + r.enviadas.length)), cajaSaldo, cajaCobros, bloquePunto(r, () => panelPedidos(caja, yo)),
     el('section', { class: 'bloque' },

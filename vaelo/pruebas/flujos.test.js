@@ -1722,7 +1722,52 @@ test('paquete que la tienda retira en la sede: no se le debe el producto, porque
   assert.equal((await admin('POST', `/api/admin/envios/${e[1]}/fallido`, { accion: 'retirar', recibio: 'La dueña' })).status, 200);
   assert.equal(db.prepare('SELECT estado FROM envios WHERE id = ?').get(e[1]).estado, 'entregado');
   const cuenta = (await t('GET', '/api/empresa/carpetas')).j.cobros_producto;
-  assert.equal(cuenta.pendiente, 200, 'solo el producto que sí se cobró'); assert.equal(cuenta.envios, 1);
+  assert.equal(cuenta.envios, 1, 'solo el producto que sí se cobró');
+  assert.equal(cuenta.cargos, 10, 'un día de bodega va a la cuenta de la tienda'); assert.equal(cuenta.pendiente, 190);
   const fila = (await admin('GET', '/api/admin/caja')).j.cobros.find((x) => x.id === id);
-  assert.equal(fila.monto, 200);
+  assert.equal(fila.monto, 190);
+});
+
+test('entrega fallida de una tienda: la tienda paga el intento, la bodega y la nueva entrega; si no le alcanza, debe y no envía hasta pagar', async () => {
+  const { t, id } = await tiendaLista('fallida@prueba.com', 'Fallida Lives');
+  const hoy = new Date(Date.now() - 6 * 3600_000).toISOString().slice(0, 10);
+  const carpeta = async () => {
+    const c = (await t('POST', '/api/empresa/carpetas', { dia: hoy })).j.carpeta.id;
+    const ids = [];
+    for (let i = 0; i < 3; i++) ids.push((await t('POST', `/api/empresa/carpetas/${c}/pedidos`, { descripcion: 'Falda ' + i, tamano: 'pequeno', cliente_nombre: 'Clienta ' + i, cliente_telefono: '5599200' + i, foto: FOTO, llenar: true,
+      dia: hoy, horario: 'cualquiera', direccion: 'Casa ' + i + ', zona 1', zona: 'Zona 1', lat: 14.633 + i * 0.002, lng: -90.52, recibe_nombre: 'Clienta ' + i, recibe_telefono: '5599200' + i, metodo_pago: 'efectivo' })).j.pedido.id);
+    return { c, ids };
+  };
+  const A = await carpeta();
+  const env = await t('POST', `/api/empresa/carpetas/${A.c}/enviar`, { modo: 'una_moto', recogida: 'sede' });
+  assert.equal(env.status, 201, JSON.stringify(env.j));
+  await admin('POST', `/api/admin/lotes-empresa/${env.j.lote}/recibido`, {});
+  const calc = await admin('POST', `/api/admin/lotes-empresa/${env.j.lote}/calcular`, { modo: 'una_moto', motos: 1 });
+  assert.equal((await admin('POST', `/api/admin/lotes-empresa/${env.j.lote}/confirmar`, { modo: 'una_moto', rutas: calc.j.rutas.map((x) => ({ pedidos: x.pedidos, piloto_id: null })) })).status, 200);
+  const eid = db.prepare('SELECT id FROM envios WHERE pedido_id = ?').get(A.ids[0]).id;
+  db.prepare("UPDATE envios SET mensajero_id = ?, asignacion = 'aceptado', estado = 'en_camino' WHERE id = ?").run(pilotoId, eid);
+  const d = db.prepare('SELECT destino_lat, destino_lng, precio FROM envios WHERE id = ?').get(eid);
+  const f = await piloto('POST', `/api/piloto/envios/${eid}/no-entregado`, { motivo: 'no_contesta', lat: d.destino_lat, lng: d.destino_lng, foto: FOTO });
+  assert.equal(f.status, 200, JSON.stringify(f.j)); assert.equal(f.j.sede, true);
+  assert.equal(db.prepare("SELECT monto FROM cargos WHERE envio_id = ? AND tipo = 'intento_fallido'").get(eid).monto, d.precio, 'el intento lo paga la tienda');
+  // No hay producto cobrado que cubra el cargo: debe y no puede enviar otra carpeta
+  let cp = (await t('GET', '/api/empresa/carpetas')).j.cobros_producto;
+  assert.equal(cp.saldo, 35); assert.equal(cp.debe_cargos, true); assert.equal(cp.saldo_vencido, true);
+  const B = await carpeta();
+  const bloqueo = await t('POST', `/api/empresa/carpetas/${B.c}/enviar`, { modo: 'una_moto', recogida: 'sede' });
+  assert.equal(bloqueo.status, 403); assert.match(bloqueo.j.error, /Debes Q35\.00 a Vaelo \(entrega fallida\)/);
+  const fila = (await admin('GET', '/api/admin/caja')).j.cobros.find((x) => x.id === id);
+  assert.equal(fila.monto, -35); assert.equal(fila.debe_cargos, true);
+  // La clienta pide que se lo lleven otra vez: nueva entrega Q35 a la tienda (más la bodega)
+  db.prepare("UPDATE envios SET estado = 'en_sede', sede_llegada = datetime('now', '-1 day') WHERE id = ?").run(eid);
+  assert.equal((await admin('POST', `/api/admin/envios/${eid}/fallido`, { accion: 'reenviar' })).status, 200);
+  const nuevo = db.prepare('SELECT precio, metodo_pago, ganancia_piloto FROM envios WHERE reentrega_de = ?').get(eid);
+  assert.equal(nuevo.precio, 0, 'a la clienta no se le cobra el envío otra vez'); assert.equal(nuevo.ganancia_piloto, 30);
+  cp = (await t('GET', '/api/empresa/carpetas')).j.cobros_producto;
+  assert.equal(cp.saldo, 35 + 35 + 10, 'intento + nueva entrega + 1 día de bodega');
+  // La oficina marca que la tienda pagó: se quita la alerta y ya puede enviar
+  assert.equal((await admin('POST', '/api/admin/caja/pagar-cobros', { cliente_id: id })).j.cargos, 3);
+  cp = (await t('GET', '/api/empresa/carpetas')).j.cobros_producto;
+  assert.equal(cp.saldo, 0); assert.equal(cp.saldo_vencido, false);
+  assert.equal((await t('POST', `/api/empresa/carpetas/${B.c}/enviar`, { modo: 'una_moto', recogida: 'sede' })).status, 201);
 });

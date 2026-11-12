@@ -560,7 +560,7 @@ null))));
           e.estado === 'a_sede' ? accion('Ya llegó a la sede', { accion: 'recibido' }) : null,
           e.estado === 'en_sede' ? [
             el('button', { class: 'boton chico', type: 'button', text: 'Lo retiraron en la sede', onclick: (ev) => {
-              const recibio = prompt(`¿Quién retiró el paquete? Se cobran ${dinero(e.sede.cargo)} de la sede más los cargos pendientes del cliente.`);
+              const recibio = prompt(e.pedido_id ? `¿Quién retiró el paquete? Se cargan ${dinero(e.sede.cargo)} de bodega a la cuenta de la tienda (Caja).` : `¿Quién retiró el paquete? Se cobran ${dinero(e.sede.cargo)} de la sede más los cargos pendientes del cliente.`);
               if (recibio) guardar(ev.target, () => api(`/api/admin/envios/${e.id}/fallido`, { body: { accion: 'retirar', recibio } }));
             } }),
             accion(`Enviar de nuevo (${dinero(f ? f.cargo_reentrega : 0)})`, { accion: 'reenviar' }, 'boton borde chico', 'Se crea un envío nuevo desde la sede hacia quien recibe. ¿Continuar?')] : null));
@@ -781,8 +781,11 @@ null))));
               el('td', {}, e.estado === 'a_sede' ? el('button', { class: 'boton chico', type: 'button', text: 'Llegó a la sede', onclick: async () => {
                 try { await api(`/api/admin/envios/${e.id}/fallido`, { body: { accion: 'recibido' } }); abrirEmpresa(id, 'sede'); } catch (x) { alert(x.message); } } })
                 : e.estado === 'en_sede' ? el('button', { class: 'boton borde chico', type: 'button', text: 'Lo recogieron', onclick: async () => {
-                  const recibio = prompt(`¿Quién recogió ${e.guia}?${e.cargo ? ` Cobra ${dinero(e.cargo)} de bodega.` : ''}`); if (!recibio) return;
-                  try { await api(`/api/admin/envios/${e.id}/fallido`, { body: { accion: 'retirar', recibio } }); abrirEmpresa(id, 'sede'); } catch (x) { alert(x.message); } } }) : null)))) : el('p', { class: 'pista', text: 'No hay paquetes de esta empresa en la sede.' }));
+                  const recibio = prompt(`¿Quién recogió ${e.guia}?${e.cargo ? ` Se cargan ${dinero(e.cargo)} de bodega a la cuenta de la tienda (Caja).` : ''}`); if (!recibio) return;
+                  try { await api(`/api/admin/envios/${e.id}/fallido`, { body: { accion: 'retirar', recibio } }); abrirEmpresa(id, 'sede'); } catch (x) { alert(x.message); } } }) : null,
+                e.estado === 'en_sede' ? el('button', { class: 'boton borde chico', type: 'button', style: 'margin-left:.4rem', text: 'Llevarlo otra vez', onclick: async () => {
+                  if (!confirm(`¿La clienta pidió que se lo lleven otra vez? Sale un envío nuevo desde la sede y se cargan a la tienda la nueva entrega y la bodega${e.cargo ? ` (${dinero(e.cargo)})` : ''}.`)) return;
+                  try { await api(`/api/admin/envios/${e.id}/fallido`, { body: { accion: 'reenviar' } }); abrirEmpresa(id, 'sede'); } catch (x) { alert(x.message); } } }) : null)))) : el('p', { class: 'pista', text: 'No hay paquetes de esta empresa en la sede.' }));
         } else if (pestana === 'historial') {
           poner(cuerpo, r.historial.length ? tabla(['Guía', 'Fecha', 'Recibe', 'Zona', 'Piloto', 'Estado'], r.historial.map(e => el('tr', { class: 'clic', onclick: () => abrirEnvio(e.id) },
             el('td', { text: e.guia }), el('td', { text: fecha(e.creado) }), el('td', { text: e.destino_nombre }), el('td', { text: e.destino_zona }), el('td', { text: e.piloto ? e.piloto.split(' ')[0] : '—' }), el('td', {}, chipEstado(e.estado))))) : el('p', { class: 'pista', text: 'Todavía no hay envíos.' }));
@@ -2160,8 +2163,9 @@ null))));
       // Si la tienda cobró envíos a sus clientes, se le descuentan; si da negativo, la tienda le debe a Vaelo
       poner($('caja-cobros'), ...(c.cobros.length ? c.cobros.map(x => el('div', { class: 'caja-fila' },
         el('div', {}, el('strong', { text: x.empresa_nombre || x.nombre }), el('br'),
-          sub(`${x.envios} envíos${x.telefono ? ' · ' + x.telefono : ''}${x.comision > 0 ? ' · ya descontada la comisión de ' + dinero(x.comision) : ''}${x.envios_tienda > 0 ? ' · ya descontados ' + dinero(x.envios_tienda) + ' de envíos que la tienda cobró' : ''}`)),
-        el('strong', { class: 'caja-monto', text: x.monto >= 0 ? dinero(x.monto) : 'Debe ' + dinero(-x.monto) }),
+          sub(`${x.envios} envíos${x.telefono ? ' · ' + x.telefono : ''}${x.comision > 0 ? ' · ya descontada la comisión de ' + dinero(x.comision) : ''}${x.envios_tienda > 0 ? ' · ya descontados ' + dinero(x.envios_tienda) + ' de envíos que la tienda cobró' : ''}${x.cargos > 0 ? ' · cargos: ' + x.cargos_detalle.map(c => `${c.nombre.toLowerCase()} (${c.n}) ${dinero(c.monto)}`).join(', ') : ''}`),
+          x.monto < 0 ? el('br') : null, x.monto < 0 ? el('small', { class: 'error-texto', text: x.debe_cargos ? 'No puede enviar carpetas hasta que pague.' : 'Tiene unos días para pagar antes de que se le bloquee.' }) : null),
+        el('strong', { class: 'caja-monto' + (x.monto < 0 ? ' error-texto' : ''), text: x.monto >= 0 ? dinero(x.monto) : 'Debe ' + dinero(-x.monto) }),
         el('button', { class: 'boton chico', type: 'button', text: x.monto >= 0 ? 'Marcar pagado' : 'La tienda ya pagó', onclick: async () => {
           if (!confirm(x.monto >= 0 ? `¿Ya le entregaste ${dinero(x.monto)} a ${x.empresa_nombre || x.nombre}?` : `¿${x.empresa_nombre || x.nombre} ya pagó su saldo de ${dinero(-x.monto)}?`)) return;
           try { await api('/api/admin/caja/pagar-cobros', { body: { cliente_id: x.id } }); cargarCaja(); } catch (e) { mostrarMensaje($('msg-caja'), e.message); }
