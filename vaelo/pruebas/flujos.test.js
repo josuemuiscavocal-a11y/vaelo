@@ -1799,3 +1799,8 @@ test('envío suelto con cobro: el piloto le lleva el dinero a quien mandó el pa
   assert.equal(fila(r2.j.id).devolver_cobro, 0);
   await ana('POST', `/api/envios/${r2.j.id}/cancelar`, {});
 });
+
+test('avisos de error: una pantalla rota se puede reportar sin cuenta y sin romper nada', async () => {
+  const r = await cliente()('POST', '/api/error-pantalla', { mensaje: 'x is not a function', detalle: 'at prueba', pagina: '/tienda' });
+  assert.equal(r.status, 200); assert.equal(r.j.ok, true);
+});

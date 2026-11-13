@@ -828,3 +828,22 @@ async function escanearQR(alLeer, { continuo = false, titulo = 'Escanea el códi
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
 }
+
+// ---------- Si una pantalla se rompe, Vaelo le avisa a la administración por correo ----------
+(() => {
+  let enviados = 0;
+  const reportar = (mensaje, detalle) => {
+    if (enviados >= 3 || !mensaje || /^Script error\.?$/i.test(mensaje) || /extension:\/\//.test(detalle || '')) return;
+    enviados++;
+    try {
+      fetch('/api/error-pantalla', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, keepalive: true,
+        body: JSON.stringify({ mensaje: String(mensaje).slice(0, 400), detalle: String(detalle || '').slice(0, 1500), pagina: location.pathname }) }).catch(() => {});
+    } catch { /* sin conexión */ }
+  };
+  window.addEventListener('error', (ev) => reportar(ev.message, ev.error && ev.error.stack ? ev.error.stack : `${ev.filename || ''}:${ev.lineno || ''}`));
+  window.addEventListener('unhandledrejection', (ev) => {
+    const r = ev.reason;
+    if (r && (r.status || r.name === 'AbortError')) return;   // errores normales de la API (ya se le muestran al usuario) o cancelaciones
+    reportar(r && r.message ? r.message : String(r), r && r.stack);
+  });
+})();

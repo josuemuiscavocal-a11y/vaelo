@@ -656,6 +656,14 @@ ruta('POST', '/api/logout', ({ req }) => {
   return { _headers: { 'Set-Cookie': cookieSesion(req, '', 0, req._cookieArea || areaDePeticion(req) || 'cliente') }, ok: true };
 });
 
+// Errores de pantalla: el navegador del cliente avisa cuando una página se rompe
+ruta('POST', '/api/error-pantalla', ({ req, body }) => {
+  if (limitar(ipDe(req), 'error-pantalla', 20, 3600_000)) return { ok: true };
+  let quien = ''; try { const u = usuarioActual(req); if (u) quien = `${u.nombre || ''} (${u.email || u.rol || ''})`; } catch { /* sin sesión */ }
+  const err = { message: texto(body.mensaje, 400), stack: texto(body.detalle, 1500) };
+  avisarError('pantalla de ' + (texto(body.pagina, 80) || 'Vaelo'), err, { ruta: texto(body.pagina, 120), 'Usuario': quien, 'Navegador': texto(req.headers['user-agent'], 160) });
+  return { ok: true };
+});
 ruta('GET', '/api/yo', ({ req }) => {
   const u = usuarioActual(req);
   if (!u) return { usuario: null };
@@ -1097,6 +1105,37 @@ const CORREO_DE = process.env.VAELO_CORREO_REMITENTE || 'Vaelo Mensajería <no-r
 const URL_SITIO = (process.env.VAELO_URL || 'https://vaelomensajeria.com').replace(/\/+$/, '');
 const correoActivo = () => !!CORREO_API;
 
+// ---------- Avisos de errores por correo ----------
+// Cuando algo falla en el servidor (o en la pantalla de un cliente), Vaelo manda un correo a la administración.
+// El mismo error se avisa una vez por hora y como máximo 30 correos al día, para no llenar la bandeja.
+const CORREO_ALERTAS = process.env.VAELO_CORREO_ALERTAS || 'vaelomensajeria@gmail.com';
+const alertasEnviadas = new Map();
+let alertasDia = { dia: '', n: 0 };
+function avisarError(origen, err, contexto = {}) {
+  try {
+    const mensaje = String(err && err.message || err || 'Error desconocido').slice(0, 500);
+    const pila = String(err && err.stack || '').split('\n').slice(0, 8).join('\n');
+    const firma = origen + '|' + mensaje.slice(0, 120) + '|' + (contexto.ruta || '');
+    const ahora = Date.now(), hoy = new Date(ahora - 6 * 3600e3).toISOString().slice(0, 10);
+    if (alertasDia.dia !== hoy) alertasDia = { dia: hoy, n: 0 };
+    if ((alertasEnviadas.get(firma) || 0) > ahora - 3600e3 || alertasDia.n >= 30) return;
+    alertasEnviadas.set(firma, ahora); alertasDia.n++;
+    if (alertasEnviadas.size > 500) for (const [k, t] of alertasEnviadas) if (t < ahora - 3600e3) alertasEnviadas.delete(k);
+    const filas = Object.entries({ 'Dónde': origen, 'Error': mensaje, ...contexto, 'Hora (Guatemala)': new Date(ahora - 6 * 3600e3).toISOString().replace('T', ' ').slice(0, 19) })
+      .filter(([, v]) => v != null && v !== '');
+    const plano = filas.map(([k, v]) => `${k}: ${v}`).join('\n') + (pila ? `\n\nDetalle técnico:\n${pila}` : '');
+    const html = `<div style="font-family:Arial,sans-serif;max-width:620px;color:#15171c"><h2 style="margin:0 0 12px">Algo falló en Vaelo</h2>
+      <table style="border-collapse:collapse">${filas.map(([k, v]) => `<tr><td style="padding:4px 10px 4px 0;color:#5a6072;vertical-align:top">${escaparHtml(k)}</td><td style="padding:4px 0"><strong>${escaparHtml(String(v))}</strong></td></tr>`).join('')}</table>
+      ${pila ? `<p style="color:#5a6072;margin-top:16px">Detalle técnico (para arreglarlo):</p><pre style="background:#f1f2f6;padding:10px;border-radius:8px;white-space:pre-wrap;font-size:12px">${escaparHtml(pila)}</pre>` : ''}
+      <p style="color:#5a6072;font-size:13px">Copia este correo en tu chat con Claude para arreglarlo.</p></div>`;
+    enviarCorreo(CORREO_ALERTAS, `Vaelo: falló algo en ${origen}`, html, plano).catch(() => {});
+  } catch { /* el aviso nunca debe tumbar el servidor */ }
+}
+process.on('unhandledRejection', (err) => { console.error('Promesa sin atrapar:', err); avisarError('servidor (tarea en segundo plano)', err); });
+process.on('uncaughtException', (err) => {
+  console.error('Error sin atrapar:', err); avisarError('servidor (se reinició)', err);
+  setTimeout(() => process.exit(1), 2000);   // el servicio vuelve a arrancar solo
+});
 async function enviarCorreo(para, asunto, html, plano) {
   if (!CORREO_API) { console.log(`[correo sin configurar] Para ${para}: ${asunto}\n${plano}`); return false; }
   try {
@@ -6500,6 +6539,8 @@ const servidor = http.createServer(async (req, res) => {
   } catch (err) {
     if (err instanceof ErrorHttp) return json(res, err.status, { error: err.message });
     console.error(new Date().toISOString(), req.method, pathname, err);
+    let quien = ''; try { const u = usuarioActual(req); if (u) quien = `${u.nombre || ''} (${u.email || u.rol || ''})`; } catch { /* sin sesión */ }
+    avisarError('página o sistema', err, { ruta: `${req.method} ${pathname}`, 'Usuario': quien });
     json(res, 500, { error: 'Ocurrió un error en el servidor. Inténtalo de nuevo en un momento.' });
   }
 });
