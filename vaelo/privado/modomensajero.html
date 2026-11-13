@@ -627,6 +627,23 @@
       return d.en_vivo ? el('span', { class: 'receptor-estado si', text: 'Ubicación en vivo' }) : el('span', { class: 'receptor-estado no', text: 'Ubicación en pausa' });
     }
     // Persona con su foto, teléfono, referencias y los botones para ir a ella
+    // Residencial o edificio: cómo entrar y el QR para mostrar en la garita
+    function cajaAccesoPiloto(e) {
+      if (!e.acceso_tipo && !e.acceso_qr) return null;
+      const tipos = { residencial: 'Residencial con garita', edificio: 'Edificio o apartamentos' };
+      return el('div', { class: 'acceso-piloto' },
+        el('strong', { text: (tipos[e.acceso_tipo] || 'Lugar con garita') + (e.acceso_qr ? ': piden QR para entrar' : '') }),
+        e.acceso_nota ? el('p', { text: e.acceso_nota }) : null,
+        e.acceso_qr ? el('button', { class: 'boton cinta chico', type: 'button', text: 'Mostrar QR en la garita', onclick: () => {
+          const dlg = el('dialog', { class: 'qr-garita' });
+          const cerrar = () => { dlg.close(); dlg.remove(); };
+          poner(dlg, el('img', { src: `/api/piloto/envios/${e.id}/acceso-qr?v=${encodeURIComponent(e.acceso_qr)}`, alt: 'QR para entrar' }),
+            el('p', { text: 'Sube el brillo de la pantalla y acércalo al lector de la garita.' }),
+            el('button', { class: 'boton', type: 'button', text: 'Cerrar', onclick: cerrar }));
+          dlg.addEventListener('cancel', (ev) => { ev.preventDefault(); cerrar(); });
+          document.body.append(dlg); dlg.showModal();
+        } }) : el('p', { class: 'pista', text: 'Si en la garita piden QR, llama a quien recibe antes de llegar.' }));
+    }
     function bloquePersona(e, { titulo, nombre, telefono, foto, chip, zona, referencias, punto, accion, extra }) {
       return el('div', { class: 'persona-piloto' },
         el('div', { class: 'cliente-piloto' },
@@ -916,7 +933,7 @@
         chip: e.pedido_id ? el('span', { class: 'receptor-estado si', text: 'Lugar marcado en el mapa' }) : r.omitido && !r.confirmado ? el('span', { class: 'receptor-estado si', text: 'Autorizado por Vaelo' }) : chipUbicacion(r),
         // Mientras no ha recogido, solo se muestran los botones para ir a recoger: los de entregar aparecen después
         zona: e.destino_zona, referencias: [e.destino_direccion, e.horario ? HORARIO_TXT[e.horario] : '', recoger ? 'Cuando recojas el paquete te mostramos cómo llegar aquí.' : ''].filter(Boolean).join(' · '), punto: 'destino', accion: recoger ? null : 'Dejar el pedido',
-        extra: e.pedido_id ? botonWhatsCliente(e) : r.omitido && !r.confirmado ? el('div', { class: 'pista', text: 'Sin ubicación: ' + r.omitido }) : null });
+        extra: [cajaAccesoPiloto(e), e.pedido_id ? botonWhatsCliente(e) : r.omitido && !r.confirmado ? el('div', { class: 'pista', text: 'Sin ubicación: ' + r.omitido }) : null] });
       return el('article', { class: 'entrega-tarjeta' + (!cerrado ? ' activa' : '') },
         el('div', { class: 'cab' }, el('strong', { class: 'guia' }, e.guia, e.flete ? el('span', { class: 'etiqueta-flete', style: 'margin-left:.4rem', text: 'Flete' }) : null), chipEstado(e.estado)),
         e.flete ? null : cajaBusca(e, recoger ? 'recoger' : 'entregar'),

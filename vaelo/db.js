@@ -721,3 +721,6 @@ module.exports = { db, DB_PATH, DATA_DIR };
 
 // Envío suelto a departamento: espera el precio de la oficina
 agregarColumnas('envios', [['precio_revisar', 'INTEGER NOT NULL DEFAULT 0'], ['precio_revisado_en', 'TEXT'], ['km_capital', 'REAL']]);
+// Cómo entrar a residenciales y edificios: tipo, indicaciones y QR de garita
+agregarColumnas('envios', [['acceso_tipo', 'TEXT'], ['acceso_nota', 'TEXT'], ['acceso_qr', 'TEXT']]);
+agregarColumnas('pedidos_empresa', [['acceso_tipo', 'TEXT'], ['acceso_nota', 'TEXT'], ['acceso_qr', 'TEXT']]);

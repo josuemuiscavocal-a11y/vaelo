@@ -238,6 +238,8 @@
         chipEstado(r.estado),
         r.codigo_entrega ? cajaCodigoSeguro(r) : null,
         tarjeta,
+        r.rol !== 'entrega' ? cajaAcceso({ acceso: r.acceso, whatsapp: r.whatsapp_vaelo, guia: r.guia_envio,
+          guardar: async (body) => { const x = await api(API + '/acceso', { body }); r.acceso = x.acceso; return x; } }) : null,
         cajaMapa, el('p', { class: 'pista', id: 'nota-mapa' }),
         datosEnvio(r),
         el('p', { class: 'pista', text: `Deja esta página abierta hasta que ${r.rol === 'entrega' ? 'el piloto recoja' : 'recibas'} el paquete. Si la cierras, vuelve a abrir el mismo enlace para seguir compartiendo tu ubicación.` }),

@@ -278,6 +278,12 @@ const AYUDA = {
     ['Elige cómo llegan los paquetes', 'El piloto los recoge en tu lugar, o tú los llevas a la sede de Vaelo.'],
     ['Confirma', 'Listo: Vaelo prepara la ruta. Aquí ves cuántos van en camino y cuántos se entregaron.'],
   ], nota: 'Después de enviarla ya no puedes agregar pedidos a esa carpeta: crea otra para el siguiente día.' },
+  residencial: { titulo: 'Clientes en residenciales o edificios', pasos: [
+    ['Mándale su enlace como siempre', 'Tu cliente abre el enlace de su pedido.'],
+    ['Abre «¿Vives en residencial o edificio?»', 'Ahí escribe cómo entrar (casa, torre, a quién preguntar en garita).'],
+    ['Si piden QR, lo sube ahí mismo', 'Una foto o captura del QR. Si le llega después, vuelve a abrir el mismo enlace y lo sube, aunque el piloto ya vaya en camino.'],
+    ['El piloto lo ve en su celular', 'Muestra el QR en la garita. Si no hay QR, llama a tu cliente antes de llegar.'],
+  ], nota: 'Si a tu cliente se le complica, que mande el QR al WhatsApp de Vaelo (3773 1793) con el código de su pedido y la oficina se lo pasa al piloto.' },
   cobros: { titulo: 'Cómo funciona tu dinero', pasos: [
     ['El piloto cobra al entregar', 'Cobra tu producto (lo que pusiste en cada pedido) y el envío a tu cliente.'],
     ['Vaelo te entrega lo cobrado', 'Lo ves aquí en «Dinero de tus productos que Vaelo te tiene».'],
@@ -661,7 +667,7 @@ async function vistaCarpeta(caja, yo, id) {
       r.minorista ? null : el('div', { class: 'navegar' }, el('label', { class: 'boton borde chico doc-boton' }, 'Subir Excel', archivo), el('a', { class: 'boton borde chico', href: '/api/empresa/pedidos/plantilla', text: 'Plantilla' }))) : null,
     msgArchivo,
     el('section', { class: 'bloque' },
-      el('div', { class: 'cab-bloque' }, el('div', {}, el('h2', { text: `Envíos (${pedidos.length})` }), abierta ? botonAyuda('enlace', '¿Cómo mando el enlace?') : null),
+      el('div', { class: 'cab-bloque' }, el('div', {}, el('h2', { text: `Envíos (${pedidos.length})` }), abierta ? [botonAyuda('enlace', '¿Cómo mando el enlace?'), ' ', botonAyuda('residencial', '¿Clientes en residencial?')] : null),
         el('div', { class: 'navegar' },
           abierta && pedidos.some((p) => ['pendiente', 'esperando'].includes(p.estado)) ? el('button', { class: 'boton cinta chico', type: 'button', text: `Recordar a los que faltan (${pedidos.filter((p) => ['pendiente', 'esperando'].includes(p.estado)).length})`,
             onclick: () => dialogoRecordar(pedidos.filter((p) => ['pendiente', 'esperando'].includes(p.estado)), r, c) }) : null,

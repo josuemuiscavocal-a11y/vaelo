@@ -2052,8 +2052,8 @@ ruta('POST', '/api/admin/clientes/:id/activo', ({ req, params, body }) => {
 // =====================================================================
 
 // ---------- Entrega segura: foto y firma ----------
-const ARCHIVOS_ENTREGA = { foto: 'foto_entrega', firma: 'firma_entrega', receptor: 'receptor_foto', origen: 'origen_foto', fallo: 'fallo_foto', comprobante: 'comprobante', paquete: 'foto_paquete' };
-const FALTA_ARCHIVO = { foto: 'Toma la foto del paquete.', firma: 'La firma no es válida.', receptor: 'La foto no es válida. Elige otra.', origen: 'La foto no es válida. Elige otra.', fallo: 'La foto no es válida.', comprobante: 'Sube una foto o PDF del comprobante.', paquete: 'La foto del paquete no es válida. Toma otra.' };
+const ARCHIVOS_ENTREGA = { acceso: 'acceso_qr', foto: 'foto_entrega', firma: 'firma_entrega', receptor: 'receptor_foto', origen: 'origen_foto', fallo: 'fallo_foto', comprobante: 'comprobante', paquete: 'foto_paquete' };
+const FALTA_ARCHIVO = { acceso: 'Sube una foto o captura del QR o código de entrada.', foto: 'Toma la foto del paquete.', firma: 'La firma no es válida.', receptor: 'La foto no es válida. Elige otra.', origen: 'La foto no es válida. Elige otra.', fallo: 'La foto no es válida.', comprobante: 'Sube una foto o PDF del comprobante.', paquete: 'La foto del paquete no es válida. Toma otra.' };
 function guardarArchivoEnvio(envioId, tipo, dataUrl) {
   const col = ARCHIVOS_ENTREGA[tipo];
   const m = /^data:(?:image\/(jpeg|png|webp)|application\/(pdf));base64,([A-Za-z0-9+/=]+)$/.exec(String(dataUrl || ''));
@@ -2591,6 +2591,38 @@ ruta('DELETE', '/api/direcciones/:id', ({ req, params }) => {
 // esas ubicaciones hasta que se recoge y se entrega. La foto es opcional. Mientras falte alguna ubicación, el paquete
 // no se recoge (el panel puede autorizar una excepción, y se puede apagar en Tarifas y ajustes).
 const ESTADOS_ACTIVOS = ['pendiente', 'recogido', 'en_camino'];
+// ---------- Entrar a residenciales y edificios: tipo de acceso, indicaciones y QR de garita ----------
+const TIPOS_ACCESO = { residencial: 'Residencial o condominio con garita', edificio: 'Edificio o apartamentos' };
+function leerAcceso(body) {
+  const tipo = body.tipo ? (TIPOS_ACCESO[body.tipo] ? body.tipo : falla(400, 'Elige si es residencial o edificio.')) : null;
+  return { acceso_tipo: tipo, acceso_nota: tipo ? texto(body.nota, 300) || null : null };
+}
+const accesoSalida = (x, url) => (x.acceso_tipo || x.acceso_qr ? { tipo: x.acceso_tipo, tipo_texto: TIPOS_ACCESO[x.acceso_tipo] || 'Lugar con garita', nota: x.acceso_nota, tiene_qr: !!x.acceso_qr, qr_url: x.acceso_qr && url ? url : null } : null);
+// Guarda una imagen de QR (de un pedido o de un envío) y devuelve el nombre del archivo
+function guardarImagenQr(prefijo, dataUrl) {
+  const m = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(String(dataUrl || ''));
+  if (!m) falla(400, 'Sube una foto o captura del QR.');
+  const datos = Buffer.from(m[2], 'base64');
+  if (datos.length < 300 || datos.length > 700_000) falla(400, 'La imagen está vacía o pesa más de 700 KB.');
+  const ext = m[1] === 'jpeg' ? 'jpg' : m[1];
+  if (!FIRMAS[ext].every((b, i) => datos[i] === b)) falla(400, 'La imagen no es válida.');
+  fs.mkdirSync(DOCS_DIR, { recursive: true, mode: 0o750 });
+  const nombre = `${prefijo}-qr-${crypto.randomBytes(6).toString('hex')}.${ext}`;
+  fs.writeFileSync(path.join(DOCS_DIR, nombre), datos, { mode: 0o640 });
+  return nombre;
+}
+function guardarAccesoEnvio(e, body) {
+  const a = leerAcceso(body);
+  let qr = e.acceso_qr;
+  if (body.qr) qr = guardarImagenQr('envio-' + e.id, body.qr);
+  if (body.quitar_qr === true) qr = null;
+  db.prepare('UPDATE envios SET acceso_tipo = ?, acceso_nota = ?, acceso_qr = ? WHERE id = ?').run(a.acceso_tipo, a.acceso_nota, qr, e.id);
+  if (e.acceso_qr && e.acceso_qr !== qr && !db.prepare('SELECT 1 FROM pedidos_empresa WHERE acceso_qr = ?').get(e.acceso_qr)) fs.rm(path.join(DOCS_DIR, path.basename(e.acceso_qr)), () => {});
+  if (body.qr && !e.acceso_qr) db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(e.id, e.estado, 'Se agregó el QR o código para entrar al residencial');
+  if (e.mensajero_id && e.asignacion === 'aceptado' && (body.qr || a.acceso_nota !== e.acceso_nota))
+    avisar(e.mensajero_id, { titulo: 'Indicaciones para entrar', cuerpo: `${e.guia}: ${body.qr ? 'ya tienes el QR para la garita.' : a.acceso_nota || 'cambiaron las indicaciones.'}`, url: '/modomensajero', etiqueta: 'acceso-' + e.id });
+  return db.prepare('SELECT * FROM envios WHERE id = ?').get(e.id);
+}
 const nuevoTokenReceptor = () => crypto.randomBytes(16).toString('hex');
 const exigeReceptor = () => getAjustes().exigir_receptor !== '0';
 const origenListo = (e) => e.origen_quien === 'tercero' ? !!e.origen_confirmado_en : e.origen_lat != null;
@@ -2746,6 +2778,7 @@ ruta('GET', '/api/recibe/:token', ({ params }) => {
     confirmado, omitido: !!e.receptor_omitido, exigido: exigeReceptor(),
     // El código solo lo ve quien recibe y cuando ya confirmó: lo da al piloto al tener el paquete en la mano
     codigo_entrega: !entrega && activo && (confirmado || e.receptor_omitido) ? e.codigo_entrega : null,
+    acceso: entrega ? null : accesoSalida(e, null), whatsapp_vaelo: digitos(getAjustes().whatsapp_pagos || '50237731793'), guia_envio: e.guia,
     piloto, recibio: entrega ? null : e.recibio, entregado_en: entrega ? null : e.entregado_en,
     puede_calificar: !entrega && e.estado === 'entregado' && !!e.mensajero_id && !e.calif_receptor, calificacion: entrega ? null : e.calif_receptor || null,
     piloto_nombre: !entrega && e.estado === 'entregado' && e.mensajero_id ? (db.prepare('SELECT nombre FROM usuarios WHERE id = ?').get(e.mensajero_id)?.nombre || '').split(' ')[0] : null,
@@ -2811,6 +2844,27 @@ ruta('POST', '/api/yo/ubicacion', async ({ req, body }) => {
 });
 
 // Piloto: fotos de quien entrega y de quien recibe (solo mientras lleva el envío)
+ruta('POST', '/api/recibe/:token/acceso', ({ req, params, body }) => {
+  if (limitar(ipDe(req), 'recibe-acceso', 20, 3600_000)) falla(429, 'Demasiados intentos. Espera un momento.');
+  const e = envioPorToken(params.token);
+  if (e._rol === 'entrega' || !ESTADOS_ACTIVOS.includes(e.estado)) falla(400, 'Este envío ya no está en curso.');
+  const f = guardarAccesoEnvio(e, body);
+  return { ok: true, acceso: accesoSalida(f, null) };
+}, { limite: 1_200_000 });
+ruta('GET', '/api/piloto/envios/:id/acceso-qr', ({ req, res, params }) => {
+  const p = requierePiloto(req);
+  const e = db.prepare("SELECT * FROM envios WHERE id = ? AND mensajero_id = ? AND asignacion = 'aceptado' AND estado IN ('pendiente','recogido','en_camino')").get(Number(params.id), p.id);
+  if (!e) falla(404, 'No hay QR.');
+  return enviarArchivoEnvio(res, e, 'acceso');
+});
+// La oficina sube el QR que el cliente mandó por WhatsApp
+ruta('POST', '/api/admin/envios/:id/acceso', ({ req, body, params }) => {
+  requiereStaff(req);
+  const e = db.prepare('SELECT * FROM envios WHERE id = ?').get(Number(params.id)) || falla(404, 'No encontramos ese envío.');
+  if (!ESTADOS_ACTIVOS.includes(e.estado)) falla(400, 'Este envío ya no está en curso.');
+  const f = guardarAccesoEnvio(e, { tipo: body.tipo || e.acceso_tipo || 'residencial', nota: body.nota !== undefined ? body.nota : e.acceso_nota, qr: body.qr });
+  return { ok: true, acceso: accesoSalida(f, null) };
+}, { limite: 1_200_000 });
 ruta('GET', '/api/piloto/envios/:id/foto-receptor', ({ req, res, params }) => {
   const p = requierePiloto(req);
   const e = db.prepare("SELECT * FROM envios WHERE id = ? AND mensajero_id = ? AND asignacion = 'aceptado' AND estado IN ('pendiente','recogido','en_camino')").get(Number(params.id), p.id);
@@ -5269,7 +5323,7 @@ function pedidoPorToken(token) {
 ruta('GET', '/api/pedido/:token', ({ params }) => {
   const p = pedidoPorToken(params.token);
   const aj = getAjustes();
-  const out = { codigo: p.codigo, empresa: nombreEmpresa(p.usuario_id), descripcion: p.descripcion, tamano: TAMANOS[p.tamano]?.nombre, cliente_nombre: p.cliente_nombre,
+  const out = { acceso: accesoSalida(p, null), whatsapp_vaelo: digitos(getAjustes().whatsapp_pagos || '50237731793'), codigo: p.codigo, empresa: nombreEmpresa(p.usuario_id), descripcion: p.descripcion, tamano: TAMANOS[p.tamano]?.nombre, cliente_nombre: p.cliente_nombre,
     estado: estadoPedido(p), dia: p.dia, horario: p.horario, direccion: p.direccion, zona: p.zona, lat: p.lat, lng: p.lng, referencias: p.referencias,
     recibe_nombre: p.recibe_nombre || p.cliente_nombre, recibe_telefono: p.recibe_telefono || p.cliente_telefono, ubicacion_manual: !!p.ubicacion_manual, metodo_pago: p.metodo_pago, cobro: Number(p.cobro) || 0, envio_pagado: !!p.envio_pagado,
     editable: ['pendiente', 'confirmado', 'vencido', 'no_puede'].includes(p.estado) && !p.lote_id, en_lote: !!p.lote_id,
@@ -5289,6 +5343,26 @@ ruta('GET', '/api/pedido/:token', ({ params }) => {
   }
   return out;
 });
+// Quien recibe un pedido de tienda dice cómo entrar (residencial, edificio) y sube el QR de la garita.
+// Se puede hacer aunque el pedido ya vaya en camino: muchas veces el QR llega el mismo día.
+ruta('POST', '/api/pedido/:token/acceso', ({ req, params, body }) => {
+  const p = pedidoPorToken(params.token);
+  if (limitar(ipDe(req), 'pedido-acceso', 20, 3600_000)) falla(429, 'Demasiados intentos. Espera unos minutos.');
+  if (p.estado === 'cancelado') falla(400, 'Este pedido fue cancelado.');
+  const e = p.envio_id ? db.prepare('SELECT * FROM envios WHERE id = ?').get(p.envio_id) : null;
+  if (e && !ESTADOS_ACTIVOS.includes(e.estado)) falla(400, 'Tu pedido ya fue entregado.');
+  const a = leerAcceso(body);
+  let qr = p.acceso_qr;
+  if (body.qr) qr = guardarImagenQr('pedido-' + p.id, body.qr);
+  if (body.quitar_qr === true) qr = null;
+  db.prepare("UPDATE pedidos_empresa SET acceso_tipo = ?, acceso_nota = ?, acceso_qr = ?, actualizado = datetime('now') WHERE id = ?").run(a.acceso_tipo, a.acceso_nota, qr, p.id);
+  if (e) {
+    db.prepare('UPDATE envios SET acceso_qr = ? WHERE id = ?').run(qr, e.id);
+    guardarAccesoEnvio({ ...e, acceso_qr: qr }, { tipo: a.acceso_tipo, nota: a.acceso_nota });
+    if (body.qr && e.mensajero_id && e.asignacion === 'aceptado') avisar(e.mensajero_id, { titulo: 'Indicaciones para entrar', cuerpo: `${e.guia}: ya tienes el QR para la garita.`, url: '/modomensajero', etiqueta: 'acceso-' + e.id });
+  }
+  return { ok: true, acceso: accesoSalida({ acceso_tipo: a.acceso_tipo, acceso_nota: a.acceso_nota, acceso_qr: qr }, null) };
+}, { limite: 1_200_000 });
 ruta('POST', '/api/pedido/:token/precio', ({ params, body }) => {
   const ped = pedidoPorToken(params.token);
   const c = coordenada(body.lat, body.lng);
@@ -5721,7 +5795,7 @@ ruta('POST', '/api/admin/lotes-empresa/:id/confirmar', ({ req, params, body }) =
           p.foto, p.id, l.id, grupo ? i + 1 : null, p.tamano, p.horario, grupo, pagaEmpresa && metodoEmpresa === 'efectivo' ? precioTotal : null,
           piloto ? piloto.id : null, piloto ? 'por_aceptar' : null, piloto ? 'oficina' : null, p.lat, p.lng);
         const id = Number(res.lastInsertRowid);
-        db.prepare('UPDATE envios SET codigo_corto = ?, marcado = ?, comision_cobro = ?, ganancia_acordada = ?, tarifa_foco = ? WHERE id = ?').run(codigoCortoPedido(p), marcadoValido(l.marcado), comisionCobro(condTienda, p.cobro), acordada, enFoco ? 1 : 0, id);
+        db.prepare('UPDATE envios SET codigo_corto = ?, marcado = ?, comision_cobro = ?, ganancia_acordada = ?, tarifa_foco = ?, acceso_tipo = ?, acceso_nota = ?, acceso_qr = ? WHERE id = ?').run(codigoCortoPedido(p), marcadoValido(l.marcado), comisionCobro(condTienda, p.cobro), acordada, enFoco ? 1 : 0, p.acceso_tipo || null, p.acceso_nota || null, p.acceso_qr || null, id);
         db.prepare("UPDATE pedidos_empresa SET estado = 'enviado', envio_id = ?, actualizado = datetime('now') WHERE id = ?").run(id, p.id);
         db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(id, 'pendiente', `Pedido de ${emp.empresa_nombre || emp.nombre}${grupo ? `, parada ${i + 1} de ${ordenados.length}` : ''}${piloto ? `. Asignado a ${piloto.nombre.split(' ')[0]}, esperando que acepte` : ''} (${quien.nombre.split(' ')[0]})`);
         creados.push({ id, ruta: ri, piloto });

@@ -1470,6 +1470,24 @@ null))));
               e.destino_lat != null ? el('a', { href: `https://www.google.com/maps/dir/${e.origen_lat},${e.origen_lng}/${e.destino_lat},${e.destino_lng}`, target: '_blank', rel: 'noopener', text: 'Ver la ruta en el mapa para calcular' }) : null,
               el('div', { class: 'depto-accion' }, caja, b, wa, nota));
           })() : null,
+          enCurso ? (() => {
+            // Residencial: la oficina sube el QR que el cliente mandó por WhatsApp
+            const tipos = { residencial: 'Residencial o condominio con garita', edificio: 'Edificio o apartamentos' };
+            const entrada = el('input', { type: 'file', accept: 'image/*', 'aria-label': 'Subir QR de entrada' });
+            const nota = el('small', { class: 'pista' });
+            entrada.addEventListener('change', async () => {
+              const f = entrada.files[0]; if (!f) return;
+              nota.textContent = 'Subiendo…';
+              try { const qr = await prepararArchivo(f, false); await api(`/api/admin/envios/${e.id}/acceso`, { body: { qr } }); nota.textContent = 'QR guardado: el piloto ya lo ve.'; nota.className = 'pista ok'; }
+              catch (err) { nota.textContent = err.message; nota.className = 'pista error'; }
+              entrada.value = '';
+            });
+            return el('div', { class: 'acceso-piloto' },
+              el('strong', { text: e.acceso_tipo || e.acceso_qr ? (tipos[e.acceso_tipo] || 'Lugar con garita') + (e.acceso_qr ? ' · con QR' : '') : 'Entrada a residencial (si el cliente manda QR por WhatsApp)' }),
+              e.acceso_nota ? el('p', { text: e.acceso_nota }) : null,
+              e.acceso_qr ? el('a', { href: `/api/admin/envios/${e.id}/entrega/acceso`, target: '_blank', rel: 'noopener', text: 'Ver QR' }) : null,
+              el('div', {}, el('label', { class: 'boton borde chico doc-boton' }, e.acceso_qr ? 'Cambiar QR' : 'Subir QR que mandó por WhatsApp', entrada), ' ', nota));
+          })() : null,
           e.flete_enlace ? enlaceFlete(e.guia, e.flete_enlace, e.flete_telefono) : null,
           msg,
           bloqueReclamosPanel(e, guardar),

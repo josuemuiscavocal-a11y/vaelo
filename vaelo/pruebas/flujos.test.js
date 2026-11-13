@@ -1875,3 +1875,42 @@ test('pedido de tienda con la ubicación lejos de la capital pasa solo a departa
   assert.equal(r.status, 201, JSON.stringify(r.j));
   assert.equal(r.j.pedido.zona, 'Departamento (fuera de la capital)'); assert.ok(r.j.pedido.precio_por_calcular);
 });
+
+test('residenciales: quien recibe dice cómo entrar y sube el QR (aunque ya vaya en camino) y el piloto lo ve', async () => {
+  const { t } = await tiendaLista('resi@prueba.com', 'Lab Resi');
+  const hoy = new Date(Date.now() - 6 * 3600_000).toISOString().slice(0, 10);
+  const c = (await t('POST', '/api/empresa/carpetas', { dia: hoy })).j.carpeta.id;
+  const ids = [];
+  for (let i = 0; i < 3; i++) ids.push((await t('POST', `/api/empresa/carpetas/${c}/pedidos`, { descripcion: 'Muestras ' + i, tamano: 'pequeno', cliente_nombre: 'Clínica ' + i, cliente_telefono: '5599400' + i, foto: FOTO, llenar: true,
+    dia: hoy, horario: 'cualquiera', direccion: 'Casa ' + i, zona: 'Zona 1', lat: 14.633 + i * 0.002, lng: -90.52, recibe_nombre: 'Clínica ' + i, recibe_telefono: '5599400' + i, metodo_pago: 'efectivo' })).j.pedido.id);
+  const tok = db.prepare('SELECT token FROM pedidos_empresa WHERE id = ?').get(ids[0]).token;
+  const recibe = cliente();
+  const a = await recibe('POST', `/api/pedido/${tok}/acceso`, { tipo: 'residencial', nota: 'Garita: casa 24, preguntar por Ana' });
+  assert.equal(a.status, 200, JSON.stringify(a.j)); assert.equal(a.j.acceso.tiene_qr, false);
+  assert.equal((await recibe('GET', '/api/pedido/' + tok)).j.acceso.nota, 'Garita: casa 24, preguntar por Ana');
+  const env = await t('POST', `/api/empresa/carpetas/${c}/enviar`, { modo: 'una_moto', recogida: 'sede' });
+  await admin('POST', `/api/admin/lotes-empresa/${env.j.lote}/recibido`, {});
+  const calc = await admin('POST', `/api/admin/lotes-empresa/${env.j.lote}/calcular`, { modo: 'una_moto', motos: 1 });
+  assert.equal((await admin('POST', `/api/admin/lotes-empresa/${env.j.lote}/confirmar`, { modo: 'una_moto', rutas: calc.j.rutas.map((x) => ({ pedidos: x.pedidos, piloto_id: null })) })).status, 200);
+  const envio = db.prepare('SELECT * FROM envios WHERE pedido_id = ?').get(ids[0]);
+  assert.equal(envio.acceso_tipo, 'residencial'); assert.match(envio.acceso_nota, /casa 24/);
+  db.prepare("UPDATE envios SET mensajero_id = ?, asignacion = 'aceptado' WHERE lote_empresa_id = ?").run(pilotoId, env.j.lote);
+  // El QR llega tarde: lo sube con el mismo enlace y el piloto ya lo puede mostrar
+  const q = await recibe('POST', `/api/pedido/${tok}/acceso`, { tipo: 'residencial', nota: 'Garita: casa 24, preguntar por Ana', qr: FOTO });
+  assert.equal(q.status, 200, JSON.stringify(q.j)); assert.equal(q.j.acceso.tiene_qr, true);
+  const lista = (await piloto('GET', '/api/piloto/envios')).j.envios;
+  const mio = lista.find((x) => x.id === envio.id);
+  assert.ok(mio && mio.acceso_tipo === 'residencial' && mio.acceso_qr, 'el piloto ve cómo entrar');
+  const img = await fetch(BASE + `/api/piloto/envios/${envio.id}/acceso-qr`, { headers: {} });
+  assert.notEqual(img.status, 200, 'sin sesión de piloto no se ve el QR');
+  // Envío suelto: quien recibe lo sube en su enlace, y la oficina puede subir el que llegó por WhatsApp
+  const r = await ana('POST', '/api/envios', { vehiculo_id: 1, peso: 2, origen_zona: 'Zona 1', destino_zona: 'Zona 16', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng,
+    destino_nombre: 'Luis', destino_telefono: '55554444', destino_direccion: 'x', metodo_pago: 'efectivo', foto_paquete: FOTO });
+  const tk = r.j.enlace_receptor.split('/').pop();
+  assert.equal((await cliente()('POST', `/api/recibe/${tk}/acceso`, { tipo: 'edificio', nota: 'Torre B, apto 302' })).status, 200);
+  assert.equal((await cliente()('GET', `/api/recibe/${tk}`)).j.acceso.tipo, 'edificio');
+  assert.equal((await admin('POST', `/api/admin/envios/${r.j.id}/acceso`, { qr: FOTO })).status, 200);
+  assert.ok(fila(r.j.id).acceso_qr); assert.equal(fila(r.j.id).acceso_nota, 'Torre B, apto 302');
+  assert.equal((await cliente()('POST', `/api/recibe/${tk}/acceso`, { tipo: 'castillo' })).status, 400);
+  await ana('POST', `/api/envios/${r.j.id}/cancelar`, {});
+});

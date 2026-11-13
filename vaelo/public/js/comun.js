@@ -847,3 +847,46 @@ if ('serviceWorker' in navigator) {
     reportar(r && r.message ? r.message : String(r), r && r.stack);
   });
 })();
+
+// ---------- Cómo entrar: residencial o edificio con garita (quien recibe) ----------
+// Opcional y escondido: solo lo abre quien vive en un lugar donde piden QR o código para entrar.
+function cajaAcceso({ acceso, guardar, whatsapp, guia }) {
+  const a = acceso || {};
+  let qr = null;
+  const tipo = el('select', { 'aria-label': 'Tipo de lugar' },
+    el('option', { value: 'residencial', text: 'Residencial o condominio con garita' }),
+    el('option', { value: 'edificio', text: 'Edificio o apartamentos' }));
+  if (a.tipo) tipo.value = a.tipo;
+  const nota = el('textarea', { maxlength: 300, rows: 3, placeholder: 'Ej. Decir en garita que va a casa 24, preguntar por Ana. Torre B, apartamento 302.' });
+  nota.value = a.nota || '';
+  const estadoQr = el('small', { class: 'doc-estado', text: a.tiene_qr ? 'Ya subiste el QR. Si te mandan uno nuevo, súbelo otra vez.' : '' });
+  const entrada = el('input', { type: 'file', accept: 'image/*', 'aria-label': 'Subir el QR o código de entrada' });
+  const etiqueta = el('label', { class: 'boton borde doc-boton' }, a.tiene_qr ? 'Cambiar QR' : 'Subir QR o captura', entrada);
+  entrada.addEventListener('change', async () => {
+    const f = entrada.files[0]; if (!f) return;
+    estadoQr.className = 'doc-estado'; estadoQr.textContent = 'Preparando…';
+    try { qr = await prepararArchivo(f, false); estadoQr.textContent = 'QR listo. Toca «Guardar».'; }
+    catch (e) { estadoQr.className = 'doc-estado error'; estadoQr.textContent = e.message; }
+    entrada.value = '';
+  });
+  const msg = el('div', { class: 'mensaje', role: 'alert' });
+  const boton = el('button', { class: 'boton', type: 'button', text: 'Guardar', onclick: async () => {
+    boton.disabled = true;
+    try {
+      const r = await guardar({ tipo: tipo.value, nota: nota.value, ...(qr ? { qr } : {}) });
+      qr = null;
+      mostrarMensaje(msg, r.acceso && r.acceso.tiene_qr ? 'Listo: el piloto verá tus indicaciones y el QR para mostrarlo en la garita.' : 'Listo: el piloto verá tus indicaciones.', 'exito');
+      if (r.acceso && r.acceso.tiene_qr) { estadoQr.className = 'doc-estado'; estadoQr.textContent = 'Ya subiste el QR. Si te mandan uno nuevo, súbelo otra vez.'; etiqueta.firstChild.textContent = 'Cambiar QR'; }
+    } catch (e) { mostrarMensaje(msg, e.message); }
+    boton.disabled = false;
+  } });
+  const wa = whatsapp ? el('a', { href: `https://wa.me/${whatsapp}?text=${encodeURIComponent(`Hola Vaelo, les mando el QR para entrar al residencial. Envío ${guia || ''}.`)}`, target: '_blank', rel: 'noopener', text: 'mándalo al WhatsApp de Vaelo' }) : null;
+  return el('details', { class: 'recibe-mas acceso-lugar', open: !!(a.tipo || a.tiene_qr) },
+    el('summary', { text: '¿Vives en residencial o edificio donde piden QR o código para entrar?' }),
+    el('p', { class: 'pista', text: 'Dinos cómo entrar para que el piloto no se quede en la garita. Si te piden QR, súbelo aquí: el piloto lo verá en su celular para mostrarlo.' }),
+    el('div', { class: 'campo' }, el('label', { text: 'Tipo de lugar' }), tipo),
+    el('div', { class: 'campo' }, el('label', { text: 'Indicaciones para entrar' }), nota),
+    el('div', { class: 'campo' }, el('label', { text: 'QR o código de entrada (opcional)' }), etiqueta, el('br'), estadoQr),
+    wa ? el('p', { class: 'pista' }, 'Si el QR te llega más tarde, vuelve a abrir este enlace y súbelo, o ', wa, '.') : null,
+    msg, boton);
+}

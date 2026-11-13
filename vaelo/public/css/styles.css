@@ -1806,3 +1806,10 @@ fieldset { min-width: 0; } .recientes { max-width: 100%; min-width: 0; }
 .depto-accion small { flex-basis: 100%; }
 
 .nota-depto { margin-top: 1rem; background: rgba(255,255,255,.12); border-radius: var(--radio); padding: .7rem .9rem; }
+
+/* Residenciales y edificios: cómo entrar */
+.acceso-lugar textarea { width: 100%; }
+.acceso-piloto { background: #eef3ff; border-left: 4px solid var(--azul-hondo); border-radius: var(--radio); padding: .6rem .8rem; margin: .5rem 0; display: grid; gap: .35rem; }
+.acceso-piloto p { margin: 0; }
+.qr-garita { border: 0; border-radius: var(--radio); padding: 1rem; max-width: 95vw; text-align: center; }
+.qr-garita img { width: min(85vw, 420px); height: auto; background: #fff; display: block; margin: 0 auto .6rem; }

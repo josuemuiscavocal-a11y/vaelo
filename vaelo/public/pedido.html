@@ -55,7 +55,17 @@
         } }));
     }
 
+    // Si está escribiendo cómo entrar (residencial), no se recarga la pantalla para no borrarle lo que escribe
+    let accesoEditando = false;
+    function accesoPedido() {
+      const caja = cajaAcceso({ acceso: datos.acceso, whatsapp: datos.whatsapp_vaelo, guia: datos.envio ? datos.envio.guia : datos.codigo,
+        guardar: async (body) => { const r = await api('/api/pedido/' + token + '/acceso', { body }); datos.acceso = r.acceso; accesoEditando = false; return r; } });
+      caja.addEventListener('input', () => { accesoEditando = true; });
+      caja.addEventListener('change', () => { accesoEditando = true; });
+      return caja;
+    }
     async function cargar() {
+      if (accesoEditando) { clearTimeout(reloj); reloj = setTimeout(cargar, 30_000); return; }
       try { datos = await api('/api/pedido/' + token); } catch (e) { poner(app, el('div', { class: 'mensaje error', text: e.message })); return; }
       pintar();
     }
@@ -75,6 +85,7 @@
       poner(app, cabecera(),
         d.en_lote ? el('div', { class: 'mensaje aviso', text: `${d.empresa} ya entregó tu pedido a Vaelo. Sale el ${diaTexto(d.dia)}; te avisamos cuando el piloto vaya en camino.` }) : null,
         resumen(),
+        accesoPedido(),
         bloqueAvisar(),
         d.editable ? el('button', { class: 'boton borde', type: 'button', text: d.dia_fijo ? 'Cambiar horario o lugar' : 'Cambiar día, horario o lugar', onclick: () => { editando = true; pintar(); } }) : null);
       reloj = setTimeout(cargar, 60_000);
@@ -220,6 +231,7 @@
           el('p', { text: 'Dáselo al piloto cuando te entregue. No lo compartas antes.' })) : null,
         enCurso && ((e.precio && e.metodo_pago === 'recibe') || datos.cobro > 0) ? el('p', { class: 'pedido-cobro' }, 'Pagas ', el('strong', { text: dinero((e.metodo_pago === 'recibe' ? e.precio || 0 : 0) + (datos.cobro || 0)) }),
           ' en efectivo al recibir', datos.cobro > 0 ? ` (${dinero(datos.cobro)} de tu producto${e.metodo_pago === 'recibe' && e.precio ? ` + ${dinero(e.precio)} del envío` : ''})` : '', '.') : null,
+        enCurso ? accesoPedido() : null,
         enCurso ? bloqueAvisar() : null,
         resumen(),
         el('a', { class: 'boton borde', href: '/rastreo?guia=' + e.guia, text: 'Ver en el mapa' }));
