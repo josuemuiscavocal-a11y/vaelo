@@ -44,7 +44,7 @@
       boton.disabled = true;
       try {
         const r = await api('/api/login', { body: { email: form.email.value, password: form.password.value } });
-        location.href = r.rol === 'mensajero' ? '/modomensajero' : (volverValido || '/mi-cuenta');
+        location.href = r.rol === 'mensajero' ? '/modomensajero' : (volverValido || (r.tipo_cuenta === 'minorista' ? '/tienda' : '/mi-cuenta'));
       } catch (e) {
         mostrarMensaje(document.getElementById('msg'), e.message);
         boton.disabled = false;

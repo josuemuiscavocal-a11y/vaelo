@@ -631,7 +631,7 @@ ruta('POST', '/api/login', ({ req, body }) => {
   if (!u || u.rol !== 'cliente' || !verificarPassword(password, u.password_hash)) { control.fallo(); falla(401, 'Correo o contraseña incorrectos.'); }
   control.exito();
   if (!u.activo) falla(403, 'Esta cuenta está desactivada. Comunícate con Vaelo.');
-  return { _headers: { 'Set-Cookie': crearSesion(req, u.id) }, ok: true, rol: u.rol };
+  return { _headers: { 'Set-Cookie': crearSesion(req, u.id) }, ok: true, rol: u.rol, tipo_cuenta: u.tipo_cuenta || 'personal' };
 });
 
 // Acceso de administración (solo desde /familiatecun y solo con el correo permitido)
@@ -6351,7 +6351,7 @@ const TIPOS = {
 };
 const PAGINAS = { '/': 'index.html', '/entrar': 'entrar.html', '/registro': 'registro.html', '/mi-cuenta': 'cliente.html', '/tienda': 'cliente.html',
   '/enviar': 'cliente.html', '/rastreo': 'rastreo.html', '/recuperar': 'recuperar.html', '/terminos': 'terminos.html', '/privacidad': 'privacidad.html',
-  '/empresas': 'empresas.html', '/influencers': 'influencers.html', '/politica-pilotos': 'politica-pilotos.html', '/politicas-empresas': 'politicas-empresas.html' };
+  '/empresas': 'empresas.html', '/tiendas': 'tiendas.html', '/influencers': 'influencers.html', '/politica-pilotos': 'politica-pilotos.html', '/politicas-empresas': 'politicas-empresas.html' };
 // Páginas que piden cuenta: si no has iniciado sesión, el servidor te manda a entrar antes de mostrar nada
 const PIDEN_CUENTA = { '/enviar': ['cliente', 'admin'], '/mi-cuenta': ['cliente', 'admin'], '/tienda': ['cliente', 'admin'] };
 

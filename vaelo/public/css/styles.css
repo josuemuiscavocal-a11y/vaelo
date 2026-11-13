@@ -1723,3 +1723,30 @@ fieldset { min-width: 0; } .recientes { max-width: 100%; min-width: 0; }
 /* Opción secundaria que no se recomienda (ej. marcar el lugar a mano) */
 .enlace-discreto { display: block; margin-top: .7rem; padding: 0; border: 0; background: none; color: var(--suave); font: inherit; font-size: .85rem; text-decoration: underline; cursor: pointer; }
 .enlace-discreto:hover { color: var(--tinta); }
+
+/* ---------- Ayuda "¿Cómo hago esto?" y guía de pasos de la tienda ---------- */
+.boton-ayuda { display: inline-flex; align-items: center; gap: .4rem; margin: .35rem 0; padding: .3rem .7rem .3rem .35rem; border: 1.5px solid var(--linea); border-radius: 999px;
+  background: #fff; color: var(--azul); font: inherit; font-size: .88rem; font-weight: 600; cursor: pointer; }
+.boton-ayuda:hover { border-color: var(--azul); }
+.boton-ayuda-signo { display: grid; place-items: center; width: 1.35rem; height: 1.35rem; border-radius: 50%; background: var(--azul); color: #fff; font-size: .8rem; font-weight: 800; }
+.ayuda-pasos { list-style: none; counter-reset: a; margin: 0 0 1rem; padding: 0; display: grid; gap: .55rem; }
+.ayuda-pasos li { counter-increment: a; display: grid; grid-template-columns: 2rem 1fr; column-gap: .7rem; }
+.ayuda-pasos li::before { content: counter(a); grid-row: span 2; width: 2rem; height: 2rem; border-radius: 50%; background: var(--cinta); color: var(--azul-hondo); display: grid; place-items: center; font-weight: 800; }
+.ayuda-pasos span { color: var(--suave); font-size: .93rem; }
+.ayuda-nota { background: var(--gris); border-radius: var(--radio); padding: .7rem .9rem; font-size: .93rem; }
+.guia-tienda { background: #fff; border: 2px solid var(--azul); border-radius: var(--radio); padding: 1.1rem 1.2rem; margin-bottom: 1rem; }
+.guia-tienda.lista { border: 1.5px solid var(--linea); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; padding: .7rem 1rem; color: var(--suave); }
+.guia-cabeza { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: .6rem; }
+.guia-cabeza strong { color: var(--azul-hondo); font-size: 1.05rem; }
+.guia-pasos { list-style: none; margin: 0 0 .9rem; padding: 0; display: grid; gap: .45rem; }
+.guia-pasos li { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; color: var(--suave); }
+.guia-texto { flex: 1 1 11rem; min-width: 0; }
+.guia-num { display: grid; place-items: center; width: 1.9rem; height: 1.9rem; border-radius: 50%; border: 1.5px solid var(--linea); font-weight: 800; flex: none; }
+.guia-pasos li.hecho .guia-num { background: var(--ok); border-color: var(--ok); color: #fff; }
+.guia-pasos li.hecho .guia-texto { text-decoration: line-through; }
+.guia-pasos li.actual { color: var(--tinta); font-weight: 700; }
+.guia-pasos li.actual .guia-num { background: var(--cinta); border-color: var(--cinta); color: var(--azul-hondo); }
+.guia-pasos li .boton-ayuda { margin: 0; }
+.recogida-empresa.resaltar { outline: 3px solid var(--azul); outline-offset: 3px; }
+.insignia-gris { margin-left: .35rem; padding: .05rem .45rem; border-radius: 999px; background: var(--gris); color: var(--suave); font-size: .75rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+#clientes-sub { margin-bottom: .8rem; }

@@ -168,7 +168,7 @@ async function pintarBarra() {
   const nav = el('nav', { class: 'nav', 'aria-label': 'Principal' });
   if (!usuario || usuario.rol !== 'mensajero') nav.append(el('a', { href: '/rastreo', text: 'Rastrear' }));
   const negocio = usuario && usuario.rol === 'cliente' && ['empresa', 'minorista'].includes(usuario.tipo_cuenta);
-  if (!usuario || (usuario.rol === 'cliente' && !negocio)) nav.append(el('a', { href: '/empresas', text: 'Empresas' }));
+  if (!usuario || (usuario.rol === 'cliente' && !negocio)) nav.append(el('a', { href: '/tiendas', text: 'Tiendas' }), el('a', { href: '/empresas', text: 'Empresas' }));
   if (usuario) {
     if (usuario.rol === 'admin') nav.append(el('a', { href: '/familiatecun', text: 'Panel' }));
     if (usuario.rol === 'mensajero') nav.append(el('a', { href: '/modomensajero', text: 'Mis entregas' }));

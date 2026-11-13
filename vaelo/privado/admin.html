@@ -123,6 +123,11 @@
 
       <section id="panel-clientes" role="tabpanel" aria-labelledby="tab-clientes" hidden>
         <div id="aviso-correo"></div>
+        <div class="pestanas" role="tablist" id="clientes-sub">
+          <button type="button" role="tab" aria-selected="true" data-tipo="personal">Clientes normales <span class="insignia-gris" id="n-personal"></span></button>
+          <button type="button" role="tab" aria-selected="false" data-tipo="minorista">Tiendas minoristas <span class="insignia-gris" id="n-minorista"></span></button>
+          <button type="button" role="tab" aria-selected="false" data-tipo="empresa">Empresas <span class="insignia-gris" id="n-empresa"></span></button>
+        </div>
         <div class="buscador-clientes"><input id="buscar-cliente" type="search" placeholder="Buscar por nombre, correo o teléfono" aria-label="Buscar cliente"></div>
         <div class="tabla-envoltura">
           <table>
@@ -1735,11 +1740,21 @@ null))));
       $('insignia-clientes').hidden = true;
       pintarClientes();
     }
+    // Clientes separados por tipo de cuenta: normales, tiendas minoristas y empresas
+    let tipoClientes = 'personal';
+    document.querySelectorAll('#clientes-sub button').forEach((b) => b.addEventListener('click', () => {
+      tipoClientes = b.dataset.tipo;
+      document.querySelectorAll('#clientes-sub button').forEach((x) => x.setAttribute('aria-selected', String(x === b)));
+      pintarClientes();
+    }));
+    const tipoDe = (c) => c.tipo_cuenta === 'minorista' || c.tipo_cuenta === 'empresa' ? c.tipo_cuenta : 'personal';
     function pintarClientes() {
+      for (const t of ['personal', 'minorista', 'empresa']) $('n-' + t).textContent = String(clientes.filter((c) => tipoDe(c) === t).length);
       const q = ($('buscar-cliente').value || '').trim().toLowerCase(), qd = q.replace(/\D/g, '');
-      const lista = !q ? clientes : clientes.filter(c => [c.nombre, c.email, c.empresa_nombre].some(v => (v || '').toLowerCase().includes(q)) || (qd.length >= 3 && (c.telefono || '').replace(/\D/g, '').includes(qd)));
+      const delTipo = clientes.filter((c) => tipoDe(c) === tipoClientes);
+      const lista = !q ? delTipo : delTipo.filter(c => [c.nombre, c.email, c.empresa_nombre].some(v => (v || '').toLowerCase().includes(q)) || (qd.length >= 3 && (c.telefono || '').replace(/\D/g, '').includes(qd)));
       if (q && !lista.length) { poner($('tabla-clientes'), el('tr', {}, el('td', { colspan: 9, style: 'text-align:center;color:var(--suave);padding:2rem', text: 'Ningún cliente coincide con la búsqueda.' }))); return; }
-      if (!clientes.length) { poner($('tabla-clientes'), el('tr', {}, el('td', { colspan: 9, style: 'text-align:center;color:var(--suave);padding:2rem', text: 'Todavía no hay clientes.' }))); return; }
+      if (!delTipo.length) { poner($('tabla-clientes'), el('tr', {}, el('td', { colspan: 9, style: 'text-align:center;color:var(--suave);padding:2rem', text: { personal: 'Todavía no hay clientes normales.', minorista: 'Todavía no hay tiendas minoristas.', empresa: 'Todavía no hay empresas.' }[tipoClientes] }))); return; }
       poner($('tabla-clientes'), ...lista.map(c => {
         return el('tr', { class: 'clic', tabindex: 0, onclick: () => revisarCliente(c.id), onkeydown: (ev) => { if (ev.key === 'Enter') revisarCliente(c.id); } },
           el('td', {}, el('strong', { text: c.nombre }), c.tipo_cuenta === 'empresa' || c.tipo_cuenta === 'minorista' ? [el('br'), el('span', { class: 'etiqueta-azul', text: c.empresa_nombre || 'Empresa' })] : ''),

@@ -239,6 +239,91 @@ const SERVICIOS_TIENDA = [
   ['campana', 'Avisos a tu cliente', 'Le avisamos cuando su pedido sale y cuando es la próxima entrega, con su código para recibir.'],
   ['dinero', 'Cobro al entregar', 'El piloto cobra tu producto y el envío. Vaelo te entrega tu dinero y lo ves aquí.'],
 ];
+
+// ---------- Ayuda: "¿Cómo hago esto?" en cada parte de la tienda ----------
+const AYUDA = {
+  inicio: { titulo: 'Cómo funciona tu tienda', pasos: [
+    ['Di dónde recogemos', 'Una sola vez: el lugar donde el piloto pasa por tus paquetes (tu casa o tu local).'],
+    ['Crea una carpeta del día', 'Una carpeta es un día de entrega. Ahí apuntas todos los pedidos de ese día.'],
+    ['Apunta cada pedido', 'Nombre y WhatsApp de tu cliente, qué compró, cuánto cobrar y la foto del paquete.'],
+    ['Manda el enlace a cada cliente', 'Al guardar el pedido se abre WhatsApp con su enlace. Tu cliente elige su horario y comparte su ubicación.'],
+    ['Envía la carpeta a Vaelo', 'Cuando tengas los confirmados que pide tu carpeta, toca «Enviar a Vaelo». Nosotros recogemos, entregamos y cobramos.'],
+  ], nota: 'Tú no tienes que pedirle la dirección a nadie: cada cliente la confirma en su enlace.' },
+  punto: { titulo: 'Cómo decirnos dónde recogemos', pasos: [
+    ['Busca el recuadro de recogida', 'Está en «Mi tienda», debajo de tus avisos.'],
+    ['Si estás ahí, toca «Usar mi ubicación en tiempo real»', 'Tu celular comparte dónde estás y queda guardado como el lugar de recogida.'],
+    ['Si los paquetes están en otro lugar, toca «Lo tengo en otro lugar»', 'Le mandas un enlace a la persona que está ahí y ella comparte su ubicación.'],
+  ], nota: 'Solo se hace una vez. Si te cambias de lugar, lo puedes cambiar cuando quieras.' },
+  carpetas: { titulo: 'Cómo crear una carpeta', pasos: [
+    ['Toca «Nueva carpeta»', 'Arriba a la derecha de «Tus carpetas de envíos».'],
+    ['Elige el día de entrega', 'Es el día en que quieres que tus clientes reciban. Puedes ponerle un nombre, ej. «Live del martes».'],
+    ['Ábrela y apunta tus pedidos', 'Toca la carpeta y luego «Añadir pedido» por cada cliente.'],
+  ], nota: 'Una carpeta por día. Si un día no juntas los pedidos que pide, puedes juntarla con otra carpeta.' },
+  pedido: { titulo: 'Cómo añadir un pedido', pasos: [
+    ['Toca «Añadir pedido»', 'Dentro de la carpeta del día.'],
+    ['Escribe qué es y su tamaño', 'Ej. «Blusa negra talla M», y elige si es pequeño, mediano o grande.'],
+    ['Pon el nombre y WhatsApp de tu cliente', 'A ese número le mandamos su enlace y los avisos de la entrega.'],
+    ['¿Cuánto cobra el piloto?', 'Lo que tu cliente te debe por el producto. Si ya te pagó, déjalo en 0.'],
+    ['Toma la foto del paquete', 'Ya empacado. Si algo pasa, con la foto lo comprobamos.'],
+    ['Guarda', 'Se abre WhatsApp con el enlace de tu cliente listo para mandar.'],
+  ] },
+  enlace: { titulo: 'Cómo mandar el enlace a tus clientes', pasos: [
+    ['Toca «Mandar enlace»', 'En el pedido de cada cliente. Se abre WhatsApp con el mensaje ya escrito.'],
+    ['Envía el mensaje', 'Tu cliente abre el enlace, elige su horario y comparte su ubicación en tiempo real.'],
+    ['Mira quién ya confirmó', 'El pedido cambia a «Confirmado». Si alguien no ha respondido, toca «Recordar a los que faltan».'],
+  ], nota: 'Si WhatsApp no abre, usa «Copiar enlace» en el menú del pedido (⋯) y pégalo en el chat.' },
+  enviar: { titulo: 'Cómo enviar tu carpeta a Vaelo', pasos: [
+    ['Junta los confirmados', 'El botón «Enviar a Vaelo» aparece cuando tienes los confirmados que pide tu carpeta.'],
+    ['Elige cómo repartimos', 'Una moto para todo, varias motos o pickup. Te marcamos cuál recomendamos.'],
+    ['Elige cómo llegan los paquetes', 'El piloto los recoge en tu lugar, o tú los llevas a la sede de Vaelo.'],
+    ['Confirma', 'Listo: Vaelo prepara la ruta. Aquí ves cuántos van en camino y cuántos se entregaron.'],
+  ], nota: 'Después de enviarla ya no puedes agregar pedidos a esa carpeta: crea otra para el siguiente día.' },
+  cobros: { titulo: 'Cómo funciona tu dinero', pasos: [
+    ['El piloto cobra al entregar', 'Cobra tu producto (lo que pusiste en cada pedido) y el envío a tu cliente.'],
+    ['Vaelo te entrega lo cobrado', 'Lo ves aquí en «Dinero de tus productos que Vaelo te tiene».'],
+    ['Si tu cliente te pagó el envío a ti', 'Márcalo en su pedido. Vaelo te lo descuenta de lo que te entrega.'],
+    ['Si te queda saldo por pagar', 'Págalo por transferencia y avísanos por WhatsApp. Hasta entonces no puedes enviar otra carpeta.'],
+  ] },
+};
+function verAyuda(k) {
+  const a = AYUDA[k]; if (!a) return;
+  const dlg = el('dialog', { class: 'aviso-descuentos ayuda-dialogo' });
+  const cerrar = () => { dlg.close(); dlg.remove(); };
+  poner(dlg, el('div', { class: 'dialogo' },
+    el('h2', { text: a.titulo }),
+    el('ol', { class: 'ayuda-pasos' }, a.pasos.map(([t, d]) => el('li', {}, el('strong', { text: t }), el('span', { text: d })))),
+    a.nota ? el('p', { class: 'ayuda-nota', text: a.nota }) : null,
+    el('p', { class: 'pista' }, '¿Sigues con dudas? ', el('a', { href: 'https://wa.me/50237731793?text=' + encodeURIComponent('Hola Vaelo, necesito ayuda con mi tienda: ' + a.titulo.toLowerCase()), target: '_blank', rel: 'noopener', text: 'Escríbenos por WhatsApp' })),
+    el('button', { class: 'boton', type: 'button', text: 'Entendido', onclick: cerrar })));
+  dlg.addEventListener('cancel', (ev) => { ev.preventDefault(); cerrar(); });
+  document.body.append(dlg); dlg.showModal();
+}
+const botonAyuda = (k, texto = '¿Cómo hago esto?') => el('button', { class: 'boton-ayuda', type: 'button', onclick: () => verAyuda(k) }, el('span', { class: 'boton-ayuda-signo', 'aria-hidden': 'true', text: '?' }), texto);
+// Guía de 4 pasos: marca en qué paso va la tienda y qué le toca hacer ahora
+function guiaTienda(r, acciones) {
+  const algunaConPedidos = r.abiertas.some((c) => c.total > 0);
+  const lista = r.abiertas.find((c) => c.confirmados >= c.minimo);
+  const pasos = [
+    { t: 'Di dónde recogemos', h: 'punto', hecho: !!r.punto },
+    { t: 'Crea tu carpeta y apunta tus pedidos', h: 'pedido', hecho: algunaConPedidos || !!r.enviadas.length },
+    { t: `Manda el enlace (mínimo ${r.minimo} confirmados)`, h: 'enlace', hecho: !!lista || (!!r.enviadas.length && !algunaConPedidos) },
+    { t: 'Envía la carpeta a Vaelo', h: 'enviar', hecho: !!r.enviadas.length && !algunaConPedidos },
+  ];
+  const actual = pasos.findIndex((p) => !p.hecho);
+  if (actual === -1) return el('div', { class: 'guia-tienda lista' }, el('span', { text: 'Ya sabes cómo funciona: crea una carpeta nueva para tus próximos envíos.' }), botonAyuda('inicio', 'Ver cómo funciona'));
+  const accion = [
+    { t: 'Decir dónde recogemos', f: acciones.punto },
+    { t: r.abiertas.length ? 'Abrir mi carpeta' : 'Crear mi primera carpeta', f: r.abiertas.length ? () => acciones.abrir(r.abiertas[0].id) : acciones.nueva },
+    { t: 'Abrir mi carpeta', f: () => acciones.abrir((r.abiertas.find((c) => c.total > 0) || r.abiertas[0]).id) },
+    { t: 'Enviar a Vaelo', f: () => acciones.abrir((lista || r.abiertas[0]).id) },
+  ][actual];
+  return el('section', { class: 'guia-tienda' },
+    el('div', { class: 'guia-cabeza' }, el('strong', { text: `Paso ${actual + 1} de 4` }), botonAyuda('inicio', 'Cómo funciona todo')),
+    el('ol', { class: 'guia-pasos' }, pasos.map((p, i) => el('li', { class: p.hecho ? 'hecho' : i === actual ? 'actual' : '' },
+      el('span', { class: 'guia-num', text: p.hecho ? '✓' : String(i + 1) }), el('span', { class: 'guia-texto', text: p.t }),
+      i === actual ? botonAyuda(p.h, '¿Cómo?') : null))),
+    accion && accion.f ? el('button', { class: 'boton cinta boton-grande', type: 'button', text: accion.t, onclick: accion.f }) : null);
+}
 function bloqueServicios(clave, primeraVez = true) {
   // Abierto la primera vez (antes de su primera carpeta); después queda como la tienda lo dejó
   let abierto = primeraVez; try { const g = localStorage.getItem('servicios-' + clave); if (g !== null) abierto = g === '1'; } catch { /* sin almacenamiento */ }
@@ -342,12 +427,17 @@ async function panelPedidos(caja, yo, abrirId) {
     el('div', {}, el('span', { text: 'Dinero de tus productos que Vaelo te tiene' }), el('strong', { text: dinero(cp.pendiente) }),
       el('small', { text: cp.pendiente > 0 ? `De ${cp.envios} entrega(s) ya cobrada(s)${cp.comision > 0 ? `, ya descontada la comisión de ${dinero(cp.comision)}` : ''}${cp.envios_tienda > 0 ? ` y ${dinero(cp.envios_tienda)} de envíos que tus clientes te pagaron a ti` : ''}${cp.cargos > 0 ? `; también se descuentan ${detalleCargos}` : ''}. Vaelo te lo entrega y aquí queda marcado.` : 'Estás al día: ya te entregamos todo.' })),
     cp.pagado_30 > 0 ? el('div', {}, el('span', { text: 'Ya te entregamos (30 días)' }), el('strong', { text: dinero(cp.pagado_30) }), cp.ultimo_pago ? el('small', { text: 'Último: ' + fecha(cp.ultimo_pago, false) }) : null) : null) : null;
-  poner(caja, bloqueRevision(r.condiciones), bloqueAppTiendas(), bloqueServicios(r.minorista ? 'minorista' : 'empresa', !(r.abiertas.length + r.enviadas.length)), cajaSaldo, cajaCobros, bloquePunto(r, () => panelPedidos(caja, yo)),
+  if (cajaSaldo) cajaSaldo.append(botonAyuda('cobros'));
+  if (cajaCobros) cajaCobros.append(botonAyuda('cobros'));
+  const bPunto = bloquePunto(r, () => panelPedidos(caja, yo));
+  const guia = guiaTienda(r, { punto: () => { bPunto.scrollIntoView({ behavior: 'smooth', block: 'center' }); bPunto.classList.add('resaltar'); setTimeout(() => bPunto.classList.remove('resaltar'), 2500); },
+    nueva: () => nueva.click(), abrir });
+  poner(caja, bloqueRevision(r.condiciones), guia, bloqueAppTiendas(), cajaSaldo, cajaCobros, bPunto,
     el('section', { class: 'bloque' },
-      el('div', { class: 'cab-bloque' }, el('div', {}, el('h2', { text: 'Tus carpetas de envíos' }), el('p', { class: 'pista', text: 'Una carpeta por día de entrega.' })), nueva),
+      el('div', { class: 'cab-bloque' }, el('div', {}, el('h2', { text: 'Tus carpetas de envíos' }), el('p', { class: 'pista', text: 'Una carpeta por día de entrega.' }), botonAyuda('carpetas')), nueva),
       r.abiertas.length ? el('div', { class: 'carpetas' }, r.abiertas.map(tarjeta)) : vacio),
     r.enviadas.length ? el('section', { class: 'bloque' }, el('h2', { text: 'Enviadas a Vaelo' }), el('div', { class: 'carpetas' }, r.enviadas.map(tarjeta))) : null,
-    bloqueCondiciones(r.condiciones));
+    bloqueCondiciones(r.condiciones), bloqueServicios(r.minorista ? 'minorista' : 'empresa', !(r.abiertas.length + r.enviadas.length)));
   // Cómo funcionan sus descuentos: la primera vez y cada vez que la oficina le cambia el plan
   if (r.condiciones && r.condiciones.estado === 'aprobada' && !r.condiciones.vista) avisoDescuentos(r.condiciones);
 }
@@ -557,19 +647,19 @@ async function vistaCarpeta(caja, yo, id) {
         el('button', { class: 'boton cinta boton-grande', type: 'button', text: c.sin_foto === 1 ? 'Tomar la foto que falta' : `Tomar las ${c.sin_foto} fotos que faltan`, onclick: () => {
           const b = caja.querySelector('[data-falta-foto]'); if (b) { b.scrollIntoView({ behavior: 'smooth', block: 'center' }); b.classList.add('resaltar'); setTimeout(() => b.classList.remove('resaltar'), 2500); }
         } }))
-      : listo ? el('button', { class: 'boton cinta boton-grande', type: 'button', text: 'Enviar a Vaelo', onclick: () => dialogoEnviar(c, r, recargar) })
-        : el('p', { class: 'pista', text: `Cuando ${c.minimo - c.confirmados === 1 ? 'falte 0' : 'tengas ' + c.minimo} confirmados aparece «Enviar a Vaelo».`.replace('falte 0', 'confirme uno más') }))
+      : listo ? el('div', {}, el('button', { class: 'boton cinta boton-grande', type: 'button', text: 'Enviar a Vaelo', onclick: () => dialogoEnviar(c, r, recargar) }), botonAyuda('enviar', '¿Cómo envío a Vaelo?'))
+        : el('div', {}, el('p', { class: 'pista', text: `Cuando ${c.minimo - c.confirmados === 1 ? 'falte 0' : 'tengas ' + c.minimo} confirmados aparece «Enviar a Vaelo».`.replace('falte 0', 'confirme uno más') }), botonAyuda('enlace', '¿Cómo hago que confirmen?')))
     : el('section', { class: 'bloque carpeta-estado' }, el('div', {},
       el('strong', { text: { nuevo: 'Vaelo la está preparando', en_ruta: 'En reparto', terminado: 'Terminada', cancelado: 'Cancelada' }[c.lote?.estado] || 'Enviada a Vaelo' }),
       c.lote ? el('small', { text: `${c.lote.modo_texto} · ${c.lote.entregados} de ${c.total} entregados${c.lote.en_camino ? ` · ${c.lote.en_camino} en camino` : ''}${c.lote.en_sede ? ` · ${c.lote.en_sede} en la sede de Vaelo` : ''}` }) : null,
       estadoFoco(c.foco, true)),
       r.minorista ? null : el('a', { class: 'boton borde chico', href: `/api/empresa/excel?dia=${c.dia}`, text: 'Excel del día' }));
   poner(caja, cabecera, estadoCaja, abierta && !r.punto ? bloquePunto(r, recargar) : null,
-    abierta ? el('div', { class: 'carpeta-acciones' }, anadir,
+    abierta ? el('div', { class: 'carpeta-acciones' }, anadir, botonAyuda('pedido', '¿Cómo añado un pedido?'),
       r.minorista ? null : el('div', { class: 'navegar' }, el('label', { class: 'boton borde chico doc-boton' }, 'Subir Excel', archivo), el('a', { class: 'boton borde chico', href: '/api/empresa/pedidos/plantilla', text: 'Plantilla' }))) : null,
     msgArchivo,
     el('section', { class: 'bloque' },
-      el('div', { class: 'cab-bloque' }, el('h2', { text: `Envíos (${pedidos.length})` }),
+      el('div', { class: 'cab-bloque' }, el('div', {}, el('h2', { text: `Envíos (${pedidos.length})` }), abierta ? botonAyuda('enlace', '¿Cómo mando el enlace?') : null),
         el('div', { class: 'navegar' },
           abierta && pedidos.some((p) => ['pendiente', 'esperando'].includes(p.estado)) ? el('button', { class: 'boton cinta chico', type: 'button', text: `Recordar a los que faltan (${pedidos.filter((p) => ['pendiente', 'esperando'].includes(p.estado)).length})`,
             onclick: () => dialogoRecordar(pedidos.filter((p) => ['pendiente', 'esperando'].includes(p.estado)), r, c) }) : null,

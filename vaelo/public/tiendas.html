@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Vaelo para tiendas · Vaelo</title>
+  <meta name="description" content="Para tiendas que venden en lives y redes en Guatemala: apuntas tus pedidos, cada clienta confirma con su ubicación y Vaelo entrega y cobra.">
+  <meta name="theme-color" content="#0e2463">
+  <link rel="icon" href="/img/favicon.png" type="image/png">
+  <link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/styles.css?v=20261111g">
+  <link rel="stylesheet" href="/css/suave.css?v=20261111a">
+</head>
+<body>
+  <header id="barra" class="barra"><div class="contenedor"><a href="/" class="marca"><img src="/img/logo-blanco.png" alt="Vaelo" width="139" height="40"></a></div></header>
+  <section class="empresas-hero">
+    <div class="contenedor">
+      <div>
+        <h1>Vaelo para tiendas de lives y redes</h1>
+        <p>Vendiste en tu live: tú apuntas los pedidos, Vaelo los recoge todos juntos, los entrega y cobra tu producto. Sin contrato y sin papeles.</p>
+      </div>
+      <ol class="empresas-pasos">
+        <li><strong>Crea tu cuenta de tienda</strong><span>Aquí abajo, en un solo formulario. Vaelo la revisa y te avisa.</span></li>
+        <li><strong>Apunta tus pedidos</strong><span>En una carpeta por día: nombre y WhatsApp de cada clienta y lo que compró.</span></li>
+        <li><strong>Tus clientas confirman</strong><span>Les mandas su enlace y eligen su horario y su ubicación.</span></li>
+        <li><strong>Envíala a Vaelo</strong><span>Pasamos por todo junto, entregamos y te damos lo cobrado.</span></li>
+      </ol>
+    </div>
+  </section>
+  <main class="area"><div class="contenedor" id="zona-tienda" style="max-width:980px"><p class="pista">Cargando…</p></div></main>
+  <footer class="pie-sitio"><div class="contenedor"><div>Vaelo Mensajería · Guatemala</div><div><a href="/">Inicio</a> · <a href="/empresas">Vaelo para empresas</a> · <a href="/terminos">Términos</a> · <a href="/privacidad">Privacidad</a></div></div></footer>
+  <script src="/js/comun.js?v=20261109c"></script>
+  <script src="/js/suave.js?v=20261111a"></script>
+  <script>
+    const zona = document.getElementById('zona-tienda');
+    let zonas = [];
+    const cargarZonas = api('/api/config').then((c) => { zonas = c.zonas || []; }).catch(() => {});
+    const campo = (id, t, attrs, ayuda) => el('div', { class: 'campo' }, el('label', { for: id }, t, ayuda ? el('span', { class: 'ayuda', text: ' ' + ayuda }) : null), el('input', { id, ...attrs }));
+    const selectZona = () => el('select', { id: 'tz' }, el('option', { value: '', text: 'Elige…' }), zonas.map((z) => el('option', { value: z, text: z })),
+      el('option', { value: 'Otra zona o municipio', text: 'Otra zona o en varias zonas' }));
+    const camposTienda = () => [
+      campo('tn', 'Nombre de tu tienda', { maxlength: 60, placeholder: 'Ej. Moda Luna GT' }),
+      campo('tr', 'Página de tu live o red social', { maxlength: 200, placeholder: 'Ej. instagram.com/modalunagt' }, 'Opcional'),
+      el('div', { class: 'fila' }, el('div', { class: 'campo' }, el('label', { for: 'tz', text: '¿En qué zona vendes más?' }), selectZona()),
+        campo('ts', '¿Cuántos pedidos mandas por semana?', { type: 'number', min: 0, max: 5000, inputmode: 'numeric', placeholder: 'Ej. 15' }))];
+    const datosTienda = (f) => ({ tienda: f.tn.value, tienda_red: f.tr.value, tienda_zona: f.tz.value, tienda_semana: f.ts.value });
+
+    // Sin sesión: crear la cuenta de tienda (cuenta y tienda en un solo paso) o entrar
+    function pintarAcceso() {
+      const msg = el('div', { class: 'mensaje', role: 'alert' }), msg2 = el('div', { class: 'mensaje', role: 'alert' });
+      const crear = el('form', { class: 'bloque', novalidate: true },
+        el('h2', { text: 'Crea tu cuenta de tienda' }),
+        el('p', { class: 'pista', text: 'Es gratis. Revisamos cada tienda para darte tu plan con descuentos; mientras tanto ya puedes apuntar tus pedidos.' }), msg,
+        el('h3', { text: 'Tu tienda' }), ...camposTienda(),
+        el('h3', { text: 'Tus datos para entrar' }),
+        el('div', { class: 'fila' }, campo('n', 'Tu nombre', { autocomplete: 'name', maxlength: 100 }), campo('t', 'Tu WhatsApp', { type: 'tel', autocomplete: 'tel', maxlength: 30, placeholder: '0000-0000' })),
+        el('div', { class: 'fila' }, campo('e', 'Correo', { type: 'email', autocomplete: 'email', maxlength: 150 }), campo('p', 'Contraseña', { type: 'password', autocomplete: 'new-password' }, 'Mínimo 8')),
+        el('label', { class: 'casilla' }, el('input', { type: 'checkbox', id: 'ok', style: 'width:auto' }), el('span', {}, 'Acepto los ', el('a', { href: '/terminos', target: '_blank', text: 'términos' }), ' y el ', el('a', { href: '/privacidad', target: '_blank', text: 'aviso de privacidad' }))),
+        el('button', { class: 'boton cinta boton-grande', type: 'submit', text: 'Crear mi tienda' }));
+      crear.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        if ((crear.tn.value || '').trim().length < 2) { mostrarMensaje(msg, 'Escribe el nombre de tu tienda.'); crear.tn.focus(); return; }
+        const b = crear.querySelector('button[type=submit]'); b.disabled = true;
+        try {
+          await api('/api/registro', { body: { nombre: crear.n.value, telefono: crear.t.value, email: crear.e.value, password: crear.p.value, acepto_terminos: crear.ok.checked, ...datosTienda(crear) } });
+          location.href = '/tienda';
+        } catch (e) { mostrarMensaje(msg, e.message); b.disabled = false; }
+      });
+      const entrar = el('form', { class: 'bloque', novalidate: true },
+        el('h2', { text: '¿Ya tienes cuenta?' }), el('p', { class: 'pista', text: 'Entra con tu correo. Si tu cuenta es normal, aquí mismo la conviertes en tienda.' }), msg2,
+        campo('le', 'Correo', { type: 'email', autocomplete: 'email' }), campo('lp', 'Contraseña', { type: 'password', autocomplete: 'current-password' }),
+        el('button', { class: 'boton borde', type: 'submit', text: 'Entrar' }), el('p', { class: 'pista' }, el('a', { href: '/recuperar', text: '¿Olvidaste tu contraseña?' })));
+      entrar.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        try { await api('/api/login', { body: { email: entrar.le.value, password: entrar.lp.value } }); iniciar(); } catch (e) { mostrarMensaje(msg2, e.message); }
+      });
+      zona.replaceChildren(el('div', { class: 'empresas-acceso' }, crear, entrar));
+    }
+
+    // Cuenta normal con sesión: convertirla en tienda sin crear otra cuenta
+    function pintarConvertir(u) {
+      const msg = el('div', { class: 'mensaje', role: 'alert' });
+      const f = el('form', { class: 'bloque', novalidate: true, style: 'max-width:640px;margin:auto' },
+        el('h2', { text: 'Convierte tu cuenta en tienda' }),
+        el('p', { class: 'pista', text: `Entraste como ${u.nombre}. Tu cuenta sigue siendo la misma (puedes seguir mandando paquetes sueltos), pero tendrás tu sección «Mi tienda» para mandar los pedidos de tus lives juntos.` }),
+        msg, ...camposTienda(), el('button', { class: 'boton cinta boton-grande', type: 'submit', text: 'Pedir mi tienda' }));
+      f.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const b = f.querySelector('button[type=submit]'); b.disabled = true;
+        try { await api('/api/cuenta/minorista', { body: datosTienda(f) }); location.href = '/tienda'; } catch (e) { mostrarMensaje(msg, e.message); b.disabled = false; }
+      });
+      zona.replaceChildren(f);
+    }
+
+    async function iniciar() {
+      await cargarZonas;
+      const u = await pintarBarra();
+      if (!u) return pintarAcceso();
+      if (u.rol !== 'cliente') { zona.replaceChildren(el('div', { class: 'mensaje aviso', text: 'Esta sección es para tiendas. Sal de tu sesión actual para crear la cuenta de tu tienda.' })); return; }
+      if (u.tipo_cuenta === 'minorista') { location.href = '/tienda'; return; }
+      if (u.tipo_cuenta === 'empresa') { location.href = '/mi-cuenta?empresa=1'; return; }
+      pintarConvertir(u);
+    }
+    iniciar();
+  </script>
+</body>
+</html>
