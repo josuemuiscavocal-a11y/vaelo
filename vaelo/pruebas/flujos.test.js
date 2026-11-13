@@ -17,7 +17,8 @@ const { servidor, hashPassword, asignacionAutomatica, decisionesVencidas, push, 
 let BASE;
 const ZONA1 = { lat: 14.6407, lng: -90.5133 };      // centro de la capital
 const CERCA = { lat: 14.6100, lng: -90.4700 };      // a unos 5 km
-const LEJOS = { lat: 14.3000, lng: -90.7800 };      // a más de 40 km
+const LEJOS = { lat: 14.3000, lng: -90.7800 };      // a más de 40 km (departamento)
+const AFUERA = { lat: 14.5300, lng: -90.6000 };     // a unos 14 km: municipio cercano
 
 // Cliente HTTP con cookie de sesión
 function cliente() {
@@ -91,7 +92,7 @@ test('si la entrega queda lejos se cobra la tarifa fija de fuera (Q45), sin km',
     destino_nombre: 'Luis', destino_telefono: '55554444', destino_direccion: 'x', metodo_pago: 'efectivo', foto_paquete: FOTO });
   assert.equal(r.j.precio, 35);
   const token = r.j.enlace_receptor.split('/').pop();
-  await cliente()('POST', `/api/recibe/${token}/confirmar`, { nombre: 'Luis Gómez', lat: LEJOS.lat, lng: LEJOS.lng });
+  await cliente()('POST', `/api/recibe/${token}/confirmar`, { nombre: 'Luis Gómez', lat: AFUERA.lat, lng: AFUERA.lng });
   const e = fila(r.j.id);
   assert.equal(e.tipo_tarifa, 'km', 'en la base, km = fuera de zonas');
   assert.equal(e.precio, 45, 'fuera de zonas: Q45 fijo');
@@ -1273,7 +1274,7 @@ test('planes de tiendas: precio, mínimo, cobro con comisión, volumen, excepcio
   assert.equal(cond.vencidas, true);
   // Si quien recibe cambia el lugar a otra zona, el precio se vuelve a calcular con las condiciones de hoy
   const tok = db.prepare('SELECT token FROM pedidos_empresa WHERE id = ?').get(p4.id).token;
-  const mov = await cliente()('POST', '/api/pedido/' + tok, { dia: hoy, horario: 'tarde', lat: 14.9, lng: -90.9, zona: 'Otra zona o municipio', direccion: 'Finca', recibe_nombre: 'Compradora', recibe_telefono: '55557209' });
+  const mov = await cliente()('POST', '/api/pedido/' + tok, { dia: hoy, horario: 'tarde', lat: 14.53, lng: -90.60, zona: 'Otra zona o municipio', direccion: 'Finca', recibe_nombre: 'Compradora', recibe_telefono: '55557209' });
   assert.equal(mov.status, 200, JSON.stringify(mov.j)); assert.equal(mov.j.precio.precio, 45);
 
   // Bodega: 2 días sin costo y después la tarifa general
@@ -1843,4 +1844,34 @@ test('envío a departamento: queda con precio por calcular, no se asigna hasta q
   assert.equal(e.precio, 120); assert.equal(e.destino_zona, 'Departamento (fuera de la capital)');
   assert.ok(e.ganancia_acordada > 0 && e.ganancia_acordada < 120, 'el piloto gana sobre el precio que se puso');
   assert.equal((await admin('POST', `/api/admin/pedidos/${ids[0]}/precio-departamento`, { precio: 130 })).status, 400, 'ya salió');
+});
+
+test('envío suelto a departamento: no sale con Q45, espera el precio de la oficina y se le manda al cliente', async () => {
+  const r = await ana('POST', '/api/envios', { vehiculo_id: 1, peso: 2, origen_zona: 'Zona 1', destino_zona: 'Otra zona o municipio', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng,
+    destino_nombre: 'Luis', destino_telefono: '55554444', destino_direccion: 'Escuintla', metodo_pago: 'efectivo', foto_paquete: FOTO });
+  const token = r.j.enlace_receptor.split('/').pop();
+  await cliente()('POST', `/api/recibe/${token}/confirmar`, { nombre: 'Luis Gómez', lat: LEJOS.lat, lng: LEJOS.lng });
+  assert.equal(fila(r.j.id).precio_revisar, 1);
+  const det = (await admin('GET', `/api/admin/envios/${r.j.id}`)).j.envio;
+  assert.equal(det.listo_para_piloto, false); assert.match(det.motivo_no_listo, /departamento/);
+  assert.equal((await admin('POST', `/api/admin/envios/${r.j.id}/asignar`, { mensajero_id: pilotoId })).status, 400, 'no se asigna sin precio');
+  const pr = await admin('POST', `/api/admin/envios/${r.j.id}/precio-departamento`, { precio: 150 });
+  assert.equal(pr.status, 200, JSON.stringify(pr.j)); assert.match(pr.j.mensaje, /Q150\.00/);
+  const e = fila(r.j.id);
+  assert.equal(e.precio, 150); assert.ok(e.ganancia_acordada > 0 && e.ganancia_acordada < 150);
+  // Si quien recibe se mueve, el precio de la oficina se respeta
+  await cliente()('POST', `/api/recibe/${token}/ubicacion`, { lat: LEJOS.lat + 0.05, lng: LEJOS.lng });
+  assert.equal(fila(r.j.id).precio, 150);
+  assert.equal((await admin('GET', `/api/admin/envios/${r.j.id}`)).j.envio.listo_para_piloto, true);
+  await ana('POST', `/api/envios/${r.j.id}/cancelar`, {});
+});
+
+test('pedido de tienda con la ubicación lejos de la capital pasa solo a departamento aunque elija otra zona', async () => {
+  const { t } = await tiendaLista('lejos@prueba.com', 'Tienda Lejos');
+  const hoy = new Date(Date.now() - 6 * 3600_000).toISOString().slice(0, 10);
+  const c = (await t('POST', '/api/empresa/carpetas', { dia: hoy })).j.carpeta.id;
+  const r = await t('POST', `/api/empresa/carpetas/${c}/pedidos`, { descripcion: 'Muestras', tamano: 'pequeno', cliente_nombre: 'Cli', cliente_telefono: '55993001', foto: FOTO, llenar: true,
+    dia: hoy, horario: 'cualquiera', direccion: 'Escuintla centro', zona: 'Otra zona o municipio', lat: LEJOS.lat, lng: LEJOS.lng, recibe_nombre: 'Cli', recibe_telefono: '55993001', metodo_pago: 'efectivo' });
+  assert.equal(r.status, 201, JSON.stringify(r.j));
+  assert.equal(r.j.pedido.zona, 'Departamento (fuera de la capital)'); assert.ok(r.j.pedido.precio_por_calcular);
 });

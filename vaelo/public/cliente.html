@@ -358,6 +358,7 @@
       let t = '', clase = '';
       if (e.estado === 'pendiente') {
         if (!e.receptor_listo) { t = `Falta que ${quien} abra su enlace y comparta su ubicación. Toca «Mandar enlace».`; clase = 'toca'; }
+        else if (e.precio_revisar && !e.precio_revisado_en) { t = 'Envío a departamento: Vaelo calcula el precio y te lo manda por WhatsApp. Después asignamos piloto.'; clase = 'toca'; }
         else if (e.programado_para) t = `Programado: el piloto pasa por el paquete el ${fechaProgramada(e.programado_para)}.`;
         else t = piloto ? `${piloto} va por tu paquete.` : 'Estamos buscando al piloto más cercano.';
       } else if (e.estado === 'recogido' || e.estado === 'en_camino') t = `Tu paquete va en camino a ${quien}${piloto ? ` con ${piloto}` : ''}.`;
@@ -390,7 +391,7 @@
           el('div', { class: 'detalle', text: (e.programado_para && e.estado === 'pendiente' ? `Programado: ${fechaProgramada(e.programado_para)}` : fecha(e.creado)) + (e.mensajero_nombre && e.asignacion === 'aceptado' ? `. Piloto: ${e.mensajero_nombre.split(' ')[0]}` : '') })),
         el('div', { class: 'lado' }, chipEstado(e.estado),
           e.estado === 'pendiente' && !e.receptor_listo ? el('span', { class: 'receptor-estado no', text: 'Faltan ubicaciones' }) : null,
-          el('strong', { text: (e.precio_por_confirmar ? 'Desde ' : '') + dinero(e.precio) }),
+          el('strong', { text: e.precio_revisar && !e.precio_revisado_en ? 'Precio por confirmar' : (e.precio_por_confirmar ? 'Desde ' : '') + dinero(e.precio) }),
           e.cargos_extra > 0 ? el('small', { class: 'pista', text: `+ ${dinero(e.cargos_extra)} de cargos` }) : null),
         e.estado !== 'cancelado' ? barraPasos(e.estado) : null,
         cajaDecision(e, () => { cargarEnvios(); cargarCargos(); }),
@@ -831,7 +832,7 @@
           el('div', {}, el('span', { text: 'Vehículo y peso' }), `${e.vehiculo}, ${e.peso} lb`),
           el('div', {}, el('span', { text: 'Recogida' }), [e.origen_quien === 'tercero' ? `Entrega ${e.origen.nombre}` : 'Tú', e.origen_zona, e.origen_direccion].filter(Boolean).join('. ')),
           el('div', {}, el('span', { text: 'Recibe' }), [e.destino_nombre, e.destino_zona, e.destino_direccion].filter(Boolean).join('. ')),
-          el('div', {}, el('span', { text: 'Precio' }), `${e.precio_por_confirmar ? 'Desde ' : ''}${dinero(e.precio)}${e.km ? `, ${e.km} km` : ''}`,
+          el('div', {}, el('span', { text: 'Precio' }), e.precio_revisar && !e.precio_revisado_en ? 'Por confirmar (envío a departamento)' : `${e.precio_por_confirmar ? 'Desde ' : ''}${dinero(e.precio)}${e.km ? `, ${e.km} km` : ''}`,
             e.descuento > 0 ? el('small', { style: 'display:block;color:var(--ok)', text: `Ahorraste ${dinero(e.descuento)}` }) : ''),
           e.programado_para ? el('div', {}, el('span', { text: 'Recogida programada' }), fechaProgramada(e.programado_para)) : '',
           el('div', {}, el('span', { text: 'Pago' }), PAGOS[e.metodo_pago] || e.metodo_pago),

@@ -1450,6 +1450,26 @@ null))));
           ...(e.paquetes_extra || []).map(x => el('div', { class: 'foto-lleva' }, el('a', { href: `/api/admin/envios/${e.id}/paquete/${x.n}`, target: '_blank', rel: 'noopener' },
             el('img', { src: `/api/admin/envios/${e.id}/paquete/${x.n}`, alt: `Foto del paquete ${x.n}` })), el('div', {}, el('strong', { text: `Paquete ${x.n} · ${x.peso} lb` }), el('br'), sub(x.descripcion || 'Sin descripción')))),
           enCurso && !e.listo_para_piloto ? el('div', { class: 'mensaje aviso', text: e.motivo_no_listo }) : null,
+          e.precio_revisar && e.estado === 'pendiente' ? (() => {
+            // Envío suelto a departamento: la oficina pone el precio y se lo manda al cliente
+            const caja = el('input', { type: 'number', min: 1, max: 3000, step: '0.01', inputmode: 'decimal', placeholder: 'Q', value: e.precio_revisado_en ? e.precio : '', 'aria-label': 'Precio del envío a departamento' });
+            const nota = el('small', { class: 'pista' });
+            const wa = el('a', { class: 'boton cinta chico', target: '_blank', rel: 'noopener', hidden: true, text: 'Mandar precio por WhatsApp' });
+            const b = el('button', { class: 'boton chico', type: 'button', text: e.precio_revisado_en ? 'Cambiar precio' : 'Guardar precio', onclick: async () => {
+              b.disabled = true;
+              try {
+                const x = await api(`/api/admin/envios/${e.id}/precio-departamento`, { body: { precio: caja.value } });
+                nota.textContent = `Guardado: ${dinero(x.precio)}. Mándaselo al cliente; ya se puede asignar piloto.`; nota.className = 'pista ok';
+                if (x.whatsapp) { wa.href = `https://wa.me/${waTel(x.whatsapp)}?text=${encodeURIComponent(x.mensaje)}`; wa.hidden = false; }
+                b.textContent = 'Cambiar precio'; cargarEnvios();
+              } catch (err) { nota.textContent = err.message; nota.className = 'pista error'; }
+              b.disabled = false;
+            } });
+            return el('div', { class: 'depto-precios' }, el('strong', { text: `Envío a departamento (a ${Math.round(e.km_capital || 0)} km de la capital)` }),
+              el('p', { class: 'pista', text: e.precio_revisado_en ? `Precio puesto: ${dinero(e.precio)}.` : 'No tiene precio fijo. Calcula el precio, guárdalo y mándaselo al cliente por WhatsApp. Hasta entonces no se puede asignar piloto.' }),
+              e.destino_lat != null ? el('a', { href: `https://www.google.com/maps/dir/${e.origen_lat},${e.origen_lng}/${e.destino_lat},${e.destino_lng}`, target: '_blank', rel: 'noopener', text: 'Ver la ruta en el mapa para calcular' }) : null,
+              el('div', { class: 'depto-accion' }, caja, b, wa, nota));
+          })() : null,
           e.flete_enlace ? enlaceFlete(e.guia, e.flete_enlace, e.flete_telefono) : null,
           msg,
           bloqueReclamosPanel(e, guardar),

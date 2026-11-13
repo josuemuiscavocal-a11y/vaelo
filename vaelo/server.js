@@ -105,9 +105,11 @@ function listoParaPiloto(e) {
   if (e.flete && !e.flete_configurado_en) return false;
   if (e.metodo_pago === 'transferencia' && e.pago_estado !== 'verificado') return false;
   if (e.lote_sede_id && db.prepare('SELECT estado FROM lotes_sede WHERE id = ?').get(e.lote_sede_id)?.estado !== 'recibido') return false;
+  if (e.precio_revisar && !e.precio_revisado_en) return false;
   return true;
 }
-const motivoNoListo = (e) => e.flete && !e.flete_configurado_en ? 'El cliente todavía no completa los datos del flete con su enlace.'
+const motivoNoListo = (e) => e.precio_revisar && !e.precio_revisado_en ? `Envío a departamento (a ${Math.round(e.km_capital || 0)} km de la capital): pon el precio aquí abajo y mándaselo al cliente antes de asignar piloto.`
+  : e.flete && !e.flete_configurado_en ? 'El cliente todavía no completa los datos del flete con su enlace.'
   : e.metodo_pago === 'transferencia' && e.pago_estado !== 'verificado'
   ? 'Falta confirmar la transferencia: el cliente manda el comprobante al WhatsApp de Vaelo y la oficina lo marca recibido.'
   : 'Los paquetes de este envío todavía no llegan a la sede de Vaelo.';
@@ -119,6 +121,15 @@ function distanciaRecta(a, b) {
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(h));
 }
+// Entregas lejos de la capital (departamentos): no llevan precio fijo, la oficina pone el precio
+const CENTRO_CAPITAL = { lat: 14.6349, lng: -90.5069 };
+function kmDeCapital(lat, lng) {
+  if (lat == null || lng == null) return 0;
+  const a = getAjustes();
+  const sede = a.sede_lat != null && a.sede_lng != null && Number.isFinite(Number(a.sede_lat)) ? { lat: Number(a.sede_lat), lng: Number(a.sede_lng) } : CENTRO_CAPITAL;
+  return distanciaRecta(sede, { lat, lng });
+}
+const lejosDeCapital = (lat, lng) => lat != null && kmDeCapital(lat, lng) > (Number(getAjustes().km_departamento) || 25);
 const cacheRutas = new Map();
 async function kilometros(a, b) {
   const clave = [a.lat, a.lng, b.lat, b.lng].map((n) => n.toFixed(5)).join(',');
@@ -2495,6 +2506,8 @@ ruta('POST', '/api/envios', async ({ req, body }) => {
     if (body.guardar_destino) guardarDireccion(u.id, body.guardar_destino, { direccion: d.destino_direccion, zona: texto(body.destino_zona, 60), telefono: d.destino_telefono, contacto: d.destino_nombre });
     db.exec('COMMIT');
     avisarEnvio(out.id, 'nuevo');
+    const nuevo = db.prepare('SELECT * FROM envios WHERE id = ?').get(out.id);
+    if (nuevo && marcarDepartamento(nuevo)) out.departamento = true;
     return { _status: 201, ...out };
   } catch (err) { db.exec('ROLLBACK'); throw err; }
 }, { limite: 1_200_000 });
@@ -2662,11 +2675,25 @@ function corregirZonas(id) {
   }
   if (cambios.length) db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(id, e.estado, 'Zona corregida con la ubicación real (' + cambios.join('; ') + ')');
 }
+// Si la entrega (o la recogida) queda lejos de la capital, el envío espera a que la oficina ponga el precio
+function marcarDepartamento(e) {
+  if (e.precio_revisar || e.pedido_id || e.flete || e.estado !== 'pendiente') return !!e.precio_revisar;
+  const km = Math.max(kmDeCapital(e.destino_lat, e.destino_lng), kmDeCapital(e.origen_lat, e.origen_lng));
+  if (!(km > (Number(getAjustes().km_departamento) || 25))) return false;
+  db.prepare("UPDATE envios SET precio_revisar = 1, km_capital = ? WHERE id = ?").run(Math.round(km * 10) / 10, e.id);
+  // Si ya se lo había ofrecido a un piloto (y no lo aceptó todavía), se le quita hasta tener precio
+  if (e.asignacion === 'por_aceptar') db.prepare('UPDATE envios SET mensajero_id = NULL, asignacion = NULL WHERE id = ?').run(e.id);
+  db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(e.id, e.estado, `Envío a departamento (a ${Math.round(km)} km de la capital): espera el precio de la oficina`);
+  avisarStaff({ titulo: 'Envío a departamento: falta precio', cuerpo: `${e.guia} va a ${Math.round(km)} km de la capital. Pon el precio y mándaselo al cliente.`, url: '/familiatecun', etiqueta: 'depto-' + e.id });
+  return true;
+}
 async function revisarPrecio(id) {
   corregirZonas(id);
   const e = db.prepare('SELECT * FROM envios WHERE id = ?').get(id);
   // Los fletes tienen el precio que acordó la oficina: no se recalcula
   if (!e || e.flete || !['pendiente', 'recogido', 'en_camino'].includes(e.estado) || e.origen_lat == null || e.destino_lat == null) return;
+  if (e.precio_revisado_en) return;   // la oficina ya puso el precio de departamento
+  if (marcarDepartamento(e)) return;
   const o = { lat: e.origen_lat, lng: e.origen_lng }, d = { lat: e.destino_lat, lng: e.destino_lng };
   const movido = (lat, lng, p) => lat == null || distanciaRecta({ lat, lng }, p) > 1;
   if (!e.precio_por_confirmar && !movido(e.precio_o_lat, e.precio_o_lng, o) && !movido(e.precio_d_lat, e.precio_d_lng, d)) return;
@@ -4390,7 +4417,7 @@ function precioPedido(p, vivo = false) {
 }
 function precioPedidoBase(p, vivo) {
   // Departamento: el precio lo pone la oficina; mientras tanto queda por calcular
-  if (p.zona === DEPARTAMENTO) return { precio: p.precio_especial != null ? redondear(p.precio_especial) : null, preferencial: false, departamento: true, pendiente: p.precio_especial == null };
+  if (p.zona === DEPARTAMENTO || (p.lat != null && lejosDeCapital(p.lat, p.lng))) return { precio: p.precio_especial != null ? redondear(p.precio_especial) : null, preferencial: false, departamento: true, pendiente: p.precio_especial == null };
   if (!vivo && p.precio_fijado != null && ['confirmado', 'enviado'].includes(p.estado) && p.precio_fijado_clave === claveLugar(p)) return { precio: redondear(p.precio_fijado), preferencial: !!p.precio_fijado_pref };
   const conZona = !!p.zona && p.zona !== OTRA_ZONA && zonasFijas().some((z) => z.nombre === p.zona);
   const formas = zonasConForma();
@@ -4443,6 +4470,8 @@ function leerDatosEntrega(body, parcial = false) {
     if (z !== OTRA_ZONA && z !== DEPARTAMENTO && !zonasFijas().some((x) => x.nombre === z)) falla(400, 'Elige la zona o municipio.');
     d.zona = z;
   }
+  // Aunque elija otra zona, si el punto queda lejos de la capital es envío a departamento
+  if (d.lat != null && lejosDeCapital(d.lat, d.lng)) d.zona = DEPARTAMENTO;
   if (body.referencias !== undefined) d.referencias = texto(body.referencias, 300) || null;
   if (body.recibe_nombre !== undefined || !parcial) { d.recibe_nombre = texto(body.recibe_nombre, 100); if (d.recibe_nombre.length < 2) falla(400, 'Escribe el nombre de quien recibe.'); }
   if (body.recibe_telefono !== undefined || !parcial) { d.recibe_telefono = texto(body.recibe_telefono, 30); if (digitos(d.recibe_telefono).length < 8) falla(400, 'Escribe el teléfono de quien recibe (8 dígitos).'); }
@@ -6136,6 +6165,22 @@ ruta('GET', '/api/admin/envios', ({ req, query }) => {
   }) };
 });
 
+// Precio de un envío suelto a departamento: lo pone administración y se lo manda al cliente por WhatsApp
+ruta('POST', '/api/admin/envios/:id/precio-departamento', ({ req, params, body }) => {
+  const quien = requiereRol(req, 'admin');
+  const e = db.prepare('SELECT * FROM envios WHERE id = ?').get(Number(params.id)) || falla(404, 'No encontramos ese envío.');
+  if (!e.precio_revisar) falla(400, 'Este envío no va a un departamento: tiene precio fijo.');
+  if (e.estado !== 'pendiente') falla(400, 'El piloto ya recogió el paquete: ya no se puede cambiar el precio.');
+  const precio = redondear(numero(body.precio));
+  if (!(precio >= 1 && precio <= 3000)) falla(400, 'Escribe el precio del envío (entre Q1 y Q3000).');
+  db.prepare("UPDATE envios SET precio = ?, precio_base = ?, descuento = 0, tipo_tarifa = 'km', ganancia_acordada = ?, precio_revisado_en = datetime('now'), precio_por_confirmar = 0 WHERE id = ?")
+    .run(precio, precio, gananciaPiloto(precio), e.id);
+  db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(e.id, e.estado, `Precio de departamento: ${qtz(precio)} (${quien.nombre.split(' ')[0]})`);
+  avisarEnvio(e.id, 'precio', { precio, razon: 'Envío a departamento' });
+  const c = db.prepare('SELECT nombre, telefono, empresa_nombre FROM usuarios WHERE id = ?').get(e.usuario_id);
+  const mensaje = `Hola ${(c?.empresa_nombre || c?.nombre || '').split(' ')[0]}, le saluda Vaelo. Su envío ${e.guia} para ${e.destino_nombre} es a departamento: el precio es ${qtz(precio)}. Si está de acuerdo, le asignamos piloto. Cualquier duda nos escribe a este número.`;
+  return { ok: true, precio, whatsapp: digitos(c?.telefono || ''), mensaje };
+});
 ruta('GET', '/api/admin/envios/:id', ({ req, params }) => {
   const quien = requiereStaff(req);
   const e = db.prepare(`${SQL_ENVIO} WHERE e.id = ?`).get(Number(params.id));

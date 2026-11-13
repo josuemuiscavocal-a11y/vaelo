@@ -718,3 +718,6 @@ if (!db.prepare('SELECT COUNT(*) AS n FROM influencer_regalos').get().n) {
   db.prepare("INSERT INTO influencer_regalos (puntos, regalo) VALUES (50, 'Gorra Vaelo'), (150, 'Paquete Vaelo')").run();
 }
 module.exports = { db, DB_PATH, DATA_DIR };
+
+// Envío suelto a departamento: espera el precio de la oficina
+agregarColumnas('envios', [['precio_revisar', 'INTEGER NOT NULL DEFAULT 0'], ['precio_revisado_en', 'TEXT'], ['km_capital', 'REAL']]);
