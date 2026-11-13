@@ -350,7 +350,7 @@ async function panelEmpresa(caja, op = {}, minorista = null) {
         ? 'Apunta los pedidos de tu live en una carpeta del día, mándale a cada cliente su enlace y cuando estén confirmados, envíala a Vaelo.'
         : 'Vaelo te presta sus pilotos: cada cliente paga su envío al recibir. Tu empresa solo paga si eliges pickup pagado por ti o si un paquete se queda en la sede.' }),
       yo.recogida_dias ? el('p', { class: 'recogida-fija' }, icono('reloj'), ` Pasamos por tus paquetes: ${yo.recogida_dias.split(',').map(d => ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'][d]).join(', ')} a las ${yo.recogida_hora}.`) : null),
-      minorista ? el('button', { class: 'boton borde chico', type: 'button', text: '¿Ya vendes mucho? Pide contrato de empresa', onclick: () => pintarEmpresa(caja, { ...op, solicitud: true }) })
+      minorista ? el('button', { class: 'enlace-simple', type: 'button', style: 'margin:.3rem 0 0', text: '¿Ya vendes mucho? Pide contrato de empresa', onclick: () => pintarEmpresa(caja, { ...op, solicitud: true }) })
         : el('a', { class: 'boton borde chico', href: '/politicas-empresas', target: '_blank', text: 'Políticas para empresas' })),
     minorista && minorista.solicitud && ['enviada', 'cita'].includes(minorista.solicitud.estado) ? el('div', { class: 'mensaje aviso', text: 'Tu solicitud de contrato de empresa está en revisión. Mientras tanto sigue usando tu tienda con normalidad.' }) : null,
     conBono && bono.por_envio > 0 ? el('button', { type: 'button', class: 'bono-franja', onclick: () => { vista = 'ganancias'; pintarPest(); abrir(); } },
@@ -439,7 +439,7 @@ async function panelPedidos(caja, yo, abrirId) {
     r.enviadas.length ? el('section', { class: 'bloque' }, el('h2', { text: 'Enviadas a Vaelo' }), el('div', { class: 'carpetas' }, r.enviadas.map(tarjeta))) : null,
     bloqueCondiciones(r.condiciones), bloqueServicios(r.minorista ? 'minorista' : 'empresa', !(r.abiertas.length + r.enviadas.length)));
   // Cómo funcionan sus descuentos: la primera vez y cada vez que la oficina le cambia el plan
-  if (r.condiciones && r.condiciones.estado === 'aprobada' && !r.condiciones.vista) avisoDescuentos(r.condiciones);
+  if (r.condiciones && r.condiciones.estado === 'aprobada' && !r.condiciones.vista && (r.abiertas.length + r.enviadas.length) > 0) avisoDescuentos(r.condiciones);
 }
 // Tienda en revisión: puede preparar todo, pero no enviar hasta que Vaelo la apruebe
 function bloqueRevision(c) {
@@ -581,8 +581,8 @@ function dialogoCarpeta(c, r, alGuardar) {
   const nombre = el('input', { maxlength: 60, value: c ? c.nombre : '', placeholder: 'Opcional, ej. Pedidos de la semana' });
   dlg.append(el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: () => dlg.close() }),
     el('h2', { text: c ? 'Cambiar carpeta' : 'Nueva carpeta' }),
-    el('div', { class: 'campo' }, el('label', { text: '¿Qué día se entregan?' }), chips, el('div', { style: 'margin-top:.6rem;max-width:220px' }, otro)),
-    c && c.confirmados ? el('p', { class: 'pista', text: 'Si cambias el día, los clientes que ya confirmaron tienen que confirmar de nuevo.' }) : null,
+    el('div', { class: 'campo' }, el('label', { text: '¿Qué día se entregan?' }), chips, el('div', { style: 'margin-top:.6rem;max-width:220px' }, el('small', { class: 'pista', text: 'u otro día:' }), otro)),
+    c && c.confirmados ? el('p', { class: 'pista', text: 'Si cambias el día, los clientes que ya confirmaron tienen que confirmar de nuevo.' }) : '',
     el('div', { class: 'campo' }, el('label', { text: 'Nombre' }), nombre), msg,
     el('button', { class: 'boton accion-principal', type: 'button', text: c ? 'Guardar' : 'Crear carpeta', onclick: async (ev) => {
       ev.target.disabled = true;
