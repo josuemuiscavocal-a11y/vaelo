@@ -190,6 +190,36 @@
       ];
     }
 
+    // Antes de dar el código, quien recibe puede revisar quién es su piloto
+    function cajaCodigoSeguro(r) {
+      const p = r.piloto;
+      const panel = el('div', { class: 'piloto-seguro', hidden: true });
+      if (p) {
+        panel.append(
+          p.tiene_foto ? el('img', { src: API + '/foto-piloto', alt: 'Foto de ' + p.nombre, onerror: (ev) => ev.target.replaceWith(el('div', { class: 'sin-foto-piloto grande', text: p.nombre.charAt(0) })) }) : el('div', { class: 'sin-foto-piloto grande', text: p.nombre.charAt(0) }),
+          el('div', { class: 'piloto-seguro-datos' },
+            el('div', {}, el('span', { text: 'Nombre' }), el('strong', { text: p.nombre })),
+            p.vehiculo || p.color ? el('div', {}, el('span', { text: 'Vehículo' }), el('strong', { text: [p.vehiculo, p.color].filter(Boolean).join(' · ') })) : null,
+            p.placa ? el('div', {}, el('span', { text: 'Placa' }), el('strong', { class: 'placa', text: p.placa })) : null,
+            p.telefono ? el('div', {}, el('span', { text: 'Teléfono' }), el('a', { href: 'tel:' + String(p.telefono).replace(/[^\d+]/g, ''), text: p.telefono })) : null),
+          el('ol', { class: 'piloto-seguro-pasos' },
+            el('li', { text: 'Revisa que su cara se parezca a la foto.' }),
+            el('li', { text: 'Revisa que la placa de la moto o carro sea la misma.' }),
+            el('li', { text: 'Revisa que el paquete sea tuyo y esté bien.' }),
+            el('li', { text: 'Si todo coincide, dale el código.' })),
+          el('p', { class: 'piloto-seguro-alerta', text: 'Si algo no coincide, no le des el código ni el dinero. Llama a Vaelo al 3773 1793.' }),
+          el('a', { class: 'boton borde chico', href: 'tel:37731793', text: 'Llamar a Vaelo' }));
+      } else {
+        panel.append(el('p', { class: 'piloto-seguro-alerta', text: 'Todavía no hay piloto asignado. No le des este código a nadie. Cuando un piloto acepte, aquí verás su foto, nombre y placa.' }));
+      }
+      const boton = el('button', { type: 'button', class: 'boton borde chico', text: 'Ver información del piloto',
+        onclick: () => { panel.hidden = !panel.hidden; boton.textContent = panel.hidden ? 'Ver información del piloto' : 'Ocultar información del piloto'; } });
+      return el('div', { class: 'codigo-entrega' },
+        el('div', {}, el('span', { text: 'Tu código de entrega' }), el('strong', { text: r.codigo_entrega })),
+        el('p', { text: 'Dáselo al piloto solo cuando tengas el paquete en tus manos. Antes, revisa que sea tu piloto.' }),
+        boton, panel);
+    }
+
     function pantallaConfirmado(r) {
       const cajaMapa = el('div', { class: 'mapa alto' });
       const p = r.piloto;
@@ -206,8 +236,7 @@
         ...encabezado(r),
         el('div', { id: 'estado-gps', class: 'en-vivo pausa' }),
         chipEstado(r.estado),
-        r.codigo_entrega ? el('div', { class: 'codigo-entrega' }, el('div', {}, el('span', { text: 'Tu código de entrega' }), el('strong', { text: r.codigo_entrega })),
-          el('p', { text: 'Dáselo al piloto solo cuando tengas el paquete en tus manos. No lo compartas antes con nadie.' })) : null,
+        r.codigo_entrega ? cajaCodigoSeguro(r) : null,
         tarjeta,
         cajaMapa, el('p', { class: 'pista', id: 'nota-mapa' }),
         datosEnvio(r),
