@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Vaelo para tiendas · Vaelo</title>
-  <meta name="description" content="Para tiendas que venden en lives y redes en Guatemala: apuntas tus pedidos, cada clienta confirma con su ubicación y Vaelo entrega y cobra.">
+  <title>Vaelo para tiendas y negocios · Vaelo</title>
+  <meta name="description" content="Para tiendas y negocios en Guatemala que mandan pedidos sin contrato: tiendas de redes y lives, laboratorios, farmacias, clínicas y emprendimientos. Apuntas tus pedidos, cada cliente confirma con su ubicación y Vaelo entrega y cobra.">
   <meta name="theme-color" content="#0e2463">
   <link rel="icon" href="/img/favicon.png" type="image/png">
   <link rel="apple-touch-icon" href="/img/apple-touch-icon.png">
@@ -18,8 +18,8 @@
   <section class="empresas-hero">
     <div class="contenedor">
       <div>
-        <h1>Vaelo para tiendas de lives y redes</h1>
-        <p>Vendiste en tu live: tú apuntas los pedidos, Vaelo los recoge todos juntos, los entrega y cobra tu producto. Sin contrato y sin papeles.</p>
+        <h1>Vaelo para tiendas y negocios</h1>
+        <p>Para cualquier negocio que manda pedidos a sus clientes: tiendas de redes y lives, laboratorios, farmacias, clínicas, ortopedias, emprendimientos de comida y más. Tú apuntas los pedidos, Vaelo los recoge todos juntos, los entrega y cobra tu producto. Sin contrato y sin papeles.</p>
       </div>
       <ol class="empresas-pasos">
         <li><strong>Crea tu cuenta de tienda</strong><span>Aquí abajo, en un solo formulario. Vaelo la revisa y te avisa.</span></li>
@@ -41,8 +41,8 @@
     const selectZona = () => el('select', { id: 'tz' }, el('option', { value: '', text: 'Elige…' }), zonas.map((z) => el('option', { value: z, text: z })),
       el('option', { value: 'Otra zona o municipio', text: 'Otra zona o en varias zonas' }));
     const camposTienda = () => [
-      campo('tn', 'Nombre de tu tienda', { maxlength: 60, placeholder: 'Ej. Moda Luna GT' }),
-      campo('tr', 'Página de tu live o red social', { maxlength: 200, placeholder: 'Ej. instagram.com/modalunagt' }, 'Opcional'),
+      campo('tn', 'Nombre de tu tienda o negocio', { maxlength: 60, placeholder: 'Ej. Moda Luna GT o Laboratorio San José' }),
+      campo('tr', 'Página web o red social de tu negocio', { maxlength: 200, placeholder: 'Ej. instagram.com/tunegocio' }, 'Opcional'),
       el('div', { class: 'fila' }, el('div', { class: 'campo' }, el('label', { for: 'tz', text: '¿En qué zona vendes más?' }), selectZona()),
         campo('ts', '¿Cuántos pedidos mandas por semana?', { type: 'number', min: 0, max: 5000, inputmode: 'numeric', placeholder: 'Ej. 15' }))];
     const datosTienda = (f) => ({ tienda: f.tn.value, tienda_red: f.tr.value, tienda_zona: f.tz.value, tienda_semana: f.ts.value });
@@ -51,9 +51,9 @@
     function pintarAcceso() {
       const msg = el('div', { class: 'mensaje', role: 'alert' }), msg2 = el('div', { class: 'mensaje', role: 'alert' });
       const crear = el('form', { class: 'bloque', novalidate: true },
-        el('h2', { text: 'Crea tu cuenta de tienda' }),
+        el('h2', { text: 'Crea la cuenta de tu tienda o negocio' }),
         el('p', { class: 'pista', text: 'Es gratis. Revisamos cada tienda para darte tu plan con descuentos; mientras tanto ya puedes apuntar tus pedidos.' }), msg,
-        el('h3', { text: 'Tu tienda' }), ...camposTienda(),
+        el('h3', { text: 'Tu tienda o negocio' }), ...camposTienda(),
         el('h3', { text: 'Tus datos para entrar' }),
         el('div', { class: 'fila' }, campo('n', 'Tu nombre', { autocomplete: 'name', maxlength: 100 }), campo('t', 'Tu WhatsApp', { type: 'tel', autocomplete: 'tel', maxlength: 30, placeholder: '0000-0000' })),
         el('div', { class: 'fila' }, campo('e', 'Correo', { type: 'email', autocomplete: 'email', maxlength: 150 }), campo('p', 'Contraseña', { type: 'password', autocomplete: 'new-password' }, 'Mínimo 8')),
