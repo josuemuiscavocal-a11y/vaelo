@@ -127,7 +127,7 @@ function docsEmpresa(r, s, subir, alCambiar) {
     const d = r.documentos[k], guia = GUIA_DOCS[k] || {};
     const caja = el('div', { class: 'doc-pro' });
     const estado = el('small', { class: 'doc-pro-msg', role: 'status' });
-    const entradaCam = el('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true });
+    const entradaCam = el('input', { type: 'file', accept: 'image/*', hidden: true });
     const entradaArch = el('input', { type: 'file', accept: d.pdf ? 'image/*,application/pdf' : 'image/*', hidden: true });
     const subirArchivo = async (f) => {
       if (!f) return;
@@ -678,7 +678,7 @@ function estadoFoco(f, enviada) {
 }
 function filaPedido(p, r, c, recargar) {
   const enlace = location.origin + p.enlace;
-  const fotoInput = el('input', { type: 'file', accept: 'image/*', capture: 'environment', hidden: true, onchange: async () => {
+  const fotoInput = el('input', { type: 'file', accept: 'image/*', hidden: true, onchange: async () => {
     try { await api(`/api/empresa/pedidos/${p.id}/foto`, { body: { foto: await prepararArchivo(fotoInput.files[0], false) } }); recargar(); } catch (e) { alert(e.message); }
   } });
   const mandar = async () => { api(`/api/empresa/pedidos/${p.id}/enlace`, { body: {} }).catch(() => {}); };
@@ -687,7 +687,7 @@ function filaPedido(p, r, c, recargar) {
   const wa = `https://wa.me/${waNum(p.cliente_telefono)}?text=${encodeURIComponent(textoEnlace(p, r, c.dia))}`;
   // Una acción principal a la vista; el resto en el menú "⋯"
   const principal = !editable ? null
-    : !p.tiene_foto ? el('label', { class: 'boton cinta chico doc-boton', 'data-falta-foto': '1' }, 'Tomar foto', fotoInput)
+    : !p.tiene_foto ? el('label', { class: 'boton cinta chico doc-boton', 'data-falta-foto': '1' }, 'Agregar foto', fotoInput)
     : p.estado === 'confirmado' ? null
     : el('a', { class: 'boton cinta chico', href: wa, target: '_blank', rel: 'noopener', onclick: mandar, text: p.estado === 'esperando' ? 'Recordar' : 'Mandar enlace' });
   const opciones = editable ? [
@@ -871,9 +871,9 @@ function dialogoNuevoEnvio(c, r, recargar) {
     el('small', { class: 'pista', text: r.condiciones && r.condiciones.foco
       ? 'Antes de cobrarle el envío, mándale su enlace: cuando confirme sabrás su zona y si tu carpeta tiene descuento de zona foco. Si ya te pagó, Vaelo te descuenta este envío de lo que te entrega.'
       : 'El piloto no se lo cobra y Vaelo te descuenta este envío de lo que te entrega por tus productos.' }));
-  const foto = el('input', { id: 'np-foto', type: 'file', accept: 'image/*', capture: 'environment' });
+  const foto = el('input', { id: 'np-foto', type: 'file', accept: 'image/*' });
   const vistaFoto = el('img', { alt: '', hidden: true });
-  const vacio = el('span', { class: 'foto-paquete-vacio' }, el('strong', { text: 'Foto del paquete' }), el('small', { text: 'Tócala para tomarla' }));
+  const vacio = el('span', { class: 'foto-paquete-vacio' }, el('strong', { text: 'Foto del paquete' }), el('small', { text: 'Tómala o elígela de tu galería' }));
   foto.addEventListener('change', () => { if (foto.files[0]) { vistaFoto.src = URL.createObjectURL(foto.files[0]); vistaFoto.hidden = false; vacio.hidden = true; } });
   // Siempre con enlace exclusivo: la clienta confirma con su ubicación en tiempo real (la tienda ya no marca el lugar a mano)
   const llenar = false;

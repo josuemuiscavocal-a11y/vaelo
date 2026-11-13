@@ -62,8 +62,8 @@
             <div class="foto-paquete" id="caja-foto-paquete">
               <label class="foto-paquete-boton" for="foto_paquete">
                 <img id="vista-paquete" alt="" hidden>
-                <span class="foto-paquete-vacio" id="foto-paquete-vacio"><strong>Toma una foto del paquete</strong><small>Obligatoria. Así queda registrado qué lleva antes de recogerlo.</small></span>
-                <input id="foto_paquete" type="file" accept="image/*" capture="environment">
+                <span class="foto-paquete-vacio" id="foto-paquete-vacio"><strong>Foto del paquete</strong><small>Tómala o elígela de tu galería. Obligatoria. Así queda registrado qué lleva antes de recogerlo.</small></span>
+                <input id="foto_paquete" type="file" accept="image/*">
               </label>
             </div>
             <div class="fila">
@@ -205,7 +205,7 @@
   <script src="/js/comun.js?v=20261109c"></script>
   <script src="/js/suave.js?v=20261111a"></script>
   <script src="/js/qr.js?v=1"></script>
-  <script src="/js/empresa.js?v=20261112b"></script>
+  <script src="/js/empresa.js?v=20261112c"></script>
   <script>
     const tarifaFueraDe = (id) => { const v = (cfg?.vehiculos || []).find((x) => String(x.id) === String(id)); return v ? Math.max(v.tarifa_zona, v.tarifa_base || 0) : 45; };
     let cfg = null, envios = [], selOrigen = null, selDestino = null, refresco = null;
@@ -901,9 +901,9 @@
           inp.addEventListener('input', () => { x[k] = inp.value; if (k === 'peso') cotizar(); });
           return el('div', { class: 'campo' }, el('label', {}, etq, ayuda ? el('span', { class: 'ayuda', text: ' ' + ayuda }) : null), inp);
         };
-        const foto = el('input', { type: 'file', accept: 'image/*', capture: 'environment' });
+        const foto = el('input', { type: 'file', accept: 'image/*' });
         const vista = el('img', { alt: '', hidden: !x.vista, src: x.vista || '' });
-        const vacio = el('span', { class: 'foto-paquete-vacio', hidden: !!x.vista }, el('strong', { text: 'Tomar foto' }), el('small', { text: 'Obligatoria' }));
+        const vacio = el('span', { class: 'foto-paquete-vacio', hidden: !!x.vista }, el('strong', { text: 'Foto del paquete' }), el('small', { text: 'Obligatoria' }));
         foto.addEventListener('change', () => { const f = foto.files[0]; if (!f) return; x.archivo = f; x.vista = URL.createObjectURL(f); vista.src = x.vista; vista.hidden = false; vacio.hidden = true; });
         const zona = el('select', { 'aria-label': `Zona de quien recibe el envío ${n}` }, [...$('destino_zona').options].map(o => el('option', { value: o.value, text: o.textContent, selected: o.value === x.destino_zona })));
         if (!x.destino_zona) zona.value = '';
@@ -960,7 +960,7 @@
     function leerEnvioActual() {
       const f = $('form-envio');
       if (!f.peso.value) throw new Error('Escribe el peso aproximado del paquete.');
-      if (!$('foto_paquete').files[0]) { $('caja-foto-paquete').scrollIntoView({ behavior: 'smooth', block: 'center' }); throw new Error('Toma una foto del paquete.'); }
+      if (!$('foto_paquete').files[0]) { $('caja-foto-paquete').scrollIntoView({ behavior: 'smooth', block: 'center' }); throw new Error('Agrega una foto del paquete.'); }
       if (f.destino_nombre.value.trim().length < 2) throw new Error('Escribe el nombre de quien recibe.');
       if (f.destino_telefono.value.replace(/\D/g, '').length < 8) throw new Error('Escribe el teléfono de quien recibe (8 dígitos).');
       if (!f.origen_zona.value && document.querySelector('input[name="origen_quien"]:checked')?.value === 'tercero') throw new Error('Elige la zona donde se recoge el paquete.');

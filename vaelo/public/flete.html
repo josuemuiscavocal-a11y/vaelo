@@ -66,9 +66,9 @@
       const c = (k, t, attrs = {}, ayuda) => { const { tag, opciones, ...resto } = attrs; const i = el(tag === 'select' ? 'select' : 'input', { id: k, ...resto }, opciones || []); campos[k] = i;
         return el('div', { class: 'campo' }, el('label', { for: k }, t, ayuda ? el('span', { class: 'ayuda', text: ' ' + ayuda }) : null), i); };
       const zonas = () => ({ tag: 'select', opciones: f.zonas.map(z => el('option', { value: z, text: z })) });
-      const foto = el('input', { id: 'foto', type: 'file', accept: 'image/*', capture: 'environment' });
+      const foto = el('input', { id: 'foto', type: 'file', accept: 'image/*' });
       const vista = el('img', { alt: '', hidden: true });
-      const vacio = el('span', { class: 'foto-paquete-vacio' }, el('strong', { text: 'Toma una foto de lo que se va a llevar' }), el('small', { text: 'Obligatoria. Así queda registrado cómo estaba antes de cargarlo.' }));
+      const vacio = el('span', { class: 'foto-paquete-vacio' }, el('strong', { text: 'Foto de lo que se va a llevar' }), el('small', { text: 'Obligatoria. Así queda registrado cómo estaba antes de cargarlo.' }));
       foto.addEventListener('change', () => { if (foto.files[0]) { vista.src = URL.createObjectURL(foto.files[0]); vista.hidden = false; vacio.hidden = true; } });
       const sec = (n, t, ...h) => el('section', { class: 'bloque seccion-paso' }, el('div', { class: 'seccion-cab' }, el('span', { class: 'num', text: n }), el('div', {}, el('h2', { text: t }))), ...h);
       const form = el('form', { novalidate: true },

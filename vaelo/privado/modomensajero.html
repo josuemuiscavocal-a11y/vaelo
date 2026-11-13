@@ -986,7 +986,7 @@
       const motivos = el('div', { class: 'motivos', role: 'radiogroup' }, Object.entries(MOTIVOS_FALLO).map(([k, t], i) =>
         el('label', {}, el('input', { type: 'radio', name: 'motivo', value: k, checked: i === 0 }), t)));
       const nota = el('input', { maxlength: 300, placeholder: 'Ej. Llamé 3 veces y no contestó' });
-      const foto = el('input', { type: 'file', accept: 'image/*', capture: 'environment' });
+      const foto = el('input', { type: 'file', accept: 'image/*' });
       $('dlg-p').addEventListener('close', () => { ocupado = Math.max(0, ocupado - 1); cargarEnvios(); }, { once: true });
       const boton = el('button', { class: 'boton peligro', type: 'button', style: 'width:100%', text: 'Reportar que no se pudo entregar', onclick: async () => {
         boton.disabled = true; boton.textContent = 'Enviando…';
@@ -1016,7 +1016,7 @@
       const msg = el('div', { class: 'mensaje', role: 'alert' });
       const devolver = estado === 'devuelto';
       const recibio = el('input', { maxlength: 100, value: devolver ? (e.origen?.nombre || e.cliente_nombre) : '', placeholder: 'Nombre de quien recibió' });
-      const foto = el('input', { type: 'file', accept: 'image/*', capture: 'environment' });
+      const foto = el('input', { type: 'file', accept: 'image/*' });
       $('dlg-p').addEventListener('close', () => { ocupado = Math.max(0, ocupado - 1); cargarEnvios(); }, { once: true });
       const boton = el('button', { class: 'boton cinta', type: 'button', style: 'width:100%', text: devolver ? 'Confirmar devolución' : 'Confirmar que lo dejé en la sede', onclick: async () => {
         if (devolver && !foto.files[0]) { mostrarMensaje(msg, 'Toma una foto del paquete devuelto.'); return; }
@@ -1189,9 +1189,9 @@
       const msg = el('div', { class: 'mensaje', role: 'alert' });
       const codigo = el('input', { id: 'en-codigo', inputmode: 'numeric', pattern: '[0-9]*', maxlength: 4, autocomplete: 'one-time-code', class: 'entrada-codigo', placeholder: '0000', oninput: (ev) => { ev.target.value = ev.target.value.replace(/\D/g, '').slice(0, 4); } });
       const recibio = el('input', { id: 'en-recibio', maxlength: 100, value: e.destino_nombre, placeholder: 'Nombre de quien recibe' });
-      const foto = el('input', { id: 'en-foto', type: 'file', accept: 'image/*', capture: 'environment' });
+      const foto = el('input', { id: 'en-foto', type: 'file', accept: 'image/*' });
       const vista = el('img', { alt: '', hidden: true });
-      const vacioFoto = el('span', { class: 'foto-paquete-vacio' }, el('strong', { text: 'Tomar foto del paquete entregado' }), el('small', { text: 'En las manos de quien recibe o en la puerta' }));
+      const vacioFoto = el('span', { class: 'foto-paquete-vacio' }, el('strong', { text: 'Foto del paquete entregado' }), el('small', { text: 'En las manos de quien recibe o en la puerta' }));
       foto.addEventListener('change', () => { if (foto.files[0]) { vista.src = URL.createObjectURL(foto.files[0]); vista.hidden = false; vacioFoto.hidden = true; } });
       const lienzo = el('canvas', { class: 'firma', width: 600, height: 220, 'aria-label': 'Firma de quien recibe' });
       let firmado = false;

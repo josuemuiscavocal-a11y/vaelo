@@ -585,7 +585,7 @@ function campoDocumento({ titulo, tiene, ver, subir, pdf, ayuda, camara, soloVer
   const estado = el('small', { class: 'doc-pro-msg', role: 'status' });
   let listo = !!tiene, version = 1;
   const entradaCam = el('input', { type: 'file', accept: 'image/*', hidden: true, 'aria-label': 'Tomar foto: ' + titulo });
-  if (camara) entradaCam.setAttribute('capture', camara);
+  // Sin forzar la cámara: el celular deja tomar la foto o elegirla de la galería (algunos teléfonos se traban con la cámara directa)
   const entradaArch = el('input', { type: 'file', accept: pdf ? 'image/*,application/pdf' : 'image/*', hidden: true, 'aria-label': 'Elegir archivo: ' + titulo });
   const subirArchivo = async (f) => {
     if (!f || soloVer) return;
