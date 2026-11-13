@@ -1112,7 +1112,8 @@ async function enviarCorreo(para, asunto, html, plano) {
 const escaparHtml = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 async function enviarConfirmacion(usuario) {
   const token = crypto.randomBytes(32).toString('hex');
-  db.prepare('DELETE FROM tokens_correo WHERE usuario_id = ?').run(usuario.id);
+  // Los enlaces de correos anteriores siguen sirviendo hasta que vencen: así no falla si el cliente abre un correo viejo
+  db.prepare('DELETE FROM tokens_correo WHERE usuario_id = ? AND expira < ?').run(usuario.id, Date.now());
   db.prepare('INSERT INTO tokens_correo (token, usuario_id, expira) VALUES (?, ?, ?)').run(token, usuario.id, Date.now() + 48 * 3600_000);
   const enlace = `${URL_SITIO}/confirmar-correo?t=${token}`;
   const nombre = escaparHtml(usuario.nombre.split(' ')[0]);

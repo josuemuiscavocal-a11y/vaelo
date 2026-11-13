@@ -32,6 +32,10 @@
   <script>
     pintarBarra();
     const form = document.getElementById('form');
+    // Al volver del enlace del correo: decir claramente si quedó confirmado o si hay que pedir otro
+    const estadoCorreo = new URLSearchParams(location.search).get('correo');
+    if (estadoCorreo === 'confirmado') mostrarMensaje(document.getElementById('msg'), 'Listo, tu correo quedó confirmado. Entra con tu correo y contraseña.', 'exito');
+    if (estadoCorreo === 'vencido') mostrarMensaje(document.getElementById('msg'), 'Ese enlace ya no sirve (venció o ya se usó). Entra a tu cuenta: si tu correo sigue sin confirmar, toca «Reenviar correo» y abre el correo más nuevo.');
     const volver = new URLSearchParams(location.search).get('volver') || '';
     const volverValido = /^\/[a-z-]*$/.test(volver) ? volver : '';
     if (volverValido) {
