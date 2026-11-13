@@ -975,6 +975,9 @@ test('tienda minorista: cuenta normal que se activa sola, manda carpetas con men
   assert.ok((await admin('GET', '/api/admin/tiendas/solicitudes')).j.solicitudes.some((x) => x.id === lupeId));
   assert.equal((await admin('POST', `/api/admin/tiendas/${lupeId}/aprobar`, {})).status, 200);
   assert.equal((await admin('POST', `/api/admin/tiendas/${lupeId}/aprobar`, {})).status, 400, 'ya aprobada');
+  // Volver a guardar los datos de la tienda no la regresa a revisión
+  assert.equal((await lupe('POST', '/api/cuenta/minorista', { tienda: 'Moda Lupe' })).j.pendiente, false);
+  assert.equal(db.prepare('SELECT tienda_estado FROM usuarios WHERE id = ?').get(lupeId).tienda_estado, 'aprobada', 'sigue aprobada');
   const sol = (await lupe('GET', '/api/empresa/solicitud')).j;
   assert.equal(sol.es_minorista, true); assert.equal(sol.es_empresa, false);
   assert.equal((await lupe('POST', '/api/empresa/lote-sede', { filas: [] })).status, 403, 'la bodega en la sede es solo para empresas con contrato');

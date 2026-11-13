@@ -3776,6 +3776,12 @@ ruta('POST', '/api/cuenta/minorista', ({ req, body }) => {
   if (tienda.length < 2) falla(400, 'Escribe el nombre de tu tienda (el que ven tus clientes en tus lives).');
   const solicitud = leerSolicitudTienda(body);
   db.prepare("UPDATE usuarios SET tipo_cuenta = 'minorista', empresa_nombre = ?, descuento_empresa = 0 WHERE id = ?").run(tienda, u.id);
+  // Una tienda que Vaelo ya aprobó no vuelve a revisión por guardar otra vez sus datos o por reactivar la tienda
+  if (u.tienda_estado === 'aprobada') {
+    db.prepare('UPDATE usuarios SET tienda_red = COALESCE(?, tienda_red), tienda_zona = COALESCE(?, tienda_zona), tienda_semana = COALESCE(?, tienda_semana) WHERE id = ?')
+      .run(solicitud.red, solicitud.zona, solicitud.semana, u.id);
+    return { ok: true, tipo_cuenta: 'minorista', pendiente: false, minimo: minimoLote({ tipo_cuenta: 'minorista' }) };
+  }
   guardarSolicitudTienda(u.id, u.nombre, tienda, solicitud);
   return { ok: true, tipo_cuenta: 'minorista', pendiente: true, minimo: minimoLote({ tipo_cuenta: 'minorista' }) };
 });
