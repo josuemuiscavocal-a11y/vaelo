@@ -724,20 +724,36 @@ null))));
         const recog = r.recogidas_hoy && r.recogidas_hoy.length ? el('div', { class: 'recogidas-hoy' }, el('strong', { text: 'Recogidas fijas de hoy' }),
           el('ul', {}, r.recogidas_hoy.map(x => el('li', {}, el('b', { text: x.hora }), ` ${x.empresa}`, x.listos ? el('span', { class: 'etiqueta-completa', text: `${x.listos} pedidos listos` }) : el('span', { class: 'etiqueta-gris', text: 'sin pedidos confirmados aún' }), ' ', telLink(x.telefono))))) : null;
         poner($('empresas-activas'), recog, r.empresas.length ? el('div', { class: 'empresas-lista' }, r.empresas.map((x) => el('button', { type: 'button', class: 'empresa-tarjeta' + (x.lotes_nuevos ? ' prioridad' : ''), onclick: () => abrirEmpresa(x.id) },
-          el('div', {}, el('strong', { text: x.empresa_nombre || x.nombre }), x.tipo_cuenta === 'minorista' ? [' ', el('span', { class: 'etiqueta-gris', text: 'Tienda minorista' })] : null, el('small', { text: `${x.nombre} · ${x.telefono || ''}` })),
+          el('div', {}, el('strong', { text: x.empresa_nombre || x.nombre }), x.tipo_cuenta === 'minorista' ? [' ', el('span', { class: 'etiqueta-gris', text: 'Tienda minorista' })] : null,
+            x.tipo_cuenta === 'minorista' && x.tienda_estado === 'pendiente' ? [' ', el('span', { class: 'etiqueta-pendiente', text: 'Pendiente de aprobar' })] : null, el('small', { text: `${x.nombre} · ${x.telefono || ''}` })),
           el('div', { class: 'empresa-cuentas' },
             n(x.lotes_nuevos, x.lotes_nuevos === 1 ? 'envío por repartir' : 'envíos por repartir', 'etiqueta-pendiente'),
             n(x.en_ruta, 'en ruta', 'etiqueta-azul'), n(x.en_sede, 'en sede', 'etiqueta-gris'),
             n(x.confirmados, 'confirmados sin mandar', 'etiqueta-gris'),
             el('small', { text: `${x.entregados_mes} entregados este mes` })))))
           : el('div', { class: 'bloque' }, el('p', { class: 'pista', text: 'Todavía no hay empresas con contrato. Cuando apruebes una solicitud aparece aquí.' })));
-        if (rolPanel === 'admin') { $('insignia-solicitudes').textContent = String(r.solicitudes); $('insignia-solicitudes').hidden = !r.solicitudes; pendientes += r.solicitudes; }
+        if (rolPanel === 'admin') { const tot = r.solicitudes + (r.tiendas_pendientes || 0); $('insignia-solicitudes').textContent = String(tot); $('insignia-solicitudes').hidden = !tot; pendientes += tot; }
       } catch (e) { mostrarMensaje($('msg-empresas'), e.message); }
       if (rolPanel === 'admin') {
         try {
-          const r = await api('/api/admin/empresas');
+          const [r, ts] = await Promise.all([api('/api/admin/empresas'), api('/api/admin/tiendas/solicitudes').catch(() => ({ solicitudes: [] }))]);
           const ETQ = { enviada: 'etiqueta-azul', cita: 'etiqueta-pendiente', aprobada: 'etiqueta-completa', rechazada: 'etiqueta-gris' };
-          poner($('lista-solicitudes'), ...(r.solicitudes.length ? r.solicitudes.map(x => el('div', { class: 'caja-fila' },
+          // Tiendas minoristas que esperan aprobación: se aprueban aquí mismo (conservan el plan y las condiciones que ya tengan)
+          const filaTienda = (t) => {
+            const msg = el('div', { class: 'mensaje', role: 'alert' });
+            return el('div', { class: 'caja-fila' },
+              el('div', {}, el('strong', { text: t.tienda || t.nombre }), ' ', el('span', { class: 'etiqueta-pendiente', text: 'Tienda por aprobar' }), el('br'),
+                sub(`${t.nombre} · ${t.telefono || ''} · vende más en: ${t.zona || 'no dijo'} · ${t.semana ?? '?'} pedidos por semana${t.carpetas ? ` · ${t.carpetas} pedido(s) esperando` : ''}`), msg),
+              el('button', { class: 'boton chico', type: 'button', text: 'Aprobar tienda', onclick: async (ev) => {
+                if (!confirm(`¿Aprobar la tienda «${t.tienda || t.nombre}»? Podrá enviar sus carpetas a Vaelo.`)) return;
+                ev.target.disabled = true;
+                try { await api(`/api/admin/tiendas/${t.id}/aprobar`, { body: {} }); window.avisoHecho?.('Tienda aprobada', t.tienda || t.nombre); cargarEmpresas(); }
+                catch (e) { mostrarMensaje(msg, e.message); ev.target.disabled = false; }
+              } }));
+          };
+          const tiendas = ts.solicitudes.length ? [el('h3', { text: `Tiendas minoristas por aprobar (${ts.solicitudes.length})` }), ...ts.solicitudes.map(filaTienda),
+            el('p', { class: 'pista', text: 'Para elegir plan o zona foco al aprobar, usa Planes → Solicitudes de tiendas.' }), el('h3', { text: 'Contratos de empresa' })] : [];
+          poner($('lista-solicitudes'), ...tiendas, ...(r.solicitudes.length ? r.solicitudes.map(x => el('div', { class: 'caja-fila' },
             el('div', {}, el('strong', { text: x.empresa_nombre }), ' ', el('span', { class: ETQ[x.estado], text: x.estado_texto }), el('br'),
               sub(`${x.giro || ''} · ${x.paquetes_mes || '?'} paquetes al mes · ${x.rep_nombre} · ${x.cita_fecha ? 'cita ' + x.cita_fecha.replace('T', ' ') : fecha(x.enviada_en)}`)),
             el('button', { class: 'boton chico' + (x.estado === 'enviada' ? '' : ' borde'), type: 'button', text: 'Revisar', onclick: () => verSolicitud(x, r.documentos) }))) : [el('p', { class: 'pista', text: 'Todavía no hay solicitudes.' })]));

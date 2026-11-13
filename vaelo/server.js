@@ -4142,7 +4142,7 @@ ruta('POST', '/api/admin/tiendas/:id/aprobar', ({ req, params, body }) => {
   requiereRol(req, 'admin');
   const u = db.prepare("SELECT * FROM usuarios WHERE id = ? AND tipo_cuenta = 'minorista'").get(Number(params.id)) || falla(404, 'No encontramos esa tienda.');
   if (u.tienda_estado !== 'pendiente' && u.tienda_estado !== 'rechazada') falla(400, 'Esta tienda ya está aprobada.');
-  let planId = null;
+  let planId = u.plan_id ?? null;   // sin plan nuevo, conserva el que ya le pusieron en sus condiciones
   if (body.plan_id) { const p = db.prepare('SELECT * FROM planes WHERE id = ?').get(Number(body.plan_id)) || falla(400, 'Ese plan ya no existe.'); planId = p.clave === 'minorista' ? null : p.id; }
   let propias = jsonSeguro(u.condiciones_propias);
   if (body.foco_zona) propias = { ...propias, ...leerCondiciones({ foco_zona: body.foco_zona }, true) };
@@ -5400,10 +5400,11 @@ ruta('GET', '/api/admin/empresas/:id/estado-cuenta', ({ req, res, params, query 
 });
 ruta('GET', '/api/admin/empresas-activas', ({ req }) => {
   requiereStaff(req);
-  const lista = db.prepare("SELECT id, nombre, empresa_nombre, telefono, email, tipo_cuenta FROM usuarios WHERE tipo_cuenta IN ('empresa','minorista') AND rol = 'cliente' ORDER BY COALESCE(empresa_nombre, nombre)").all()
+  const lista = db.prepare("SELECT id, nombre, empresa_nombre, telefono, email, tipo_cuenta, tienda_estado FROM usuarios WHERE tipo_cuenta IN ('empresa','minorista') AND rol = 'cliente' ORDER BY COALESCE(empresa_nombre, nombre)").all()
     .map((u) => ({ ...u, ...resumenEmpresa(u.id) }));
   lista.sort((a, b) => b.lotes_nuevos - a.lotes_nuevos || b.en_ruta - a.en_ruta || b.en_sede - a.en_sede || b.confirmados - a.confirmados);
-  return { empresas: lista, recogidas_hoy: recogidasDeHoy(), lotes_nuevos: lista.reduce((t, e) => t + e.lotes_nuevos, 0), solicitudes: db.prepare("SELECT COUNT(*) AS n FROM solicitudes_empresa WHERE estado = 'enviada'").get().n };
+  return { empresas: lista, recogidas_hoy: recogidasDeHoy(), lotes_nuevos: lista.reduce((t, e) => t + e.lotes_nuevos, 0), solicitudes: db.prepare("SELECT COUNT(*) AS n FROM solicitudes_empresa WHERE estado = 'enviada'").get().n,
+    tiendas_pendientes: lista.filter((e) => e.tipo_cuenta === 'minorista' && e.tienda_estado === 'pendiente').length };
 });
 function loteSalida(l, conDinero) {
   const pedidos = db.prepare('SELECT * FROM pedidos_empresa WHERE lote_id = ? ORDER BY id').all(l.id).map((p) => pedidoSalida(p, conDinero));
