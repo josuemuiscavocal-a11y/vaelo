@@ -88,7 +88,7 @@
           el('dt', { text: 'Lugar' }), el('dd', { text: [d.direccion, d.zona].filter(Boolean).join(', ') + (d.referencias ? ` (${d.referencias})` : '') }),
           el('dt', { text: 'Recibe' }), el('dd', { text: `${d.recibe_nombre} · ${d.recibe_telefono}` }),
           d.cobro > 0 ? [el('dt', { text: 'Tu producto' }), el('dd', { text: `${dinero(d.cobro)} en efectivo al recibir` })] : null,
-          el('dt', { text: 'Envío' }), el('dd', { text: d.envio_pagado ? 'Ya lo pagaste a la tienda' : d.precio ? `${dinero(d.precio.precio)} en efectivo al recibir${d.precio.foco ? ' (con descuento de zona)' : ''}` : '—' })));
+          el('dt', { text: 'Envío' }), el('dd', { text: d.envio_pagado ? 'Ya lo pagaste a la tienda' : d.precio && d.precio.precio != null ? `${dinero(d.precio.precio)} en efectivo al recibir${d.precio.foco ? ' (con descuento de zona)' : ''}` : d.precio && d.precio.departamento ? `Envío a departamento: Vaelo le confirma el precio a ${d.empresa}` : '—' })));
     }
 
     async function noPuedo() {
@@ -122,6 +122,7 @@
         try {
           const r = await api(`/api/pedido/${token}/precio`, { body: { zona: zona.value, lat: punto?.lat, lng: punto?.lng } });
           precio.hidden = false;
+          if (r.departamento && r.precio == null) { poner(precio, el('span', { text: 'Envío a departamento' }), el('strong', { text: 'Precio por confirmar' }), el('small', { text: `Vaelo calcula el precio según el lugar y se lo confirma a ${datos.empresa} por WhatsApp.` })); return; }
           poner(precio, el('span', { text: 'Tu envío cuesta' }), el('strong', { text: dinero(r.precio) }), el('small', { text: (r.preferencial ? 'Zona con tarifa preferencial' : 'Fuera de las zonas con tarifa preferencial') + (datos.cobro > 0 ? `. Más ${dinero(datos.cobro)} de tu producto: total ${dinero(datos.cobro + r.precio)} al recibir.` : '') }));
         } catch { precio.hidden = true; }
       };
@@ -191,7 +192,7 @@
           try {
             const z = await api(`/api/zona?lat=${p.lat}&lng=${p.lng}`);
             if (z.zona && [...zona.options].some((o) => o.value === z.zona)) zona.value = z.zona;
-            else if (!z.zona && z.hay_formas) zona.value = [...zona.options].at(-1).value;   // fuera de las zonas: "Otra zona o municipio"
+            else if (!z.zona && z.hay_formas && zona.value !== d.departamento) zona.value = d.otra_zona;   // fuera de las zonas: "Otra zona o municipio" (si eligió departamento, se respeta)
           } catch { /* sin zona */ }
           actualizarPrecio();
         },

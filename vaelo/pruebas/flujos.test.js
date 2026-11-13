@@ -1813,3 +1813,34 @@ test('la administración confirma el correo de un cliente a mano', async () => {
   assert.equal((await admin('POST', `/api/admin/clientes/${id}/confirmar-correo`, {})).status, 200);
   assert.equal(db.prepare('SELECT email_verificado FROM usuarios WHERE id = ?').get(id).email_verificado, 1);
 });
+
+test('envío a departamento: queda con precio por calcular, no se asigna hasta que la oficina pone el precio y lo manda por WhatsApp', async () => {
+  const { t } = await tiendaLista('depto@prueba.com', 'Laboratorio Depto');
+  const hoy = new Date(Date.now() - 6 * 3600_000).toISOString().slice(0, 10);
+  const c = (await t('POST', '/api/empresa/carpetas', { dia: hoy })).j.carpeta.id;
+  const ids = [];
+  for (let i = 0; i < 3; i++) ids.push((await t('POST', `/api/empresa/carpetas/${c}/pedidos`, { descripcion: 'Muestras ' + i, tamano: 'pequeno', cliente_nombre: 'Clínica ' + i, cliente_telefono: '5599200' + i, foto: FOTO, llenar: true,
+    dia: hoy, horario: 'cualquiera', direccion: i ? 'Casa 2, zona 1' : 'Barrio El Centro, Escuintla', zona: i ? 'Zona 1' : 'Departamento (fuera de la capital)', lat: i ? 14.634 + i * 0.002 : 14.30, lng: i ? -90.52 : -90.78,
+    recibe_nombre: 'Clínica ' + i, recibe_telefono: '5599200' + i, metodo_pago: 'efectivo' })).j.pedido.id);
+  const lista = (await t('GET', `/api/empresa/carpetas/${c}`)).j;
+  const ped = (lista.pedidos || lista.carpeta?.pedidos || []).find((p) => p.id === ids[0]);
+  assert.ok(ped && ped.departamento && ped.precio_por_calcular, 'la tienda ve que falta el precio');
+  const env = await t('POST', `/api/empresa/carpetas/${c}/enviar`, { modo: 'una_moto', recogida: 'sede' });
+  assert.equal(env.status, 201, JSON.stringify(env.j));
+  await admin('POST', `/api/admin/lotes-empresa/${env.j.lote}/recibido`, {});
+  const lote = (await admin('GET', `/api/admin/lotes-empresa/${env.j.lote}`)).j.lote;
+  assert.equal(lote.precios_por_calcular, 1);
+  const calc = await admin('POST', `/api/admin/lotes-empresa/${env.j.lote}/calcular`, { modo: 'un_paquete' });
+  const rutas = calc.j.rutas.map((x) => ({ pedidos: x.pedidos, piloto_id: null }));
+  const sin = await admin('POST', `/api/admin/lotes-empresa/${env.j.lote}/confirmar`, { modo: 'un_paquete', rutas });
+  assert.equal(sin.status, 400); assert.match(sin.j.error, /departamento/);
+  assert.equal((await admin('POST', `/api/admin/pedidos/${ids[1]}/precio-departamento`, { precio: 90 })).status, 400, 'zona 1 tiene precio fijo');
+  const pr = await admin('POST', `/api/admin/pedidos/${ids[0]}/precio-departamento`, { precio: 120 });
+  assert.equal(pr.status, 200, JSON.stringify(pr.j));
+  assert.equal(pr.j.precio, 120); assert.match(pr.j.mensaje, /Q120\.00/); assert.ok(pr.j.whatsapp);
+  assert.equal((await admin('POST', `/api/admin/lotes-empresa/${env.j.lote}/confirmar`, { modo: 'un_paquete', rutas })).status, 200);
+  const e = db.prepare('SELECT precio, destino_zona, ganancia_acordada FROM envios WHERE pedido_id = ?').get(ids[0]);
+  assert.equal(e.precio, 120); assert.equal(e.destino_zona, 'Departamento (fuera de la capital)');
+  assert.ok(e.ganancia_acordada > 0 && e.ganancia_acordada < 120, 'el piloto gana sobre el precio que se puso');
+  assert.equal((await admin('POST', `/api/admin/pedidos/${ids[0]}/precio-departamento`, { precio: 130 })).status, 400, 'ya salió');
+});

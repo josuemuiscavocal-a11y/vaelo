@@ -1795,3 +1795,14 @@ fieldset { min-width: 0; } .recientes { max-width: 100%; min-width: 0; }
 .codigo-entrega .piloto-seguro-datos strong { font-size: 1rem; letter-spacing: normal; font-weight: 700; }
 .piloto-seguro-pasos { text-align: left; margin: 0; padding-left: 1.2rem; width: 100%; }
 .piloto-seguro-alerta { background: #ffe5e5; color: #8a1c1c; border-radius: var(--radio); padding: .6rem .8rem; margin: 0; font-weight: 600; width: 100%; }
+
+/* Envíos a departamento: la oficina pone el precio */
+.depto-precios { border: 2px solid #e8b800; background: #fffaf0; border-radius: var(--radio); padding: .9rem 1rem; margin: 1rem 0; display: grid; gap: .6rem; }
+.depto-fila { display: flex; flex-wrap: wrap; gap: .8rem; justify-content: space-between; align-items: center; background: #fff; border-radius: var(--radio); padding: .6rem .8rem; border: 1px solid #eee; }
+.depto-fila.falta { border-color: #e8b800; }
+.depto-fila > div:first-child { display: grid; gap: .15rem; }
+.depto-accion { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
+.depto-accion input { width: 110px; }
+.depto-accion small { flex-basis: 100%; }
+
+.nota-depto { margin-top: 1rem; background: rgba(255,255,255,.12); border-radius: var(--radio); padding: .7rem .9rem; }

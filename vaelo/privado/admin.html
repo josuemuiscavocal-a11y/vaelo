@@ -791,6 +791,7 @@ null))));
             r.lotes.length ? el('div', { class: 'lotes-lista' }, r.lotes.map(l => el('div', { class: 'lote-tarjeta' + (l.estado === 'nuevo' ? ' nuevo' : '') },
               el('div', {}, el('strong', { text: `${diaLargo(l.dia)} · ${l.pedidos.length} pedidos` }), ' ', el('span', { class: l.estado === 'nuevo' ? 'etiqueta-pendiente' : 'etiqueta-azul', text: l.estado === 'nuevo' ? 'Por repartir' : 'En ruta' }),
                 el('small', { text: `La empresa eligió: ${l.modo_texto}${l.modo === 'pickup' ? (l.paga === 'empresa' ? ' (paga la empresa)' : ' (paga cada cliente)') : ''} · ${l.recogida === 'sede' ? (l.recibido_en ? 'paquetes en la sede' + (l.dias_sede ? ` hace ${l.dias_sede} día(s)` : '') : 'la empresa los trae a la sede') : 'se recoge en su local'}` }),
+                l.precios_por_calcular ? el('small', { class: 'etiqueta-pendiente', text: `${l.precios_por_calcular} envío(s) a departamento: falta calcular el precio` }) : null,
                 l.recomendacion ? el('small', { text: 'Recomendación: ' + l.recomendacion.razon }) : null,
                 l.foco ? el('small', { class: l.foco.aplica ? 'ok' : '', text: (l.foco.aplica ? `Aplica zona foco ${l.foco.zona}: ` : `No aplica zona foco ${l.foco.zona}: `) + l.foco.texto }) : null),
               l.estado === 'nuevo' ? el('button', { class: 'boton cinta', type: 'button', text: 'Dividir pedidos', onclick: () => abrirLote(l.id, emp.id) }) : null)))
@@ -1300,6 +1301,35 @@ null))));
         r.whatsapp_empresa ? el('a', { class: 'boton cinta chico', href: `https://wa.me/${waTel(r.whatsapp_empresa)}`, target: '_blank', rel: 'noopener', text: 'WhatsApp de la empresa' }) : null)
         : modo === 'pickup' ? el('p', { class: 'mensaje aviso', text: 'Pickup que pagan los clientes: cada uno paga Q35 en zonas preferenciales o Q45 fuera, en efectivo al recibir.' }) : null);
       const bloqueTransf = null;
+      // Pedidos a departamento: no tienen precio fijo. Se calcula, se guarda y se le manda a la tienda por WhatsApp antes de asignar.
+      const deptos = l.pedidos.filter(p => p.departamento);
+      const bloqueDepto = deptos.length ? el('div', { class: 'depto-precios' },
+        el('strong', { text: deptos.some(p => p.precio_por_calcular) ? 'Calcula el precio de los envíos a departamento' : 'Envíos a departamento con precio' }),
+        el('p', { class: 'pista', text: 'Estos pedidos van fuera de la capital. Pon el precio, guárdalo y mándalo por WhatsApp a la tienda. Hasta que todos tengan precio no se pueden asignar pilotos.' }),
+        ...deptos.map(p => {
+          const caja = el('input', { type: 'number', min: 1, max: 3000, step: '0.01', inputmode: 'decimal', placeholder: 'Q', value: p.precio != null ? p.precio : '', 'aria-label': 'Precio del envío de ' + p.recibe_nombre });
+          const nota = el('small', { class: 'pista' });
+          const wa = el('a', { class: 'boton cinta chico', target: '_blank', rel: 'noopener', hidden: true, text: 'Mandar precio por WhatsApp' });
+          const guardar = el('button', { class: 'boton chico', type: 'button', text: p.precio != null ? 'Cambiar precio' : 'Guardar precio', onclick: async () => {
+            guardar.disabled = true;
+            try {
+              const x = await api(`/api/admin/pedidos/${p.id}/precio-departamento`, { body: { precio: caja.value } });
+              p.precio = x.precio; p.precio_por_calcular = false;
+              nota.textContent = `Guardado: ${dinero(x.precio)}. Ahora mándaselo a la tienda.`; nota.className = 'pista ok';
+              if (x.whatsapp) { wa.href = `https://wa.me/${waTel(x.whatsapp)}?text=${encodeURIComponent(x.mensaje)}`; wa.hidden = false; }
+              else nota.textContent += ' La tienda no tiene teléfono guardado.';
+              guardar.textContent = 'Cambiar precio';
+              const tit = bloqueDepto.querySelector('strong'); if (tit && !deptos.some(q => q.precio_por_calcular)) tit.textContent = 'Envíos a departamento con precio';
+              confirmar.disabled = !l.se_puede_asignar || (l.recogida === 'sede' && !l.recibido_en);
+            } catch (e) { nota.textContent = e.message; nota.className = 'pista error'; }
+            guardar.disabled = false;
+          } });
+          return el('div', { class: 'depto-fila' + (p.precio_por_calcular ? ' falta' : '') },
+            el('div', {}, el('strong', { text: `${p.codigo_corto || p.codigo} · ${p.recibe_nombre || p.cliente_nombre}` }),
+              el('small', { text: [p.direccion, p.referencias].filter(Boolean).join(' · ') || 'Sin dirección' }),
+              p.lat != null ? el('a', { href: `https://www.google.com/maps?q=${p.lat},${p.lng}`, target: '_blank', rel: 'noopener', text: 'Ver en el mapa para calcular' }) : null),
+            el('div', { class: 'depto-accion' }, caja, guardar, wa, nota));
+        })) : null;
       const confirmar = el('button', { class: 'boton accion-principal', type: 'button', text: 'Confirmar rutas y avisar a los pilotos', disabled: !l.se_puede_asignar || (l.recogida === 'sede' && !l.recibido_en), onclick: async () => {
         if (!rutas.length) { mostrarMensaje(msg, 'Primero calcula las rutas.'); return; }
         for (const q of rutas) {
@@ -1325,7 +1355,7 @@ null))));
         l.recogida === 'sede' && !l.recibido_en ? el('div', { class: 'cargos-aviso' }, el('span', { text: 'La empresa trae los paquetes a la sede. Cuando lleguen, márcalo para poder asignar.' }),
           el('button', { class: 'boton chico', type: 'button', text: 'Paquetes recibidos', onclick: async () => { try { await api(`/api/admin/lotes-empresa/${loteId}/recibido`, { body: {} }); abrirLote(loteId, empresaId); } catch (e) { alert(e.message); } } })) : null,
         !l.se_puede_asignar ? el('div', { class: 'mensaje aviso', text: `Puedes preparar las rutas; se asignan el ${diaLargo(l.dia)}.` }) : null,
-        bloqueTransf, modos, pickup, mapaCaja, resumen, lista, msg,
+        bloqueTransf, bloqueDepto, modos, pickup, mapaCaja, resumen, lista, msg,
         el('div', { class: 'navegar' }, confirmar,
           el('button', { class: 'boton peligro chico', type: 'button', text: 'Cancelar este envío', onclick: async () => {
             if (!confirm('Los pedidos vuelven a la empresa como confirmados. ¿Cancelar?')) return;

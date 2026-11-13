@@ -36,6 +36,8 @@ const SQL_VIAJE_HECHO = `e.estado NOT IN ('pendiente','recogido','en_camino','ca
 const METODOS_PAGO = ['efectivo', 'recibe'];   // recibe: paga quien recibe
 const POLITICA_PILOTO_VERSION = 1;   // si cambia la política, los pilotos la vuelven a aceptar antes de trabajar
 const OTRA_ZONA = 'Otra zona o municipio';
+// Pedidos a departamentos (fuera de la capital y municipios cercanos): no tienen precio fijo, la oficina lo calcula y se lo manda a la tienda por WhatsApp
+const DEPARTAMENTO = 'Departamento (fuera de la capital)';
 
 // ---------- Utilidades ----------
 function hashPassword(password) {
@@ -554,6 +556,7 @@ ruta('GET', '/api/config', () => {
     whatsapp_pagos: aj.whatsapp_pagos || '50237731793',
     zonas: zonasFijas().map((z) => z.nombre),
     otraZona: OTRA_ZONA,
+    departamento: DEPARTAMENTO,
     whatsapp: aj.whatsapp || '',
     horario: aj.horario || '',
     recargo_fragil: Number(aj.recargo_fragil) || 0,
@@ -4366,6 +4369,7 @@ function evaluarFoco(cond, pedidos) {
 const focoDeLote = (loteId) => { if (!loteId) return null; const l = db.prepare('SELECT foco FROM lotes_empresa WHERE id = ?').get(loteId); const f = l ? jsonSeguro(l.foco) : {}; return f.zona ? f : null; };
 // Precio normal (el general, sin plan): con él se calcula lo que gana el piloto, que no cambia por los descuentos de la tienda
 function precioGeneralPedido(p) {
+  if (p.zona === DEPARTAMENTO) return Number(p.precio_especial) || 0;
   const conZona = !!p.zona && p.zona !== OTRA_ZONA && zonasFijas().some((z) => z.nombre === p.zona);
   const formas = zonasConForma();
   const dentro = conZona && (!formas.length || p.lat == null || !!zonaDeFormas({ lat: p.lat, lng: p.lng }, formas));
@@ -4385,6 +4389,8 @@ function precioPedido(p, vivo = false) {
   return base;
 }
 function precioPedidoBase(p, vivo) {
+  // Departamento: el precio lo pone la oficina; mientras tanto queda por calcular
+  if (p.zona === DEPARTAMENTO) return { precio: p.precio_especial != null ? redondear(p.precio_especial) : null, preferencial: false, departamento: true, pendiente: p.precio_especial == null };
   if (!vivo && p.precio_fijado != null && ['confirmado', 'enviado'].includes(p.estado) && p.precio_fijado_clave === claveLugar(p)) return { precio: redondear(p.precio_fijado), preferencial: !!p.precio_fijado_pref };
   const conZona = !!p.zona && p.zona !== OTRA_ZONA && zonasFijas().some((z) => z.nombre === p.zona);
   const formas = zonasConForma();
@@ -4401,6 +4407,7 @@ function pedidoSalida(p, conDinero = false) {
     direccion: p.direccion, zona: p.zona, lat: p.lat, lng: p.lng, referencias: p.referencias, recibe_nombre: p.recibe_nombre, recibe_telefono: p.recibe_telefono, ubicacion_manual: !!p.ubicacion_manual,
     metodo_pago: p.metodo_pago, cobro: Number(p.cobro) || 0, envio_pagado: !!p.envio_pagado, estado: estadoPedido(p), estado_texto: ESTADOS_PEDIDO[estadoPedido(p)], tiene_foto: !!p.foto, enlace: '/pedido/' + p.token,
     confirmado_por: p.confirmado_por, confirmado_en: p.confirmado_en, enlace_enviado_en: p.enlace_enviado_en, lote_id: p.lote_id, creado: p.creado,
+    departamento: p.zona === DEPARTAMENTO, precio_por_calcular: p.zona === DEPARTAMENTO && p.precio_especial == null,
     transferencia_ok: !!p.transferencia_ok, avisos: db.prepare('SELECT COUNT(*) AS n FROM push_pedidos WHERE pedido_id = ?').get(p.id).n };
   if (conDinero) out.precio = precioPedido(p).precio;
   if (p.envio_id) {
@@ -4433,7 +4440,7 @@ function leerDatosEntrega(body, parcial = false) {
   if (body.direccion !== undefined || !parcial) { d.direccion = texto(body.direccion, 300); if (d.direccion.length < 5) falla(400, d.direccion ? 'Escribe la dirección más completa (por ejemplo: 5a calle 3-20, casa azul).' : 'Escribe la dirección de entrega.'); }
   if (body.zona !== undefined || !parcial) {
     const z = texto(body.zona, 60);
-    if (z !== OTRA_ZONA && !zonasFijas().some((x) => x.nombre === z)) falla(400, 'Elige la zona o municipio.');
+    if (z !== OTRA_ZONA && z !== DEPARTAMENTO && !zonasFijas().some((x) => x.nombre === z)) falla(400, 'Elige la zona o municipio.');
     d.zona = z;
   }
   if (body.referencias !== undefined) d.referencias = texto(body.referencias, 300) || null;
@@ -5239,7 +5246,7 @@ ruta('GET', '/api/pedido/:token', ({ params }) => {
     editable: ['pendiente', 'confirmado', 'vencido', 'no_puede'].includes(p.estado) && !p.lote_id, en_lote: !!p.lote_id,
     dia_fijo: p.carpeta_id ? carpetaDe(p)?.dia || null : null, no_puede_nota: p.no_puede_nota,
     precio: p.lat != null || p.zona ? precioPedido(p) : null, tarifa_zona: preciosDe(condicionesDe(p.usuario_id)).zona, tarifa_fuera: preciosDe(condicionesDe(p.usuario_id)).fuera,
-    zonas: [...zonasFijas().map((z) => z.nombre), OTRA_ZONA], horarios: HORARIOS, hoy: hoyGT() };
+    zonas: [...zonasFijas().map((z) => z.nombre), OTRA_ZONA, DEPARTAMENTO], otra_zona: OTRA_ZONA, departamento: DEPARTAMENTO, horarios: HORARIOS, hoy: hoyGT() };
   if (p.envio_id) {
     const e = db.prepare(`${SQL_ENVIO} WHERE e.id = ?`).get(p.envio_id);
     if (e) {
@@ -5490,7 +5497,7 @@ function loteSalida(l, conDinero) {
   return { ...l, foco, modo_texto: MODOS_LOTE[l.modo], recomendacion: rec, pedidos, origen: origenLote(l), empresa: nombreEmpresa(l.usuario_id),
     telefono_empresa: db.prepare('SELECT telefono FROM usuarios WHERE id = ?').get(l.usuario_id)?.telefono || '',
     dias_sede: l.recibido_en && l.estado === 'nuevo' ? Math.max(0, Math.round((Date.parse(hoyGT()) - Date.parse(new Date(fechaMs(l.recibido_en) - 6 * 3600_000).toISOString().slice(0, 10))) / 86400_000)) : 0,
-    se_puede_asignar: l.dia <= hoyGT() };
+    se_puede_asignar: l.dia <= hoyGT(), precios_por_calcular: pedidos.filter((p) => p.precio_por_calcular).length };
 }
 ruta('GET', '/api/admin/empresas-activas/:id', ({ req, params }) => {
   const quien = requiereStaff(req);
@@ -5584,6 +5591,21 @@ ruta('POST', '/api/admin/pedidos/:id/pago', ({ req, params, body }) => {
   else falla(400, 'Acción no válida.');
   return { ok: true };
 });
+// Precio de un pedido a departamento: lo calcula la oficina y se lo manda a la tienda por WhatsApp
+ruta('POST', '/api/admin/pedidos/:id/precio-departamento', ({ req, params, body }) => {
+  const quien = requiereRol(req, 'admin');
+  const p = db.prepare('SELECT * FROM pedidos_empresa WHERE id = ?').get(Number(params.id)) || falla(404, 'No encontramos ese pedido.');
+  if (p.zona !== DEPARTAMENTO) falla(400, 'Este pedido no va a un departamento: tiene precio fijo.');
+  if (p.estado !== 'confirmado') falla(400, p.estado === 'enviado' ? 'Este pedido ya salió: ya no se puede cambiar el precio.' : 'Este pedido todavía no está confirmado por el cliente.');
+  const precio = redondear(numero(body.precio));
+  if (!(precio >= 1 && precio <= 3000)) falla(400, 'Escribe el precio del envío (entre Q1 y Q3000).');
+  db.prepare("UPDATE pedidos_empresa SET precio_especial = ?, precio_especial_por = ?, precio_fijado = ?, precio_fijado_pref = 0, precio_fijado_clave = ?, actualizado = datetime('now') WHERE id = ?")
+    .run(precio, quien.nombre.split(' ')[0], precio, claveLugar(p), p.id);
+  const emp = db.prepare('SELECT * FROM usuarios WHERE id = ?').get(p.usuario_id);
+  avisar(p.usuario_id, { titulo: 'Precio de envío a departamento', cuerpo: `${p.recibe_nombre || p.cliente_nombre}: ${qtz(precio)}.`, url: '/mi-cuenta?empresa=1' });
+  const mensaje = `Hola ${emp?.empresa_nombre || emp?.nombre || ''}, le saluda Vaelo. El envío a departamento para ${p.recibe_nombre || p.cliente_nombre}${p.direccion ? ` (${p.direccion})` : ''}, pedido ${p.codigo}, tiene un precio de ${qtz(precio)}. Si está de acuerdo, lo dejamos programado. Cualquier duda nos escribe a este número.`;
+  return { ok: true, precio, whatsapp: digitos(emp?.punto_telefono || emp?.telefono || ''), mensaje };
+});
 // Confirmar las rutas: se crean los envíos (con el mismo código del pedido) y se ofrecen a los pilotos
 ruta('POST', '/api/admin/lotes-empresa/:id/confirmar', ({ req, params, body }) => {
   const quien = requiereStaff(req);
@@ -5595,6 +5617,8 @@ ruta('POST', '/api/admin/lotes-empresa/:id/confirmar', ({ req, params, body }) =
   const modo = MODOS_LOTE[body.modo] ? body.modo : falla(400, 'Elige cómo se reparte.');
   const pedidos = db.prepare("SELECT * FROM pedidos_empresa WHERE lote_id = ? AND estado = 'confirmado'").all(l.id);
   const porId = new Map(pedidos.map((p) => [p.id, p]));
+  const sinPrecio = pedidos.filter((p) => p.zona === DEPARTAMENTO && p.precio_especial == null);
+  if (sinPrecio.length) falla(400, `Falta poner el precio de los pedidos a departamento: ${sinPrecio.map((p) => p.codigo).join(', ')}.`);
   const esPickup = modo === 'pickup';
   if (!esPickup && pedidos.some((p) => p.tamano === 'grande')) falla(400, 'Hay paquetes grandes: solo se pueden mandar en pickup.');
   const pagaEmpresa = esPickup && l.paga === 'empresa';
@@ -5639,7 +5663,7 @@ ruta('POST', '/api/admin/lotes-empresa/:id/confirmar', ({ req, params, body }) =
   const creados = [];
   // Con las zonas dibujadas, el piloto ve la zona real del punto marcado (no la que escribió el cliente)
   const formasZona = zonasConForma();
-  const zonaReal = (p) => (formasZona.length && p.lat != null ? (zonaDeFormas({ lat: p.lat, lng: p.lng }, formasZona) || OTRA_ZONA) : p.zona);
+  const zonaReal = (p) => (p.zona === DEPARTAMENTO ? DEPARTAMENTO : formasZona.length && p.lat != null ? (zonaDeFormas({ lat: p.lat, lng: p.lng }, formasZona) || OTRA_ZONA) : p.zona);
   db.exec('BEGIN');
   try {
     rutas.forEach((r, ri) => {
