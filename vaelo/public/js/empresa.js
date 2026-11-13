@@ -634,12 +634,14 @@ async function vistaCarpeta(caja, yo, id) {
           if (!ok) return;
           await api(`/api/empresa/carpetas/${c.id}`, { method: 'DELETE' }).catch((e) => alert(e.message)); volver();
         } })) : null));
+  const bpCarpeta = abierta && !r.punto ? bloquePunto(r, recargar) : null;
   const estadoCaja = abierta
     ? el('section', { class: 'bloque carpeta-estado' + (listo ? ' lista' : '') },
       el('div', {}, el('strong', { class: 'carpeta-cifra', text: `${c.confirmados}` }), el('span', { text: ` de ${c.minimo} confirmados` }), progresoCarpeta(c),
         c.dia < r.hoy ? el('small', { class: 'error-texto', text: 'El día de entrega ya pasó. Toca «Cambiar día o nombre» o junta estos pedidos con otra carpeta; tus clientes confirman la nueva fecha.' }) : null,
         c.total && (c.dia < r.hoy || c.confirmados < c.minimo) ? el('button', { class: 'boton borde chico', type: 'button', style: 'margin-top:.6rem', text: 'Juntar con otra carpeta', onclick: () => dialogoJuntar(c, r, recargar) }) : null,
-        !r.punto ? el('small', { class: 'error-texto', text: 'Falta el lugar donde el piloto recoge tus paquetes (abajo).' }) : null,
+        !r.punto ? el('div', { class: 'falta-punto' }, el('small', { class: 'error-texto', text: 'Falta decir dónde recoge el piloto tus paquetes.' }),
+          el('button', { class: 'boton cinta chico', type: 'button', text: 'Decir dónde recogemos', onclick: () => { if (!bpCarpeta) return; bpCarpeta.scrollIntoView({ behavior: 'smooth', block: 'center' }); bpCarpeta.classList.add('resaltar'); setTimeout(() => bpCarpeta.classList.remove('resaltar'), 2500); } })) : null,
         c.sin_foto && !listo ? el('small', { text: c.sin_foto === 1 ? 'Falta la foto de 1 paquete.' : `Falta la foto de ${c.sin_foto} paquetes.` }) : null,
         estadoFoco(c.foco, false)),
       listo && c.sin_foto ? el('div', { class: 'falta-fotos' }, el('p', {}, el('strong', { text: `Ya puedes enviarla, solo falta${c.sin_foto === 1 ? '' : 'n'} ${c.sin_foto} foto${c.sin_foto === 1 ? '' : 's'}.` }),
@@ -654,7 +656,7 @@ async function vistaCarpeta(caja, yo, id) {
       c.lote ? el('small', { text: `${c.lote.modo_texto} · ${c.lote.entregados} de ${c.total} entregados${c.lote.en_camino ? ` · ${c.lote.en_camino} en camino` : ''}${c.lote.en_sede ? ` · ${c.lote.en_sede} en la sede de Vaelo` : ''}` }) : null,
       estadoFoco(c.foco, true)),
       r.minorista ? null : el('a', { class: 'boton borde chico', href: `/api/empresa/excel?dia=${c.dia}`, text: 'Excel del día' }));
-  poner(caja, cabecera, estadoCaja, abierta && !r.punto ? bloquePunto(r, recargar) : null,
+  poner(caja, cabecera, estadoCaja, bpCarpeta,
     abierta ? el('div', { class: 'carpeta-acciones' }, anadir, botonAyuda('pedido', '¿Cómo añado un pedido?'),
       r.minorista ? null : el('div', { class: 'navegar' }, el('label', { class: 'boton borde chico doc-boton' }, 'Subir Excel', archivo), el('a', { class: 'boton borde chico', href: '/api/empresa/pedidos/plantilla', text: 'Plantilla' }))) : null,
     msgArchivo,
@@ -890,17 +892,19 @@ function dialogoNuevoEnvio(c, r, recargar) {
     if (d.nombre) nombre.value = d.nombre;
     if (d.telefono) tel.value = d.telefono;
   });
+  // Lo esencial a la vista (quién, su WhatsApp, qué compró, cuánto cobrar y la foto); lo demás en «Más opciones»
+  const masOpciones = el('details', { class: 'mas-opciones' }, el('summary', { text: 'Más opciones: tamaño del paquete, envío ya pagado' }),
+    el('div', { class: 'campo' }, el('label', { text: 'Tamaño' }), el('small', { class: 'pista', text: 'Si no lo cambias, va como pequeño (cabe en la caja de la moto).' }), tamanos),
+    pagado);
   const form = el('form', { novalidate: true },
-    el('button', { class: 'boton borde chico', type: 'button', style: 'margin-bottom:.6rem', text: 'Pegar datos de WhatsApp', onclick: () => { cajaPegar.hidden = !cajaPegar.hidden; if (!cajaPegar.hidden) pegado.focus(); } }), cajaPegar,
+    el('button', { class: 'enlace-simple', type: 'button', style: 'margin:0 0 .6rem', text: '¿Te mandó sus datos por WhatsApp? Pégalos aquí', onclick: () => { cajaPegar.hidden = !cajaPegar.hidden; if (!cajaPegar.hidden) pegado.focus(); } }), cajaPegar,
     el('div', { class: 'fila' }, el('div', { class: 'campo' }, el('label', { for: 'np-nombre', text: '¿Quién te compró?' }), nombre), el('div', { class: 'campo' }, el('label', { for: 'np-tel', text: 'Su WhatsApp' }), tel)),
     el('div', { class: 'campo' }, el('label', { for: 'np-desc', text: '¿Qué compró?' }), desc),
     el('div', { class: 'campo', hidden: r.condiciones && r.condiciones.cobro_permitido === false }, el('label', { for: 'np-cobro' }, '¿Cuánto le cobramos por el producto? (Q)', el('span', { class: 'ayuda', text: r.condiciones && r.condiciones.cobro_tope ? ` Opcional, hasta ${dinero(r.condiciones.cobro_tope)}` : ' Opcional' })), cobro,
       el('small', { class: 'pista', text: 'Sin contar el envío. Déjalo vacío si ya te pagó. El piloto lo cobra y Vaelo te entrega ese dinero.' })),
-    pagado,
-    el('div', { class: 'campo' }, el('label', { text: 'Tamaño' }), tamanos),
-    el('div', { class: 'campo' }, el('label', { for: 'np-foto' }, 'Foto del paquete', el('span', { class: 'ayuda', text: ' Puedes tomarla después, al empacar' })),
+    el('div', { class: 'campo' }, el('label', { for: 'np-foto' }, 'Foto del paquete', el('span', { class: 'ayuda', text: ' Puedes agregarla después, al empacar' })),
       el('div', { class: 'foto-paquete foto-paquete-chica' }, el('label', { class: 'foto-paquete-boton', for: 'np-foto' }, vistaFoto, vacio, foto))),
-    recomendacion, msg, otro, guardar);
+    masOpciones, recomendacion, msg, otro, guardar);
   form.addEventListener('submit', async (ev) => {
     ev.preventDefault();
     guardar.disabled = true;

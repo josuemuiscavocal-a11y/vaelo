@@ -833,14 +833,21 @@
 
     function tarjeta(e) {
       const fragil = e.fragil ? el('div', { class: 'franja-fragil', text: 'FRÁGIL: manejar con cuidado especial' }) : null;
-      const cobro = Number(e.cobro_destinatario) > 0 ? el('div', { class: 'cobro', text: `Cobrar a quien recibe: ${dinero(e.cobro_destinatario)}` }) : null;
+      const nomEntrega = (e.origen_nombre || e.cliente_nombre || 'quien entrega').split(' ')[0], nomRecibe = (e.destino_nombre || 'quien recibe').split(' ')[0];
+      const alEntregar = (e.metodo_pago === 'recibe' ? Number(e.precio) || 0 : 0) + (Number(e.cobro_destinatario) || 0);
+      const lineasDinero = [
+        e.metodo_pago === 'efectivo' && e.precio > 0 ? `Al recoger: cobra ${dinero(e.precio + (e.cargos_extra || 0))} del envío a ${nomEntrega}.` : null,
+        alEntregar > 0 ? `Al entregar: cobra ${dinero(alEntregar)} a ${nomRecibe}${e.metodo_pago === 'recibe' && Number(e.cobro_destinatario) > 0 ? ` (${dinero(e.precio)} del envío + ${dinero(e.cobro_destinatario)} del producto)` : Number(e.cobro_destinatario) > 0 ? ' (el producto)' : ' (el envío)'}.` : null,
+        e.devolver_cobro && Number(e.cobro_destinatario) > 0 ? `Después: llévale los ${dinero(e.cobro_destinatario)} del producto a ${nomEntrega}, donde recogiste.` : null,
+      ].filter(Boolean);
+      const cobro = lineasDinero.length ? el('div', { class: 'cobro dinero-pasos' }, el('strong', { text: 'Dinero' }), el('ul', {}, lineasDinero.map((t) => el('li', { text: t })))) : null;
       const cobraEnvio = e.metodo_pago === 'recibe' ? `Cobra el envío (${dinero(e.precio)}) a quien recibe` : e.metodo_pago === 'efectivo' ? `Cobra ${dinero(e.precio + (e.cargos_extra || 0))} en efectivo` : PAGOS[e.metodo_pago] || e.metodo_pago;
       const resumen = el('div', { style: 'font-size:.92rem;color:var(--suave)' },
         e.tiene_foto_paquete ? el('div', { class: 'foto-lleva', style: 'margin-bottom:.5rem' }, el('img', { src: `/api/piloto/envios/${e.id}/foto-paquete`, alt: 'Foto del paquete', onclick: (ev) => window.open(ev.target.src, '_blank') }),
           el('div', {}, el('strong', { style: 'color:var(--tinta)', text: e.paquetes_extra ? `Paquete 1 de ${e.paquetes_extra.length + 1}` : 'Lo que llevas' }), el('br'), e.paquetes_extra ? `${e.peso_paquete1} lb. Revisa que sea el de la foto.` : 'Revisa que el paquete sea el de la foto.')) : null,
         ...(e.paquetes_extra || []).map(x => el('div', { class: 'foto-lleva', style: 'margin-bottom:.5rem' }, el('img', { src: `/api/piloto/envios/${e.id}/paquete/${x.n}`, alt: `Foto del paquete ${x.n}`, onclick: (ev) => window.open(ev.target.src, '_blank') }),
           el('div', {}, el('strong', { style: 'color:var(--tinta)', text: `Paquete ${x.n} de ${e.paquetes_extra.length + 1}` }), el('br'), [`${x.peso} lb`, x.descripcion].filter(Boolean).join('. ')))),
-        `${e.vehiculo}, ${e.peso} lb${e.paquetes > 1 ? `, ${e.paquetes} paquetes` : ''}${e.descripcion ? '. ' + e.descripcion : ''}. ${cobraEnvio}. Ganas ${dinero(e.ganancia_piloto ?? 0)}`,
+        `${e.vehiculo}, ${e.peso} lb${e.paquetes > 1 ? `, ${e.paquetes} paquetes` : ''}${e.descripcion ? '. ' + e.descripcion : ''}. ${['efectivo', 'recibe'].includes(e.metodo_pago) ? '' : cobraEnvio + '. '}Tú ganas ${dinero(e.ganancia_piloto ?? 0)}.`,
         e.notas ? el('div', { style: 'color:var(--tinta)', text: 'Indicaciones: ' + e.notas }) : null);
 
       if (e.asignacion === 'por_aceptar') {
@@ -907,7 +914,8 @@
         titulo: 'Recibe el paquete', nombre: r.nombre || e.destino_nombre, telefono: e.destino_telefono,
         foto: r.tiene_foto ? `/api/piloto/envios/${e.id}/foto-receptor?v=${v(r.confirmado_en)}` : null,
         chip: e.pedido_id ? el('span', { class: 'receptor-estado si', text: 'Lugar marcado en el mapa' }) : r.omitido && !r.confirmado ? el('span', { class: 'receptor-estado si', text: 'Autorizado por Vaelo' }) : chipUbicacion(r),
-        zona: e.destino_zona, referencias: [e.destino_direccion, e.horario ? HORARIO_TXT[e.horario] : ''].filter(Boolean).join(' · '), punto: 'destino', accion: 'Dejar el pedido',
+        // Mientras no ha recogido, solo se muestran los botones para ir a recoger: los de entregar aparecen después
+        zona: e.destino_zona, referencias: [e.destino_direccion, e.horario ? HORARIO_TXT[e.horario] : '', recoger ? 'Cuando recojas el paquete te mostramos cómo llegar aquí.' : ''].filter(Boolean).join(' · '), punto: 'destino', accion: recoger ? null : 'Dejar el pedido',
         extra: e.pedido_id ? botonWhatsCliente(e) : r.omitido && !r.confirmado ? el('div', { class: 'pista', text: 'Sin ubicación: ' + r.omitido }) : null });
       return el('article', { class: 'entrega-tarjeta' + (!cerrado ? ' activa' : '') },
         el('div', { class: 'cab' }, el('strong', { class: 'guia' }, e.guia, e.flete ? el('span', { class: 'etiqueta-flete', style: 'margin-left:.4rem', text: 'Flete' }) : null), chipEstado(e.estado)),
@@ -1099,6 +1107,10 @@
     const valorBusca = (x) => { const b = buscaDe(x); return el('span', { class: 'busca-valor ' + CLASE_BUSCA[b.tipo], title: b.tipo }, textoBusca(b)); };
     // Recuadro grande: siempre igual, en el mismo lugar. al: 'recoger' muestra qué hacer si no trae la marca
     function cajaBusca(x, al) {
+      if (!x.codigo_corto && !x.pedido_id && x.marcado !== 'etiqueta' && !x.grupo)
+        return el('div', { class: 'caja-busca' }, el('span', { class: 'busca-etq', text: 'PAQUETE' }),
+          el('div', {}, el('strong', { style: 'font-size:1.1rem', text: `Es el único paquete de ${(x.origen_nombre || x.cliente_nombre || 'este cliente').split(' ')[0]}` }),
+            el('small', { text: 'No lleva código: revisa que sea el de la foto y llévalo a ' + (x.destino_nombre || 'quien recibe').split(' ')[0] + '.' })));
       const b = buscaDe(x);
       const ayuda = al === 'recoger' ? (x.pedido_id ? '¿No la trae? Pídele a la empresa que la marque antes de llevártelo.' : '¿No lo trae? Escribe tú el código y el nombre abajo, con tu marcador, y pégale cinta.') : '';
       return el('div', { class: 'caja-busca' }, el('span', { class: 'busca-etq', text: 'BUSCA' }),
