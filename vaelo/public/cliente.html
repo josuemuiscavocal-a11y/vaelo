@@ -120,22 +120,22 @@
             <legend>Pago y detalles</legend>
             <div class="campo">
               <div class="opciones" role="radiogroup" aria-label="Cómo pagas el envío">
-                <label class="opcion"><input type="radio" name="metodo_pago" value="efectivo" checked><span>Efectivo<small>Al mensajero</small></span></label>
-                <label class="opcion" id="opcion-recibe"><input type="radio" name="metodo_pago" value="recibe"><span>Paga quien recibe<small>El piloto le cobra el envío al entregar</small></span></label>
+                <label class="opcion"><input type="radio" name="metodo_pago" value="efectivo" checked><span>Yo pago el envío<small>En efectivo al piloto</small></span></label>
+                <label class="opcion" id="opcion-recibe"><input type="radio" name="metodo_pago" value="recibe"><span>Mi cliente paga el envío<small>El piloto se lo cobra al entregar</small></span></label>
               </div>
             </div>
             <div class="campo"><label for="cupon">Cupón de descuento <span class="ayuda">Opcional</span></label>
               <div class="cupon-fila"><input id="cupon" maxlength="30" autocomplete="off" style="text-transform:uppercase"><button class="boton borde chico" type="button" id="aplicar-cupon">Aplicar</button></div>
               <small id="cupon-msg" class="pista"></small></div>
             <div class="fila">
-              <div class="campo"><label for="cobro_destinatario">Cobrar a quien recibe (Q) <span class="ayuda">Si vendes en línea; deja vacío si no aplica</span></label><input id="cobro_destinatario" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00"></div>
+              <div class="campo"><label for="cobro_destinatario">Cobrar el producto que envías (Q) <span class="ayuda">Lo que tu cliente te debe por lo que compró. El piloto se lo cobra al entregar y te lleva tu dinero. Déjalo vacío si ya te pagó.</span></label><input id="cobro_destinatario" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00"></div>
               <div class="campo"><label for="notas">Indicaciones para el mensajero <span class="ayuda">Opcional</span></label><input id="notas" maxlength="300" placeholder="Llamar al llegar, dejar en garita…"></div>
             </div>
             <div class="campo" id="campo-devolver" hidden>
-              <label>¿Cómo recibes el dinero que cobra el piloto?</label>
+              <label>¿Cómo te llega tu dinero?</label>
               <div class="opciones" role="radiogroup" aria-label="Cómo recibes el cobro">
-                <label class="opcion"><input type="radio" name="devolver_cobro" value="si" checked><span>El piloto me lo trae<small>Después de entregar, te lleva el dinero a donde recogió el paquete</small></span></label>
-                <label class="opcion"><input type="radio" name="devolver_cobro" value="no"><span>Me lo entrega Vaelo<small>Se junta con tus cobros y lo recibes en la sede</small></span></label>
+                <label class="opcion"><input type="radio" name="devolver_cobro" value="si" checked><span>El piloto me trae mi dinero<small>Después de entregar, te lo lleva a donde recogió el paquete</small></span></label>
+                <label class="opcion"><input type="radio" name="devolver_cobro" value="no"><span>Lo recojo en Vaelo<small>Se junta con tus cobros y lo recibes en la sede</small></span></label>
               </div>
             </div>
           </fieldset>
@@ -814,7 +814,7 @@
           el('div', {}, el('span', { text: 'Pago' }), PAGOS[e.metodo_pago] || e.metodo_pago),
           e.cargos_extra > 0 ? el('div', {}, el('span', { text: 'Cargos pendientes incluidos' }), dinero(e.cargos_extra)) : null,
           e.paquetes > 1 ? el('div', {}, el('span', { text: 'Paquetes' }), `${e.paquetes} para la misma dirección`) : null,
-          Number(e.cobro_destinatario) > 0 ? el('div', {}, el('span', { text: 'Cobrar al recibir' }), dinero(e.cobro_destinatario),
+          Number(e.cobro_destinatario) > 0 ? el('div', {}, el('span', { text: 'Cobro de tu producto' }), dinero(e.cobro_destinatario),
             e.devolver_cobro ? el('small', { style: 'display:block', text: e.cobro_devuelto_en ? `El piloto ya te entregó este dinero (${fecha(e.cobro_devuelto_en)}).`
               : e.estado === 'entregado' ? 'El piloto ya cobró y va a llevarte el dinero a donde recogió el paquete.' : 'Después de entregar, el piloto te lleva este dinero a donde recogió el paquete.' }) : null) : null),
         e.estado === 'entregado' ? pruebaEntrega(e) : '',
