@@ -123,11 +123,11 @@
       const nombre = (r.nombre_sugerido || '').split(' ')[0];
       if (r.rol === 'entrega') return [
         el('h1', { text: nombre ? `Hola, ${nombre}` : 'Hola' }),
-        el('p', { style: 'font-size:1.05rem' }, 'Vaelo pasará a recoger contigo un paquete que ', el('strong', { text: r.remitente }), ` envía a ${r.destinatario.split(' ')[0]}. `, el('span', { class: 'pista', text: 'Guía ' + r.guia })),
+        el('p', { style: 'font-size:1.05rem' }, 'Vaelo pasará a recoger contigo un paquete que ', el('strong', { text: r.remitente }), ` le envía a ${r.destinatario.split(' ')[0]}.`),
       ];
       return [
         el('h1', { text: r.estado === 'entregado' ? 'Paquete entregado' : `Hola, ${nombre}` }),
-        el('p', { style: 'font-size:1.05rem' }, el('strong', { text: r.remitente }), ' te envía un paquete con Vaelo. ', el('span', { class: 'pista', text: 'Guía ' + r.guia })),
+        el('p', { style: 'font-size:1.05rem' }, el('strong', { text: r.remitente }), ' te envía un paquete con Vaelo.'),
       ];
     }
     function datosEnvio(r) {
@@ -157,7 +157,7 @@
       });
       const nombre = el('input', { id: 'nombre', maxlength: 100, value: r.nombre_sugerido || '', autocomplete: 'name' });
       const msg = el('div', { class: 'mensaje', role: 'alert' });
-      const boton = el('button', { class: 'boton cinta', type: 'button', style: 'width:100%', text: 'Confirmar y compartir mi ubicación' });
+      const boton = el('button', { class: 'boton cinta boton-grande', type: 'button', style: 'width:100%', text: 'Compartir mi ubicación' });
       boton.addEventListener('click', async () => {
         mostrarMensaje(msg, '');
         if (nombre.value.trim().length < 3) return mostrarMensaje(msg, 'Escribe tu nombre completo.');
@@ -171,21 +171,22 @@
           iniciarUbicacion();
           await cargar();
           window.scrollTo({ top: 0, behavior: 'smooth' });
-        } catch (e) { mostrarMensaje(msg, e.message); boton.disabled = false; boton.textContent = 'Confirmar y compartir mi ubicación'; }
+        } catch (e) { mostrarMensaje(msg, e.message); boton.disabled = false; boton.textContent = 'Compartir mi ubicación'; }
       });
       const entrega = r.rol === 'entrega';
       return [
         ...encabezado(r),
-        el('div', { class: 'mensaje aviso', text: entrega ? 'Comparte tu ubicación para que el piloto llegue a recoger el paquete a donde estás. Solo toma un minuto.'
-          : 'Comparte tu ubicación para que el piloto te lleve el paquete a donde estás. Solo toma un minuto.' }),
-        el('div', { class: 'recibe-paso' }, el('h2', { text: '1. Confirma tu nombre' }), el('label', { class: 'oculto', for: 'nombre', text: 'Nombre completo' }), nombre),
-        el('div', { class: 'recibe-paso' }, el('h2', {}, '2. Tu foto ', el('span', { class: 'ayuda', text: 'Opcional' })),
-          el('p', { class: 'pista', text: 'Si quieres, elige una foto tuya de la galería para que el piloto te reconozca.' }),
-          el('div', { class: 'selfie' }, vista, el('div', {}, etiquetaFoto, el('br'), msgFoto))),
-        el('div', { class: 'recibe-paso' }, el('h2', { text: '3. Comparte tu ubicación' }),
-          el('p', { class: 'pista', text: `Tu ubicación solo la ven el piloto asignado y Vaelo, y se deja de compartir cuando ${entrega ? 'el piloto recoge' : 'recibes'} el paquete. Deja esta página abierta mientras tanto.` }),
-          msg, boton),
+        // Una sola acción a la vista: compartir la ubicación. El nombre ya viene escrito y la foto es opcional
+        el('div', { class: 'recibe-principal' },
+          el('h2', { text: entrega ? '¿Dónde recoge el piloto?' : '¿Dónde te entregamos?' }),
+          el('p', { text: entrega ? 'Toca el botón y el piloto llega directo a donde estás para recoger el paquete.' : 'Toca el botón y el piloto te lleva el paquete directo a donde estás. No tienes que escribir tu dirección.' }),
+          msg, boton,
+          el('small', { class: 'pista', text: `Tu celular te va a pedir permiso: toca «Permitir». Tu ubicación solo la ven el piloto y Vaelo, y se deja de compartir cuando ${entrega ? 'el piloto recoge' : 'recibes'} el paquete.` })),
         datosEnvio(r),
+        el('details', { class: 'recibe-mas' }, el('summary', { text: '¿Tu nombre no es ' + (r.nombre_sugerido || '').split(' ')[0] + '? Cámbialo aquí' }),
+          el('label', { for: 'nombre', text: 'Tu nombre completo' }), nombre),
+        el('details', { class: 'recibe-mas' }, el('summary', { text: 'Agregar mi foto para que el piloto me reconozca (opcional)' }),
+          el('div', { class: 'selfie' }, vista, el('div', {}, etiquetaFoto, el('br'), msgFoto))),
       ];
     }
 

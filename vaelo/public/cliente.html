@@ -497,14 +497,15 @@
       if (r.confirmado) return el('div', { class: 'mensaje exito' }, el('strong', { text: `${r.nombre || e.destino_nombre} confirmó que recibe` }),
         r.en_vivo ? '. Está compartiendo su ubicación con el piloto.' : '. Su ubicación está en pausa: si cerró la página, pídele que vuelva a abrir el enlace.',
         el('button', { class: 'boton borde chico', type: 'button', style: 'margin-left:.5rem', text: 'Reenviar enlace', onclick: () => compartirSeguimiento(e) }));
+      const quien = (e.destino_nombre || 'quien recibe').split(' ')[0];
       return el('div', { class: 'compartir-receptor' },
-        el('h3', { text: 'Envía este enlace a quien recibe' }),
-        el('p', { text: r.exigido && !r.omitido
-          ? `${e.destino_nombre} debe abrirlo y compartir su ubicación: el piloto le lleva el paquete a donde esté. Por seguridad, buscamos piloto hasta que la comparta.`
-          : `${e.destino_nombre} puede abrirlo para compartir su ubicación y ver su código de entrega.` }),
-        el('div', { class: 'acciones' },
-          el('a', { class: 'boton cinta chico', href: whatsappReceptor(e), target: '_blank', rel: 'noopener', text: 'Enviar por WhatsApp' }),
-          el('button', { class: 'boton borde chico', type: 'button', text: 'Compartir o copiar', onclick: () => compartirSeguimiento(e) })));
+        el('h3', { text: r.exigido && !r.omitido ? `Último paso: manda el enlace a ${quien}` : `Manda el enlace a ${quien}` }),
+        el('ol', { class: 'pasos-simples' },
+          el('li', { text: 'Toca «Mandar por WhatsApp». El mensaje ya va escrito.' }),
+          el('li', { text: `${quien} abre el enlace y toca «Compartir mi ubicación».` }),
+          el('li', { text: r.exigido && !r.omitido ? 'Listo: buscamos al piloto y se lo lleva a donde esté.' : 'El piloto se lo lleva a donde esté.' })),
+        el('a', { class: 'boton cinta boton-grande', href: whatsappReceptor(e), target: '_blank', rel: 'noopener', style: 'width:100%', text: 'Mandar por WhatsApp' }),
+        el('button', { class: 'enlace-simple', type: 'button', text: '¿No usa WhatsApp? Copiar el enlace', onclick: () => compartirSeguimiento(e) }));
     }
 
     // Enlace para quien entrega el paquete (cuando no es quien pide)
@@ -807,8 +808,9 @@
       const recargar = () => { verDetalle(id); cargarEnvios(); cargarCargos(); };
       poner($('dlg-cuerpo'), 
         el('button', { class: 'cerrar', type: 'button', 'aria-label': 'Cerrar', text: '×', onclick: cerrarDialogo }),
-        el('h2', { style: 'font-size:1.4rem;margin-bottom:.3rem', text: e.guia }), chipEstado(e.estado),
+        el('h2', { style: 'font-size:1.4rem;margin-bottom:.3rem', text: 'Para ' + (e.destino_nombre || 'quien recibe') }), chipEstado(e.estado),
         e.estado !== 'cancelado' ? barraPasos(e.estado) : null,
+        cajaReceptor(e),
         cajaDecision(e, recargar),
         e.tiene_foto_fallo ? el('a', { class: 'prueba-img', href: `/api/envios/${e.id}/entrega/fallo`, target: '_blank', rel: 'noopener', style: 'margin:.5rem 0' },
           el('img', { src: `/api/envios/${e.id}/entrega/fallo`, alt: 'Foto del intento de entrega' }), el('small', { text: 'Foto del intento de entrega' })) : null,
@@ -818,7 +820,6 @@
         ...(e.paquetes_extra || []).map(x => el('a', { class: 'prueba-img', href: `/api/envios/${e.id}/paquete/${x.n}`, target: '_blank', rel: 'noopener', style: 'margin:.5rem 0' },
           el('img', { src: `/api/envios/${e.id}/paquete/${x.n}`, alt: `Foto del paquete ${x.n}` }), el('small', { text: [`Paquete ${x.n}`, `${x.peso} lb`, x.descripcion].filter(Boolean).join(' · ') })))),
         cajaEntrega(e),
-        cajaReceptor(e),
         cajaCodigo(e),
         tarjetaPiloto(e, piloto),
         cajaMapa,
@@ -843,6 +844,7 @@
         bloqueReclamo(e, datos, recargar),
         e.estado === 'devuelto' ? el('p', { class: 'mensaje exito' }, 'Devuelto a ', el('strong', { text: e.devuelto_a || '' }), e.devuelto_en ? ` el ${fecha(e.devuelto_en)}.` : '.') : '',
         e.estado === 'entregado' && piloto ? bloqueCalificar(e) : '',
+        el('p', { class: 'pista', text: 'Número de guía (para soporte): ' + e.guia }),
         el('h3', { text: 'Historial' }),
         el('ol', { class: 'linea-tiempo' }, eventos.slice().reverse().map(ev =>
           el('li', {}, el('strong', { text: ESTADOS[ev.estado] || ev.estado }), ev.nota ? el('div', { text: ev.nota }) : null, el('small', { text: fecha(ev.creado) })))),

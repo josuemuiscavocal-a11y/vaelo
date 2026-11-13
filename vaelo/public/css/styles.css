@@ -1774,3 +1774,12 @@ fieldset { min-width: 0; } .recientes { max-width: 100%; min-width: 0; }
 .mas-opciones[open] summary { margin-bottom: .6rem; }
 .botones-envio { display: flex; gap: .6rem; }
 .botones-envio #boton-enviar { flex: 1; }
+/* Página de quien recibe: una sola acción a la vista */
+.recibe-principal { background: #fff; border: 2px solid var(--cinta); border-radius: var(--radio); padding: 1.2rem; margin: 1rem 0; display: grid; gap: .6rem; }
+.recibe-principal h2 { font-size: 1.4rem; margin: 0; }
+.recibe-principal p { margin: 0; }
+.recibe-mas { margin: .6rem 0; border: 1.5px solid var(--linea); border-radius: var(--radio); padding: .6rem .9rem; }
+.recibe-mas summary { cursor: pointer; color: var(--azul); font-weight: 600; }
+.recibe-mas[open] summary { margin-bottom: .6rem; }
+.pasos-simples { margin: .3rem 0 .9rem; padding-left: 1.3rem; display: grid; gap: .3rem; }
+.enlace-simple { display: block; margin: .6rem auto 0; background: none; border: 0; color: var(--azul); font: inherit; font-size: .92rem; text-decoration: underline; cursor: pointer; }
