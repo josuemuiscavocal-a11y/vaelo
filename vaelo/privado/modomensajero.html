@@ -596,7 +596,7 @@
       if (firma !== ultimaFirma && !ocupado && !escribiendo) {
         ultimaFirma = firma;
         if (!envios.length) poner($('lista'), el('div', { class: 'vacio', text: enLinea ? 'Estás en línea. Aquí aparecerán los envíos que te asignen.' : 'No tienes entregas. Conéctate para recibir envíos.' }));
-        else poner($('lista'), rutaSugerida(), ...tarjetas());
+        else poner($('lista'), cajaCobrosPorLlevar(), rutaSugerida(), ...tarjetas());
       }
       pintarConexion(); pintarAlertaGps();
     }
@@ -668,6 +668,32 @@
     // Lo que está en curso va arriba; lo terminado queda plegado en "Terminados" para que no estorbe
     const TERMINADOS = ['entregado', 'devuelto', 'en_sede', 'cancelado'];
     let verTerminados = false;
+    // Envíos sueltos con cobro: después de entregar, el piloto le lleva el dinero a quien mandó el paquete
+    const porLlevar = () => envios.filter(e => e.estado === 'entregado' && e.devolver_cobro && !e.cobro_devuelto_en && Number(e.cobro_destinatario) > 0 && !e.sede_llegada);
+    function cajaCobrosPorLlevar() {
+      const lista = porLlevar();
+      if (!lista.length) return null;
+      return el('section', { class: 'entrega-tarjeta cobros-llevar' },
+        el('h2', { text: lista.length === 1 ? 'Lleva el dinero al cliente' : `Lleva el dinero a ${lista.length} clientes` }),
+        el('p', { class: 'pista', text: 'Ya entregaste el paquete y cobraste. Ahora lleva el dinero a quien te dio el paquete, al mismo lugar donde lo recogiste.' }),
+        ...lista.map(e => {
+          const msg = el('div', { class: 'mensaje', role: 'alert' });
+          const mapa = e.origen_lat != null ? `https://www.google.com/maps/dir/?api=1&destination=${e.origen_lat},${e.origen_lng}` : null;
+          const tel = String(e.origen_telefono || e.cliente_telefono || '').replace(/\D/g, '').slice(-8);
+          return el('div', { class: 'cobro-llevar' },
+            el('div', { class: 'cobro', text: `Entrega ${dinero(e.cobro_destinatario)} a ${e.origen_nombre || e.cliente_nombre || 'el cliente'}` }),
+            el('small', { text: [e.guia, e.origen_zona, e.origen_direccion].filter(Boolean).join(' · ') }), msg,
+            el('div', { class: 'navegar' },
+              mapa ? el('a', { class: 'boton borde', href: mapa, target: '_blank', rel: 'noopener', text: 'Cómo llegar' }) : null,
+              tel ? el('a', { class: 'boton borde', href: 'tel:' + tel, text: 'Llamar' }) : null,
+              el('button', { class: 'boton', type: 'button', text: 'Ya entregué el dinero', onclick: async (ev) => {
+                if (!confirm(`¿Ya le entregaste ${dinero(e.cobro_destinatario)} a ${e.origen_nombre || e.cliente_nombre || 'el cliente'}?`)) return;
+                ev.target.disabled = true;
+                try { await api(`/api/piloto/envios/${e.id}/cobro-devuelto`, { body: {} }); ultimaFirma = ''; cargarEnvios(); }
+                catch (x) { mostrarMensaje(msg, x.message); ev.target.disabled = false; }
+              } })));
+        }));
+    }
     function tarjetas() {
       const activos = [], hechos = [], vistos = new Set();
       for (const e of envios) {
@@ -785,7 +811,7 @@
       // 3) Entregas en orden: la siguiente abierta completa y el resto como lista
       const actual = abiertos[0], siguiente = abiertos[1];
       // Efectivo de la ruta: lo que cobra en cada entrega (y lo que la empresa le pagó al recoger, si aplica)
-      const efectivoDe = (x) => (['recibe', 'efectivo'].includes(x.metodo_pago) ? x.precio + (x.cargos_extra || 0) : 0) + (Number(x.cobro_destinatario) || 0);
+      const efectivoDe = (x) => (['recibe', 'efectivo'].includes(x.metodo_pago) ? x.precio + (x.cargos_extra || 0) : 0) + (x.devolver_cobro ? 0 : Number(x.cobro_destinatario) || 0);
       const porCobrar = lista.filter(x => x.estado !== 'cancelado').reduce((t, x) => t + efectivoDe(x), 0) + (Number(e0.cobro_en_recogida) || 0);
       const cobrado = lista.filter(x => x.estado === 'entregado').reduce((t, x) => t + efectivoDe(x), 0) + (lista.some(x => x.estado !== 'pendiente') ? Number(e0.cobro_en_recogida) || 0 : 0);
       const hechas = lista.filter(x => x.estado === 'entregado').length;

@@ -1373,7 +1373,8 @@ ruta('GET', '/api/piloto/envios/:id/ruta', async ({ req, params, query }) => {
 ruta('GET', '/api/piloto/envios', ({ req }) => {
   const p = requierePiloto(req);
   const filas = db.prepare(`${SQL_ENVIO} WHERE e.mensajero_id = ?
-    AND (e.estado IN ${SQL_PILOTO_ACTIVO} OR (e.piloto_cerro_en IS NOT NULL AND e.piloto_cerro_en >= datetime('now','-1 day')))
+    AND (e.estado IN ${SQL_PILOTO_ACTIVO} OR (e.piloto_cerro_en IS NOT NULL AND e.piloto_cerro_en >= datetime('now','-1 day'))
+      OR (e.estado = 'entregado' AND e.devolver_cobro = 1 AND e.cobro_devuelto_en IS NULL AND e.cobro_destinatario > 0 AND e.sede_llegada IS NULL))
     ORDER BY CASE WHEN e.asignacion = 'por_aceptar' THEN 0 WHEN e.estado IN ('fallido','devolviendo','a_sede') THEN 1 WHEN e.estado = 'en_camino' THEN 2 WHEN e.estado = 'recogido' THEN 3 WHEN e.estado = 'pendiente' THEN 4 ELSE 5 END, e.id`).all(p.id);
   return { envios: filas.map((e) => {
     const out = envioSalida(e);
@@ -1545,6 +1546,17 @@ ruta('POST', '/api/piloto/envios/:id/calificar-cliente', ({ req, params, body })
 });
 
 // Lo que gana el piloto: por cobrar, efectivo que debe entregar, totales y pagos anteriores
+// El piloto ya le llevó el dinero cobrado a quien mandó el paquete
+ruta('POST', '/api/piloto/envios/:id/cobro-devuelto', ({ req, params }) => {
+  const p = requierePiloto(req);
+  const e = db.prepare('SELECT * FROM envios WHERE id = ? AND mensajero_id = ?').get(Number(params.id), p.id) || falla(404, 'No encontramos ese envío.');
+  if (e.estado !== 'entregado' || !e.devolver_cobro || !(e.cobro_destinatario > 0) || e.sede_llegada) falla(400, 'Este envío no tiene dinero para llevar al cliente.');
+  if (e.cobro_devuelto_en) return { ok: true };
+  db.prepare("UPDATE envios SET cobro_devuelto_en = datetime('now'), cobro_pagado_en = COALESCE(cobro_pagado_en, datetime('now')) WHERE id = ?").run(e.id);
+  db.prepare('INSERT INTO eventos (envio_id, estado, nota) VALUES (?, ?, ?)').run(e.id, 'entregado', `El piloto entregó ${qtz(e.cobro_destinatario)} del cobro a quien mandó el paquete`);
+  avisar(e.usuario_id, { titulo: 'Te entregaron tu dinero', cuerpo: `El piloto te entregó ${qtz(e.cobro_destinatario)} que cobró por tu envío ${e.guia}.`, url: '/mi-cuenta?envio=' + e.id, etiqueta: 'cobro-' + e.id });
+  return { ok: true };
+});
 ruta('GET', '/api/piloto/ganancias', ({ req }) => {
   const p = requierePiloto(req);
   const suma = (cond) => redondear(db.prepare(`SELECT COALESCE(SUM(e.ganancia_piloto), 0) AS t FROM envios e WHERE e.mensajero_id = ? AND e.piloto_cerro_en IS NOT NULL AND ${cond}`).get(p.id).t);
@@ -2388,6 +2400,8 @@ function insertarEnvio(u, body, d, c, desc, programado, grupo = null) {
   // Código de influencer: suma puntos cuando se entregue; el piloto gana lo de un envío sin descuento
   if (desc.influencer_id) db.prepare('UPDATE envios SET influencer_id = ?, influencer_puntos = ?, ganancia_acordada = ? WHERE id = ?').run(desc.influencer_id, puntosPorUso(), gananciaPiloto(c.precio), id);
   const codigoCorto = codigoCortoEnvio(id);
+  // Envío suelto con cobro: si quien manda lo pide, el piloto le lleva el dinero cobrado a donde recogió el paquete
+  if (body.devolver_cobro === true && !body._lote_sede_id && Number(d.cobro_destinatario) > 0) db.prepare('UPDATE envios SET devolver_cobro = 1 WHERE id = ?').run(id);
   if (body._extras && body._extras.length) guardarExtras(id, body._extras);
   // Los cargos pendientes del cliente (cancelación, devolución, sede) se cobran junto con este envío
   const extra = sumarCargosPendientes(u.id, id);
@@ -2796,7 +2810,7 @@ ruta('GET', '/api/admin/alertas', ({ req }) => { requiereStaff(req); return { al
 // más el cobro a quien recibe cuando él lo entregó (si se retiró en la sede, lo cobró la oficina)
 const SQL_EFECTIVO = `(CASE WHEN e.estado != 'cancelado' AND e.metodo_pago = 'efectivo' THEN e.precio + e.cargos_extra ELSE 0 END
   + CASE WHEN e.estado = 'entregado' AND e.sede_llegada IS NULL AND e.metodo_pago = 'recibe' THEN e.precio ELSE 0 END
-  + CASE WHEN e.estado = 'entregado' AND e.sede_llegada IS NULL THEN e.cobro_destinatario ELSE 0 END)`;
+  + CASE WHEN e.estado = 'entregado' AND e.sede_llegada IS NULL AND e.cobro_devuelto_en IS NULL THEN e.cobro_destinatario ELSE 0 END)`;
 ruta('GET', '/api/admin/caja', ({ req }) => {
   requiereRol(req, 'admin');
   const pilotos = db.prepare(`SELECT u.id, u.nombre, u.telefono,
@@ -4967,7 +4981,7 @@ function carpetaSalida(c, conPedidos = false) {
 // Cuentas con la tienda: lo cobrado de sus productos (menos la comisión) menos los envíos que ella ya le cobró a sus clientes.
 // Si da negativo, la tienda le debe a Vaelo (saldo).
 // Lo que Vaelo le debe a la tienda por cada envío. Un paquete que la tienda retiró en la sede no se le cobró a nadie: ahí no hay producto que entregarle
-const SQL_COBRO_HECHO = 'e.cobro_destinatario > 0 AND e.sede_llegada IS NULL';
+const SQL_COBRO_HECHO = 'e.cobro_destinatario > 0 AND e.sede_llegada IS NULL AND e.cobro_devuelto_en IS NULL';
 const SQL_ENVIO_TIENDA = "e.metodo_pago = 'tienda' AND e.sede_llegada IS NULL";   // si no se entregó, se cobra como intento fallido (cargo)
 const SQL_NETO_TIENDA = `(CASE WHEN ${SQL_COBRO_HECHO} THEN e.cobro_destinatario - e.comision_cobro ELSE 0 END - CASE WHEN ${SQL_ENVIO_TIENDA} THEN e.precio ELSE 0 END)`;
 const SQL_CUENTA_TIENDA = `e.estado = 'entregado' AND ((${SQL_COBRO_HECHO}) OR (${SQL_ENVIO_TIENDA}))`;

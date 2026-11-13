@@ -653,6 +653,8 @@ db.exec(`
 agregarColumnas('usuarios', [['plan_id', 'INTEGER'], ['condiciones_propias', 'TEXT'], ['condiciones_vence', 'TEXT'], ['condiciones_nota', 'TEXT']]);
 agregarColumnas('pedidos_empresa', [['precio_fijado', 'REAL'], ['precio_fijado_pref', 'INTEGER'], ['precio_fijado_clave', 'TEXT']]);
 agregarColumnas('envios', [['comision_cobro', 'REAL NOT NULL DEFAULT 0']]);
+// Envío suelto con cobro: el piloto le lleva el dinero cobrado a quien mandó el paquete (al lugar donde lo recogió)
+agregarColumnas('envios', [['devolver_cobro', 'INTEGER NOT NULL DEFAULT 0'], ['cobro_devuelto_en', 'TEXT']]);
 db.prepare("INSERT OR IGNORE INTO planes (clave, nombre, descripcion) VALUES ('minorista', 'Minorista', 'Tiendas de lives y ventas por redes')").run();
 db.prepare("INSERT OR IGNORE INTO planes (clave, nombre, descripcion) VALUES ('empresa', 'Empresa', 'Empresas con contrato')").run();
 // Recordatorios de efectivo al piloto (qué avisos ya se mandaron de la tanda actual) y monto desde el que se le sugiere pasar a la sede

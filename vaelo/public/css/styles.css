@@ -1750,3 +1750,8 @@ fieldset { min-width: 0; } .recientes { max-width: 100%; min-width: 0; }
 .recogida-empresa.resaltar { outline: 3px solid var(--azul); outline-offset: 3px; }
 .insignia-gris { margin-left: .35rem; padding: .05rem .45rem; border-radius: 999px; background: var(--gris); color: var(--suave); font-size: .75rem; font-weight: 700; font-variant-numeric: tabular-nums; }
 #clientes-sub { margin-bottom: .8rem; }
+/* Piloto: dinero por llevar al cliente que mandó el paquete */
+.cobros-llevar { border: 2px solid var(--cinta); margin-bottom: 1rem; }
+.cobros-llevar h2 { font-size: 1.3rem; }
+.cobro-llevar { display: grid; gap: .4rem; padding: .7rem 0; border-top: 1px solid var(--linea); }
+.cobro-llevar .navegar { display: flex; flex-wrap: wrap; gap: .5rem; }

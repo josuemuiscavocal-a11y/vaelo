@@ -1774,3 +1774,22 @@ test('entrega fallida de una tienda: la tienda paga el intento, la bodega y la n
   assert.equal(cp.saldo, 0); assert.equal(cp.saldo_vencido, false);
   assert.equal((await t('POST', `/api/empresa/carpetas/${B.c}/enviar`, { modo: 'una_moto', recogida: 'sede' })).status, 201);
 });
+
+test('envío suelto con cobro: el piloto le lleva el dinero a quien mandó el paquete', async () => {
+  const r = await ana('POST', '/api/envios', { vehiculo_id: 1, peso: 2, origen_zona: 'Zona 1', destino_zona: 'Zona 16', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng,
+    destino_nombre: 'Luis', destino_telefono: '55554444', destino_direccion: 'x', metodo_pago: 'efectivo', foto_paquete: FOTO, cobro_destinatario: 150, devolver_cobro: true });
+  assert.equal(r.status, 201, JSON.stringify(r.j));
+  assert.equal(fila(r.j.id).devolver_cobro, 1);
+  db.prepare("UPDATE envios SET mensajero_id = ?, estado = 'entregado', entregado_en = datetime('now'), piloto_cerro_en = datetime('now', '-3 days') WHERE id = ?").run(pilotoId, r.j.id);
+  const lista = (await piloto('GET', '/api/piloto/envios')).j.envios;
+  assert.ok(lista.some((e) => e.id === r.j.id && e.devolver_cobro === 1), 'el piloto lo ve aunque ya cerró la entrega');
+  assert.equal((await ana('POST', `/api/piloto/envios/${r.j.id}/cobro-devuelto`, {})).status >= 400, true, 'solo el piloto');
+  assert.equal((await piloto('POST', `/api/piloto/envios/${r.j.id}/cobro-devuelto`, {})).status, 200);
+  assert.ok(fila(r.j.id).cobro_devuelto_en);
+  assert.ok(!(await piloto('GET', '/api/piloto/envios')).j.envios.some((e) => e.id === r.j.id), 'ya no aparece por llevar');
+  // Sin pedirlo, el cobro se queda como siempre (lo entrega Vaelo)
+  const r2 = await ana('POST', '/api/envios', { vehiculo_id: 1, peso: 2, origen_zona: 'Zona 1', destino_zona: 'Zona 16', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng,
+    destino_nombre: 'Luis', destino_telefono: '55554444', destino_direccion: 'x', metodo_pago: 'efectivo', foto_paquete: FOTO, cobro_destinatario: 80 });
+  assert.equal(fila(r2.j.id).devolver_cobro, 0);
+  await ana('POST', `/api/envios/${r2.j.id}/cancelar`, {});
+});

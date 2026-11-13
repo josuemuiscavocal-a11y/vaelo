@@ -131,6 +131,13 @@
               <div class="campo"><label for="cobro_destinatario">Cobrar a quien recibe (Q) <span class="ayuda">Si vendes en línea; deja vacío si no aplica</span></label><input id="cobro_destinatario" type="number" min="0" step="0.01" inputmode="decimal" placeholder="0.00"></div>
               <div class="campo"><label for="notas">Indicaciones para el mensajero <span class="ayuda">Opcional</span></label><input id="notas" maxlength="300" placeholder="Llamar al llegar, dejar en garita…"></div>
             </div>
+            <div class="campo" id="campo-devolver" hidden>
+              <label>¿Cómo recibes el dinero que cobra el piloto?</label>
+              <div class="opciones" role="radiogroup" aria-label="Cómo recibes el cobro">
+                <label class="opcion"><input type="radio" name="devolver_cobro" value="si" checked><span>El piloto me lo trae<small>Después de entregar, te lleva el dinero a donde recogió el paquete</small></span></label>
+                <label class="opcion"><input type="radio" name="devolver_cobro" value="no"><span>Me lo entrega Vaelo<small>Se junta con tus cobros y lo recibes en la sede</small></span></label>
+              </div>
+            </div>
           </fieldset>
 
           <div class="resumen-precio"><span><span id="resumen-titulo">Precio del envío</span><span class="desglose" id="desglose"></span><span class="desglose" id="desglose-cargos"></span></span><span class="precio-final"><del id="precio-antes"></del><strong id="precio" aria-live="polite">—</strong></span></div>
@@ -807,7 +814,9 @@
           el('div', {}, el('span', { text: 'Pago' }), PAGOS[e.metodo_pago] || e.metodo_pago),
           e.cargos_extra > 0 ? el('div', {}, el('span', { text: 'Cargos pendientes incluidos' }), dinero(e.cargos_extra)) : null,
           e.paquetes > 1 ? el('div', {}, el('span', { text: 'Paquetes' }), `${e.paquetes} para la misma dirección`) : null,
-          Number(e.cobro_destinatario) > 0 ? el('div', {}, el('span', { text: 'Cobrar al recibir' }), dinero(e.cobro_destinatario)) : null),
+          Number(e.cobro_destinatario) > 0 ? el('div', {}, el('span', { text: 'Cobrar al recibir' }), dinero(e.cobro_destinatario),
+            e.devolver_cobro ? el('small', { style: 'display:block', text: e.cobro_devuelto_en ? `El piloto ya te entregó este dinero (${fecha(e.cobro_devuelto_en)}).`
+              : e.estado === 'entregado' ? 'El piloto ya cobró y va a llevarte el dinero a donde recogió el paquete.' : 'Después de entregar, el piloto te lleva este dinero a donde recogió el paquete.' }) : null) : null),
         e.estado === 'entregado' ? pruebaEntrega(e) : '',
         bloqueReclamo(e, datos, recargar),
         e.estado === 'devuelto' ? el('p', { class: 'mensaje exito' }, 'Devuelto a ', el('strong', { text: e.devuelto_a || '' }), e.devuelto_en ? ` el ${fecha(e.devuelto_en)}.` : '.') : '',
@@ -1003,6 +1012,7 @@
             descripcion: f.descripcion.value, origen_telefono: f.origen_telefono.value, origen_direccion: f.origen_direccion.value,
             destino_nombre: f.destino_nombre.value, destino_telefono: f.destino_telefono.value, destino_direccion: f.destino_direccion.value,
             cobro_destinatario: f.cobro_destinatario.value, metodo_pago: f.metodo_pago.value, notas: f.notas.value, foto_paquete: fotoPaquete,
+            devolver_cobro: Number(f.cobro_destinatario.value) > 0 && (document.querySelector('input[name=devolver_cobro]:checked')?.value || 'si') === 'si',
           } });
           if ($('guardar-destino').value) cargarDirecciones();
           limpiarEnvioActual(); cargarCargos();
@@ -1097,6 +1107,8 @@
           el('a', { href: `https://wa.me/${whatsappPagos}?text=${encodeURIComponent('Hola Vaelo, quiero cotizar un flete en ' + cfg.fletes[0].toLowerCase() + '. Voy a llevar: ')}`, target: '_blank', rel: 'noopener', text: 'Escríbenos por WhatsApp' }),
           ': primero coordinamos qué llevas y te damos el precio.');
       }
+      const verDevolver = () => { $('campo-devolver').hidden = !(Number($('cobro_destinatario').value) > 0); };
+      $('cobro_destinatario').addEventListener('input', verDevolver); verDevolver();
       $('foto_paquete').addEventListener('change', () => {
         const f = $('foto_paquete').files[0];
         if (f) { $('vista-paquete').src = URL.createObjectURL(f); $('vista-paquete').hidden = false; $('foto-paquete-vacio').hidden = true; }
