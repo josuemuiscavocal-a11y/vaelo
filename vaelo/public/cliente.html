@@ -45,13 +45,14 @@
       <section id="panel-nuevo" role="tabpanel" aria-labelledby="tab-nuevo">
         <form id="form-envio" class="bloque" novalidate>
           <div id="msg-envio" class="mensaje" role="alert"></div>
-          <fieldset>
+          <div id="pasos-envio"></div>
+          <fieldset data-paso="1">
             <legend>¿En qué lo enviamos?</legend>
             <div class="vehiculos" id="vehiculos" role="radiogroup" aria-label="Vehículo"></div>
             <p class="pista" id="aviso-flete" hidden></p>
           </fieldset>
 
-          <fieldset id="fs-paquete">
+          <fieldset id="fs-paquete" data-paso="1">
             <legend>El paquete</legend>
             <div class="titulo-envio1" id="titulo-paquete1" hidden><p class="paquete-num"><span>1</span> Envío 1</p><small class="ayuda">Quien lo recibe se llena más abajo, en "¿Quién lo recibe?"</small></div>
             <div class="fila">
@@ -76,7 +77,7 @@
             </button>
           </fieldset>
 
-          <fieldset id="fs-origen">
+          <fieldset id="fs-origen" data-paso="2">
             <legend>¿Dónde lo recogemos?</legend>
             <div class="opciones" role="radiogroup" aria-label="Quién entrega el paquete al piloto" id="opciones-origen">
               <label class="opcion"><input type="radio" name="origen_quien" value="cliente" checked><span>Yo lo entrego<small>El piloto llega a donde estás ahora</small></span></label>
@@ -91,7 +92,7 @@
             <p class="pista" id="pista-origen">Al enviar te pediremos tu ubicación. Deja Vaelo abierto hasta que el piloto recoja tu paquete: así te encuentra donde estés.</p>
           </fieldset>
 
-          <fieldset id="fs-destino">
+          <fieldset id="fs-destino" data-paso="2">
             <legend>¿Quién lo recibe?</legend>
             <div class="recientes" id="recientes" hidden><span class="etiqueta-campo">Enviar otra vez a</span><div class="recientes-lista" id="recientes-lista"></div></div>
             <div class="campo dir-guardada" hidden><label for="dir-destino">Usar un contacto guardado</label><select id="dir-destino"></select></div>
@@ -107,7 +108,7 @@
             <div class="campo"><label for="guardar-destino">Guardar este contacto como <span class="ayuda">Opcional, ej. Luis oficina</span></label><input id="guardar-destino" maxlength="40"></div>
           </fieldset>
 
-          <fieldset>
+          <fieldset data-paso="3">
             <legend>¿Cuándo lo recogemos?</legend>
             <div class="opciones" role="radiogroup" aria-label="Cuándo">
               <label class="opcion"><input type="radio" name="cuando" value="ahora" checked><span>Lo antes posible<small>Buscamos piloto de una vez</small></span></label>
@@ -116,7 +117,7 @@
             <div class="campo" id="campo-programado" hidden style="margin-top:.75rem"><label for="programado">Fecha y hora de recogida</label><input id="programado" type="datetime-local"></div>
           </fieldset>
 
-          <fieldset>
+          <fieldset data-paso="3">
             <legend>Pago y detalles</legend>
             <div class="campo">
               <div class="opciones" role="radiogroup" aria-label="Cómo pagas el envío">
@@ -140,9 +141,9 @@
             </div>
           </fieldset>
 
-          <div class="resumen-precio"><span><span id="resumen-titulo">Precio del envío</span><span class="desglose" id="desglose"></span><span class="desglose" id="desglose-cargos"></span></span><span class="precio-final"><del id="precio-antes"></del><strong id="precio" aria-live="polite">—</strong></span></div>
-          <p class="pista" style="margin:-.4rem 0 1rem">Al enviar aceptas los <a href="/terminos" target="_blank">términos del servicio</a>.</p>
-          <div class="botones-envio">
+          <div class="resumen-precio" data-paso="3"><span><span id="resumen-titulo">Precio del envío</span><span class="desglose" id="desglose"></span><span class="desglose" id="desglose-cargos"></span></span><span class="precio-final"><del id="precio-antes"></del><strong id="precio" aria-live="polite">—</strong></span></div>
+          <p class="pista" data-paso="3" style="margin:-.4rem 0 1rem">Al enviar aceptas los <a href="/terminos" target="_blank">términos del servicio</a>.</p>
+          <div class="botones-envio" data-paso="3">
             <button class="boton" type="submit" id="boton-enviar">Enviar paquete</button>
           </div>
         </form>
@@ -204,7 +205,7 @@
   <script src="/js/comun.js?v=20261109c"></script>
   <script src="/js/suave.js?v=20261111a"></script>
   <script src="/js/qr.js?v=1"></script>
-  <script src="/js/empresa.js?v=20261112a"></script>
+  <script src="/js/empresa.js?v=20261112b"></script>
   <script>
     const tarifaFueraDe = (id) => { const v = (cfg?.vehiculos || []).find((x) => String(x.id) === String(id)); return v ? Math.max(v.tarifa_zona, v.tarifa_base || 0) : 45; };
     let cfg = null, envios = [], selOrigen = null, selDestino = null, refresco = null;
@@ -350,22 +351,42 @@
       cargarEnvios(); cargarCargos();
     }
 
+    // Qué está pasando con el envío y qué le toca al cliente, en palabras simples
+    function queSigue(e) {
+      const quien = (e.destino_nombre || 'quien recibe').split(' ')[0];
+      const piloto = e.mensajero_nombre && e.asignacion === 'aceptado' ? e.mensajero_nombre.split(' ')[0] : '';
+      let t = '', clase = '';
+      if (e.estado === 'pendiente') {
+        if (!e.receptor_listo) { t = `Falta que ${quien} abra su enlace y comparta su ubicación. Toca «Mandar enlace».`; clase = 'toca'; }
+        else if (e.programado_para) t = `Programado: el piloto pasa por el paquete el ${fechaProgramada(e.programado_para)}.`;
+        else t = piloto ? `${piloto} va por tu paquete.` : 'Estamos buscando al piloto más cercano.';
+      } else if (e.estado === 'recogido' || e.estado === 'en_camino') t = `Tu paquete va en camino a ${quien}${piloto ? ` con ${piloto}` : ''}.`;
+      else if (e.estado === 'entregado') t = e.devolver_cobro && !e.cobro_devuelto_en && Number(e.cobro_destinatario) > 0 ? `Entregado. El piloto te lleva tu dinero (${dinero(e.cobro_destinatario)}).` : `Entregado a ${quien}.`;
+      else if (['fallido', 'devolviendo', 'a_sede', 'en_sede'].includes(e.estado)) { t = 'No se pudo entregar. Revisa abajo qué quieres hacer.'; clase = 'toca'; }
+      else return null;
+      return el('div', { class: 'que-sigue ' + clase, text: t });
+    }
+    let pasoEnvio = 1;
     function tarjetaEnvio(e) {
       const terminado = !ACTIVOS_CLI.includes(e.estado);
       const acciones = el('div', { class: 'acciones' },
         el('button', { class: 'boton chico', type: 'button', text: terminado ? 'Ver detalle' : 'Ver en el mapa', onclick: () => verDetalle(e.id) }),
-        e.estado !== 'cancelado' ? el('button', { class: 'boton borde chico', type: 'button', text: 'Guía', onclick: () => verGuia(e) }) : null,
+        e.estado !== 'cancelado' && e.codigo_corto ? el('button', { class: 'boton borde chico', type: 'button', text: 'Imprimir etiqueta', onclick: () => verGuia(e) }) : null,
         e.estado === 'entregado' && (!e.entregado_en || Date.now() - new Date(e.entregado_en.replace(' ', 'T') + 'Z') < 7 * 86400e3)
           ? el('button', { class: 'boton borde chico', type: 'button', text: 'Reportar un problema', title: 'Si tu paquete llegó dañado, incompleto o se perdió', onclick: async () => { await verDetalle(e.id); document.querySelector('#dlg .reclamo > button')?.click(); document.querySelector('#dlg .reclamo')?.scrollIntoView({ behavior: 'smooth', block: 'center' }); } }) : null,
         el('button', { class: 'boton borde chico', type: 'button', text: 'Enviar otra vez', title: `Mandar otro paquete a ${e.destino_nombre || 'esta persona'} con los mismos datos`, onclick: () => repetirEnvio(e) }));
       if (e.estado === 'pendiente') {
         acciones.append(el('button', { class: 'boton peligro chico', type: 'button', text: 'Cancelar envío', onclick: (ev) => cancelarEnvio(e, ev.target) }));
       }
+      if (e.estado === 'pendiente' && !e.receptor_listo)
+        acciones.prepend(el('button', { class: 'boton cinta chico', type: 'button', text: 'Mandar enlace', onclick: () => verDetalle(e.id) }));
       return el('article', { class: 'envio e-' + e.estado },
         el('div', {},
-          el('div', { class: 'guia' }, e.codigo_corto && e.estado !== 'cancelado' ? el('span', { class: 'codigo-paquete', title: 'Escríbelo en el paquete con marcador', text: e.codigo_corto }) : null, e.guia, e.fragil ? el('span', { class: 'etiqueta-pendiente', style: 'margin-left:.4rem', text: 'Frágil' }) : null),
+          el('div', { class: 'guia' }, e.codigo_corto && e.estado !== 'cancelado' ? el('span', { class: 'codigo-paquete', title: 'Escríbelo en el paquete con marcador', text: e.codigo_corto }) : null,
+            el('span', { text: 'Para ' + (e.destino_nombre || 'quien recibe') }), e.fragil ? el('span', { class: 'etiqueta-pendiente', style: 'margin-left:.4rem', text: 'Frágil' }) : null),
+          queSigue(e),
           e.codigo_corto && e.estado === 'pendiente' ? el('div', { class: 'pista codigo-pista', text: `Escribe ${e.codigo_corto} en el paquete con marcador y debajo el nombre de quien recibe. Si no tienes, el piloto lo escribe al recoger.` }) : null,
-          el('div', { class: 'detalle', text: `${e.vehiculo}, ${e.peso} lb. Para ${e.destino_nombre}, ${e.destino_zona}` }),
+          el('div', { class: 'detalle', text: `${e.vehiculo}, ${e.peso} lb${e.destino_zona ? ' · ' + e.destino_zona : ''}` }),
           el('div', { class: 'detalle', text: (e.programado_para && e.estado === 'pendiente' ? `Programado: ${fechaProgramada(e.programado_para)}` : fecha(e.creado)) + (e.mensajero_nombre && e.asignacion === 'aceptado' ? `. Piloto: ${e.mensajero_nombre.split(' ')[0]}` : '') })),
         el('div', { class: 'lado' }, chipEstado(e.estado),
           e.estado === 'pendiente' && !e.receptor_listo ? el('span', { class: 'receptor-estado no', text: 'Faltan ubicaciones' }) : null,
@@ -441,6 +462,7 @@
 
     // Código que quien recibe le da al piloto
     function cajaCodigo(e) {
+      return '';   // el código lo ve quien recibe en su enlace; a quien manda no se le muestra
       if (!e.codigo_entrega || ['entregado', 'cancelado'].includes(e.estado)) return '';
       return el('div', { class: 'codigo-entrega' }, el('div', {}, el('span', { text: 'Código de entrega' }), el('strong', { text: e.codigo_entrega })),
         el('p', { text: 'Quien recibe también lo ve en su enlace después de confirmar. El piloto se lo pedirá para entregar el paquete.' }));
@@ -454,7 +476,7 @@
         el('div', { class: 'prueba-fotos' }, e.tiene_foto_entrega ? ver('foto', 'Foto') : '', e.tiene_firma_entrega ? ver('firma', 'Firma') : ''));
     }
     // Enlace privado para quien recibe: confirma con su foto, comparte su ubicación y ve su código de entrega
-    const mensajeReceptor = (e) => `Hola ${e.destino_nombre.split(' ')[0]}, te envío un paquete con Vaelo (guía ${e.guia}). ` +
+    const mensajeReceptor = (e) => `Hola ${e.destino_nombre.split(' ')[0]}, te envío un paquete con Vaelo. ` +
       (e.metodo_pago === 'recibe' && e.precio ? `El envío lo pagas tú al recibir: ${dinero(e.precio)} en efectivo al piloto. ` : '') +
       `Abre este enlace y comparte tu ubicación para que el piloto te lo lleve a donde estés: ${location.origin}${e.receptor.enlace}`;
     function whatsappReceptor(e) {
@@ -1019,12 +1041,17 @@
           $('cupon').value = ''; $('cupon-msg').textContent = ''; f.origen_nombre.value = ''; f.origen_direccion.value = '';
           if (quien === 'tercero') f.origen_telefono.value = '';
           mostrarMensaje($('msg-envio'), '');
+          if (window.irPasoEnvio) window.irPasoEnvio(1, true);
           await celebrarPedido(r.guia, r.precio, r.codigo_entrega, r.exige_receptor, r.codigo_corto);
           cargarEnvios();
           abrirTab('lista');
           verDetalle(r.id);
         }
-      } catch (e) { mostrarMensaje($('msg-envio'), e.message); $('msg-envio').scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+      } catch (e) {
+        // Si el error es de un paso anterior, lleva al cliente a ese paso
+        if (window.irPasoEnvio) { if (/peso|foto|paquete/i.test(e.message)) window.irPasoEnvio(1, true); else if (/recibe|destino|recog|zona donde|entrega el paquete/i.test(e.message)) window.irPasoEnvio(2, true); }
+        mostrarMensaje($('msg-envio'), e.message); $('msg-envio').scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
       boton.disabled = false; boton.classList.remove('cargando'); pintarCaja();
     });
 
@@ -1107,6 +1134,62 @@
           el('a', { href: `https://wa.me/${whatsappPagos}?text=${encodeURIComponent('Hola Vaelo, quiero cotizar un flete en ' + cfg.fletes[0].toLowerCase() + '. Voy a llevar: ')}`, target: '_blank', rel: 'noopener', text: 'Escríbenos por WhatsApp' }),
           ': primero coordinamos qué llevas y te damos el precio.');
       }
+      // ---------- Formulario en 3 pasos: el paquete, de dónde a dónde, cuándo y pago ----------
+      Object.assign(AYUDA, {
+        envio_paquete: { titulo: 'Paso 1: el paquete', pasos: [
+          ['Elige moto o pickup', 'Moto para sobres y paquetes que caben en una mochila o caja pequeña. Pickup para cosas grandes.'],
+          ['Escribe el peso aproximado', 'En libras. No tiene que ser exacto.'],
+          ['Toma la foto del paquete', 'Ya empacado. Si algo pasa, con la foto lo comprobamos.'],
+        ], nota: '¿Vas a mandar a varias personas desde el mismo lugar? Toca «Agregar otro envío».' },
+        envio_lugares: { titulo: 'Paso 2: de dónde a dónde', pasos: [
+          ['¿Dónde lo recogemos?', 'Si tú entregas el paquete, el piloto llega a donde estás. Si lo entrega otra persona, le mandas un enlace.'],
+          ['¿Quién lo recibe?', 'Su nombre y su WhatsApp. No necesitas su dirección exacta.'],
+          ['Quien recibe comparte su ubicación', 'Al terminar te damos un enlace para mandárselo. Ahí comparte dónde está y el piloto llega directo.'],
+        ] },
+        envio_pago: { titulo: 'Paso 3: cuándo y pago', pasos: [
+          ['¿Cuándo lo recogemos?', '«Lo antes posible» o «Programar» para elegir el día y la hora.'],
+          ['¿Quién paga el envío?', 'Tú en efectivo al piloto, o tu cliente al recibir.'],
+          ['¿El piloto cobra tu producto?', 'Escribe cuánto te debe tu cliente por lo que compró. El piloto se lo cobra y te trae tu dinero, o lo recoges en Vaelo.'],
+          ['Toca «Enviar paquete»', 'Listo. Luego mandas el enlace a quien recibe.'],
+        ] },
+      });
+      const NOMBRES_PASO = ['El paquete', 'De dónde a dónde', 'Cuándo y pago'];
+      const AYUDA_PASO = ['envio_paquete', 'envio_lugares', 'envio_pago'];
+      const formEnvio = $('form-envio');
+      // Lo opcional queda guardado en «Más opciones» para que el formulario se vea corto
+      const mas = el('details', { class: 'mas-opciones', 'data-paso': '3' }, el('summary', { text: 'Más opciones: cupón e indicaciones para el piloto' }));
+      mas.append($('cupon').closest('.campo'), $('notas').closest('.campo'));
+      formEnvio.querySelector('.resumen-precio').before(mas);
+      const guardarContacto = $('guardar-destino').closest('.campo');
+      const masDestino = el('details', { class: 'mas-opciones' }, el('summary', { text: 'Guardar este contacto para la próxima' }), guardarContacto);
+      $('fs-destino').append(masDestino);
+      const navPasos = (n) => el('div', { class: 'nav-pasos', 'data-paso': String(n) },
+        n > 1 ? el('button', { class: 'boton borde', type: 'button', text: 'Atrás', onclick: () => irPaso(n - 1) }) : el('span'),
+        el('button', { class: 'boton cinta', type: 'button', text: 'Siguiente', onclick: () => irPaso(n + 1) }));
+      $('fs-paquete').after(navPasos(1));
+      $('fs-destino').after(navPasos(2));
+      const atras3 = el('button', { class: 'boton borde', type: 'button', text: 'Atrás', onclick: () => irPaso(2) });
+      formEnvio.querySelector('.botones-envio').prepend(atras3);
+      const faltaPaso = (n) => {
+        if (n === 1 && !(Number($('peso').value) > 0)) return ['Escribe el peso aproximado del paquete.', $('peso')];
+        if (n === 2 && !$('destino_nombre').value.trim()) return ['Escribe el nombre de quien recibe.', $('destino_nombre')];
+        if (n === 2 && $('destino_telefono').value.replace(/\D/g, '').length < 8) return ['Escribe el teléfono de quien recibe (8 dígitos).', $('destino_telefono')];
+        if (n === 2 && !$('destino_zona').value) return ['Elige la zona o municipio de quien recibe.', $('destino_zona')];
+        return null;
+      };
+      function irPaso(n, sinRevisar) {
+        if (!sinRevisar && n > pasoEnvio) { const f = faltaPaso(pasoEnvio); if (f) { mostrarMensaje($('msg-envio'), f[0]); f[1].focus(); return; } }
+        mostrarMensaje($('msg-envio'), '');
+        pasoEnvio = n;
+        formEnvio.querySelectorAll('[data-paso]').forEach((x) => { x.hidden = x.dataset.paso !== String(n); });
+        poner($('pasos-envio'), el('div', { class: 'pasos-form' },
+          el('ol', {}, NOMBRES_PASO.map((t, i) => el('li', { class: i + 1 === n ? 'actual' : i + 1 < n ? 'hecho' : '' },
+            el('button', { type: 'button', onclick: () => { if (i + 1 < n) irPaso(i + 1, true); } }, el('span', { class: 'paso-num', text: i + 1 < n ? '✓' : String(i + 1) }), el('span', { text: t }))))),
+          botonAyuda(AYUDA_PASO[n - 1])));
+        if (n > 1) $('pasos-envio').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      window.irPasoEnvio = irPaso;
+      irPaso(1, true);
       const verDevolver = () => { $('campo-devolver').hidden = !(Number($('cobro_destinatario').value) > 0); };
       $('cobro_destinatario').addEventListener('input', verDevolver); verDevolver();
       $('foto_paquete').addEventListener('change', () => {
@@ -1123,7 +1206,7 @@
       new MutationObserver(copiar).observe($('boton-enviar'), { childList: true, attributes: true, subtree: true });
       copiar();
       let botonVisible = false, formVisible = false;
-      const ver = () => { barra.hidden = !formVisible || botonVisible || $('panel-nuevo').hidden; };
+      const ver = () => { barra.hidden = !formVisible || botonVisible || $('panel-nuevo').hidden || pasoEnvio !== 3; };
       new IntersectionObserver(([x]) => { botonVisible = x.isIntersecting; ver(); }).observe($('boton-enviar'));
       new IntersectionObserver(([x]) => { formVisible = x.isIntersecting; ver(); }).observe($('form-envio'));
       $('barra-boton').addEventListener('click', () => $('form-envio').requestSubmit());

@@ -2399,6 +2399,8 @@ function insertarEnvio(u, body, d, c, desc, programado, grupo = null) {
   const id = Number(r.lastInsertRowid);
   // Código de influencer: suma puntos cuando se entregue; el piloto gana lo de un envío sin descuento
   if (desc.influencer_id) db.prepare('UPDATE envios SET influencer_id = ?, influencer_puntos = ?, ganancia_acordada = ? WHERE id = ?').run(desc.influencer_id, puntosPorUso(), gananciaPiloto(c.precio), id);
+  // Si con este ya son 2 o más en curso, primero reciben código los que ya estaban (en orden) y luego este
+  for (const o of db.prepare("SELECT id FROM envios WHERE usuario_id = ? AND id != ? AND pedido_id IS NULL AND codigo_corto IS NULL AND estado = 'pendiente' ORDER BY id").all(u.id, id)) codigoCortoEnvio(o.id);
   const codigoCorto = codigoCortoEnvio(id);
   // Envío suelto con cobro: si quien manda lo pide, el piloto le lleva el dinero cobrado a donde recogió el paquete
   if (body.devolver_cobro === true && !body._lote_sede_id && Number(d.cobro_destinatario) > 0) db.prepare('UPDATE envios SET devolver_cobro = 1 WHERE id = ?').run(id);
@@ -4446,9 +4448,13 @@ function codigoCortoPedido(p) {
   return codigo;
 }
 // Envío de un cliente: sus iniciales y el siguiente número libre del día (LP-01, LP-02…)
+// Envío suelto: el código para escribir en el paquete solo hace falta cuando quien manda tiene 2 o más envíos en curso
+// (o un pedido con varios destinos). Con uno solo, el piloto lo reconoce por la guía y el cliente no tiene que escribir nada.
+const necesitaCodigoSuelto = (e) => !!e.grupo || db.prepare("SELECT COUNT(*) AS n FROM envios WHERE usuario_id = ? AND pedido_id IS NULL AND flete = 0 AND estado IN ('pendiente','recogido','en_camino')").get(e.usuario_id).n >= 2;
 function codigoCortoEnvio(envioId) {
-  const e = db.prepare('SELECT id, usuario_id, pedido_id, codigo_corto, creado FROM envios WHERE id = ?').get(envioId);
+  const e = db.prepare('SELECT id, usuario_id, pedido_id, codigo_corto, creado, estado, grupo FROM envios WHERE id = ?').get(envioId);
   if (!e || e.codigo_corto) return e?.codigo_corto || null;
+  if (!e.pedido_id && (e.estado !== 'pendiente' || !necesitaCodigoSuelto(e))) return null;
   if (e.pedido_id) {
     const p = db.prepare('SELECT * FROM pedidos_empresa WHERE id = ?').get(e.pedido_id);
     const c = codigoCortoPedido(p);

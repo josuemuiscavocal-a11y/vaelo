@@ -871,11 +871,12 @@ test('código corto para escribir en el paquete: por remitente y por día, sin r
   await lucia('POST', '/api/login', { email: 'codigos@prueba.com', password: 'clave-codigo-123' });
   const base = { vehiculo_id: 1, peso: 1, origen_zona: 'Zona 1', destino_zona: 'Zona 1', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng, metodo_pago: 'efectivo', destino_telefono: '55554444', foto_paquete: FOTO };
   const a = await lucia('POST', '/api/envios', { ...base, destino_nombre: 'Uno' });
-  assert.equal(a.status, 201, JSON.stringify(a.j)); assert.equal(a.j.codigo_corto, 'ML-01');
+  assert.equal(a.status, 201, JSON.stringify(a.j)); assert.equal(a.j.codigo_corto, null, 'con un solo envío no hace falta escribir código');
   const caja = await lucia('POST', '/api/envios/caja', { vehiculo_id: 1, metodo_pago: 'efectivo', origen_quien: 'cliente', origen_zona: 'Zona 1', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng,
     envios: [{ peso: 1, destino_nombre: 'Dos', destino_telefono: '55554444', destino_zona: 'Zona 1', foto_paquete: FOTO }, { peso: 1, destino_nombre: 'Tres', destino_telefono: '55554445', destino_zona: 'Zona 1', foto_paquete: FOTO }] });
   assert.equal(caja.status, 201, JSON.stringify(caja.j));
   assert.deepEqual(caja.j.envios.map((x) => x.codigo_corto), ['ML-02', 'ML-03']);
+  assert.equal(db.prepare('SELECT codigo_corto FROM envios WHERE id = ?').get(a.j.id).codigo_corto, 'ML-01', 'al ser varios, el primero también recibe código');
   // El piloto y la administración lo ven; se puede buscar por el código
   const lista = (await admin('GET', '/api/admin/envios?q=ml-02')).j.envios;
   assert.ok(lista.some((x) => x.codigo_corto === 'ML-02'));
@@ -924,11 +925,15 @@ test('códigos sin cruzarse: clientes con las mismas iniciales, empresa con las 
     metodo_pago: 'efectivo', destino_nombre: 'Recibe', destino_telefono: '55554444', foto_paquete: FOTO });
   // Un paquete de ayer, con ZQ-01, que sigue en camino
   const ayer = await envio(a); assert.equal(ayer.status, 201, JSON.stringify(ayer.j));
+  const otro = await envio(a); assert.equal(otro.status, 201);   // con dos en curso ya llevan código
   db.prepare("UPDATE envios SET creado = datetime('now', '-1 day'), estado = 'en_camino' WHERE id = ?").run(ayer.j.id);
+  db.prepare("UPDATE envios SET estado = 'cancelado' WHERE id = ?").run(otro.j.id);
   assert.equal(db.prepare('SELECT codigo_corto FROM envios WHERE id = ?').get(ayer.j.id).codigo_corto, 'ZQ-01');
   // Hoy: los tres clientes mandan envíos intercalados y la empresa registra pedidos
   const codigos = [];
-  for (let i = 0; i < 4; i++) for (const q of [a, b, c]) { const r = await envio(q); assert.equal(r.status, 201); codigos.push(r.j.codigo_corto); }
+  const ids = [];
+  for (let i = 0; i < 4; i++) for (const q of [a, b, c]) { const r = await envio(q); assert.equal(r.status, 201); ids.push(r.j.id); }
+  codigos.push(...ids.map((id) => db.prepare('SELECT codigo_corto FROM envios WHERE id = ?').get(id).codigo_corto));
   const dia = new Date(Date.now() - 6 * 3600_000).toISOString().slice(0, 10);
   const carpeta = (await emp('POST', '/api/empresa/carpetas', { dia })).j.carpeta;
   for (let i = 0; i < 5; i++) assert.equal((await emp('POST', `/api/empresa/carpetas/${carpeta.id}/pedidos`, { descripcion: 'Zapatos ' + i, tamano: 'pequeno', cliente_nombre: 'Comprador ' + i, cliente_telefono: '5555123' + i })).status, 201);
@@ -1062,8 +1067,9 @@ test('códigos de tiendas minoristas: dos tiendas y un cliente con las mismas in
     assert.equal((await t('POST', `/api/empresa/carpetas/${c.id}/pedidos`, { descripcion: 'Blusa ' + i, tamano: 'pequeno', cliente_nombre: 'Clienta ' + i, cliente_telefono: '5555321' + i })).status, 201);
     const r = await p('POST', '/api/envios', { vehiculo_id: 1, peso: 1, origen_zona: 'Zona 1', destino_zona: 'Zona 1', origen_lat: ZONA1.lat, origen_lng: ZONA1.lng,
       metodo_pago: 'efectivo', destino_nombre: 'Recibe', destino_telefono: '55554444', foto_paquete: FOTO });
-    assert.equal(r.status, 201); codigos.push(r.j.codigo_corto);
+    assert.equal(r.status, 201); codigos.push(r.j.id);
   }
+  for (let i = 0; i < codigos.length; i++) codigos[i] = db.prepare('SELECT codigo_corto FROM envios WHERE id = ?').get(codigos[i]).codigo_corto;
   for (const t of [t1, t2, t3]) for (const c of (await t('GET', '/api/empresa/carpetas')).j.abiertas) codigos.push(...(await t('GET', `/api/empresa/carpetas/${c.id}`)).j.carpeta.pedidos.map((x) => x.codigo_corto));
   assert.equal(codigos.length, 12);
   assert.ok(codigos.every((x) => /^RM-\d{2,}$/.test(x)), codigos.join(','));

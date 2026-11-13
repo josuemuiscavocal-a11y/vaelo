@@ -645,15 +645,14 @@ function celebrarPedido(guia, precio, codigo, exigeReceptor, codigoCorto) {
     const cerrar = () => { capa.classList.add('saliendo'); setTimeout(() => { capa.remove(); listo(); }, sinAnimacion() ? 0 : 300); clearTimeout(reloj); };
     const caja = el('div', { class: 'celebra-caja' });
     caja.innerHTML = svg;
-    caja.append(el('h2', { text: '¡Pedido recibido!' }),
-      el('p', {}, 'Tu número de guía es ', el('strong', { class: 'celebra-guia', text: guia })),
+    // Pantalla simple: listo, el total y lo único que falta hacer (el código del paquete solo si tiene varios envíos)
+    caja.append(el('h2', { text: '¡Listo, envío pedido!' }),
       precio != null ? el('p', { class: 'celebra-precio', text: `Total ${dinero(precio)}` }) : '',
       codigoCorto ? el('div', { class: 'codigo-paquete-aviso' }, el('span', { text: 'Escribe en el paquete' }), el('strong', { text: codigoCorto }),
         el('small', { text: 'Con marcador, grande, y debajo el nombre de quien recibe. Si no tienes, el piloto lo escribe al recoger.' })) : '',
-      codigo ? el('p', { class: 'celebra-codigo' }, 'Código de entrega ', el('strong', { text: codigo }), el('br'), el('small', { text: 'Quien recibe lo verá en su enlace. El piloto se lo pedirá para entregar.' })) : '',
       el('div', { class: 'celebra-ruta-lugar' }),
-      el('p', { class: 'celebra-pista', text: exigeReceptor ? 'Ahora envía el enlace a quien recibe. Cuando comparta su ubicación, buscamos al piloto más cercano.' : 'Estamos buscando al piloto más cercano.' }),
-      el('button', { class: 'boton cinta', type: 'button', text: exigeReceptor ? 'Enviar los enlaces' : 'Ver mi envío', onclick: cerrar }));
+      el('p', { class: 'celebra-pista', text: exigeReceptor ? 'Solo falta una cosa: manda el enlace a quien recibe para que comparta su ubicación.' : 'Estamos buscando al piloto más cercano.' }),
+      el('button', { class: 'boton cinta boton-grande', type: 'button', text: exigeReceptor ? 'Mandar enlace a quien recibe' : 'Ver mi envío', onclick: cerrar }));
     caja.querySelector('.celebra-ruta-lugar').outerHTML = ruta;
     capa.append(caja);
     document.body.append(capa);

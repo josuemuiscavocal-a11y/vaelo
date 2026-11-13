@@ -1755,3 +1755,22 @@ fieldset { min-width: 0; } .recientes { max-width: 100%; min-width: 0; }
 .cobros-llevar h2 { font-size: 1.3rem; }
 .cobro-llevar { display: grid; gap: .4rem; padding: .7rem 0; border-top: 1px solid var(--linea); }
 .cobro-llevar .navegar { display: flex; flex-wrap: wrap; gap: .5rem; }
+/* Mis envíos: qué está pasando, en palabras simples */
+.que-sigue { margin: .35rem 0; padding: .45rem .7rem; border-radius: 8px; background: var(--gris); font-size: .93rem; }
+.que-sigue.toca { background: #fff4cc; font-weight: 600; }
+/* Formulario de envío en 3 pasos */
+.pasos-form { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; margin-bottom: 1rem; }
+.pasos-form ol { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: .4rem; }
+.pasos-form li button { display: inline-flex; align-items: center; gap: .4rem; border: 0; background: none; font: inherit; color: var(--suave); padding: .2rem .4rem; cursor: default; }
+.pasos-form li.hecho button { cursor: pointer; color: var(--ok); }
+.pasos-form li.actual button { color: var(--azul-hondo); font-weight: 800; }
+.paso-num { display: grid; place-items: center; width: 1.7rem; height: 1.7rem; border-radius: 50%; border: 1.5px solid var(--linea); font-weight: 800; font-size: .85rem; }
+.pasos-form li.actual .paso-num { background: var(--cinta); border-color: var(--cinta); color: var(--azul-hondo); }
+.pasos-form li.hecho .paso-num { background: var(--ok); border-color: var(--ok); color: #fff; }
+.nav-pasos { display: flex; justify-content: space-between; gap: .6rem; margin-top: 1rem; }
+.nav-pasos .boton { min-width: 8rem; }
+.mas-opciones { margin: .8rem 0; border: 1.5px solid var(--linea); border-radius: var(--radio); padding: .6rem .9rem; }
+.mas-opciones summary { cursor: pointer; font-weight: 700; color: var(--azul); }
+.mas-opciones[open] summary { margin-bottom: .6rem; }
+.botones-envio { display: flex; gap: .6rem; }
+.botones-envio #boton-enviar { flex: 1; }
