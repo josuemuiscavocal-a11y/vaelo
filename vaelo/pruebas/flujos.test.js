@@ -1804,3 +1804,12 @@ test('avisos de error: una pantalla rota se puede reportar sin cuenta y sin romp
   const r = await cliente()('POST', '/api/error-pantalla', { mensaje: 'x is not a function', detalle: 'at prueba', pagina: '/tienda' });
   assert.equal(r.status, 200); assert.equal(r.j.ok, true);
 });
+
+test('la administración confirma el correo de un cliente a mano', async () => {
+  const t = cliente();
+  await t('POST', '/api/registro', { nombre: 'Sin Correo', email: 'sincorreo@prueba.com', telefono: '55558888', password: 'clave-de-prueba-123', acepto_terminos: true }, { 'x-real-ip': '10.8.8.8' });
+  const id = db.prepare("SELECT id FROM usuarios WHERE email = 'sincorreo@prueba.com'").get().id;
+  assert.equal((await t('POST', `/api/admin/clientes/${id}/confirmar-correo`, {})).status, 403, 'un cliente no puede');
+  assert.equal((await admin('POST', `/api/admin/clientes/${id}/confirmar-correo`, {})).status, 200);
+  assert.equal(db.prepare('SELECT email_verificado FROM usuarios WHERE id = ?').get(id).email_verificado, 1);
+});

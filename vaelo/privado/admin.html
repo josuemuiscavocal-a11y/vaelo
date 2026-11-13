@@ -1758,7 +1758,14 @@ null))));
       poner($('tabla-clientes'), ...lista.map(c => {
         return el('tr', { class: 'clic', tabindex: 0, onclick: () => revisarCliente(c.id), onkeydown: (ev) => { if (ev.key === 'Enter') revisarCliente(c.id); } },
           el('td', {}, el('strong', { text: c.nombre }), c.tipo_cuenta === 'empresa' || c.tipo_cuenta === 'minorista' ? [el('br'), el('span', { class: 'etiqueta-azul', text: c.empresa_nombre || 'Empresa' })] : ''),
-          el('td', {}, el('a', { href: 'mailto:' + c.email, text: c.email, onclick: (ev) => ev.stopPropagation() }), el('br'), sub(c.email_verificado ? 'Correo confirmado' : 'Correo sin confirmar')),
+          el('td', {}, el('a', { href: 'mailto:' + c.email, text: c.email, onclick: (ev) => ev.stopPropagation() }), el('br'), c.email_verificado ? sub('Correo confirmado')
+            : [sub('Correo sin confirmar'), ' ', rolPanel === 'admin' ? el('button', { class: 'boton chico borde', type: 'button', text: 'Confirmar correo', onclick: async (ev) => {
+                ev.stopPropagation();
+                if (!confirm(`¿Confirmar el correo de ${c.nombre} (${c.email})?`)) return;
+                ev.target.disabled = true;
+                try { await api(`/api/admin/clientes/${c.id}/confirmar-correo`, { body: {} }); c.email_verificado = 1; pintarClientes(); }
+                catch (e) { alert(e.message); ev.target.disabled = false; }
+              } }) : null]),
           el('td', {}, c.telefono ? el('a', { href: 'https://wa.me/502' + c.telefono.replace(/\D/g, '').slice(-8), target: '_blank', rel: 'noopener', text: c.telefono, onclick: (ev) => ev.stopPropagation() }) : '—'),
           el('td', {}, el('span', { class: c.tipo_cuenta === 'personal' || !c.tipo_cuenta ? 'etiqueta-gris' : 'etiqueta-azul', text: TIPOS_CUENTA[c.tipo_cuenta] || 'Personal' }),
             !c.activo ? [' ', el('span', { class: 'etiqueta-pendiente', text: 'Bloqueada' })] : ''),

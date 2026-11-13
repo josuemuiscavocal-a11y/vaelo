@@ -1922,6 +1922,16 @@ ruta('GET', '/api/admin/envios/:id/recorrido', ({ req, params }) => {
 });
 
 // ---------- Administración: clientes ----------
+// La administración confirma a mano el correo de un cliente (por ejemplo, si no le llega el correo)
+ruta('POST', '/api/admin/clientes/:id/confirmar-correo', ({ req, params }) => {
+  requiereRol(req, 'admin');
+  const u = db.prepare("SELECT id, email_verificado FROM usuarios WHERE id = ? AND rol = 'cliente'").get(Number(params.id)) || falla(404, 'No encontramos ese cliente.');
+  if (!u.email_verificado) {
+    db.prepare('UPDATE usuarios SET email_verificado = 1 WHERE id = ?').run(u.id);
+    db.prepare('DELETE FROM tokens_correo WHERE usuario_id = ?').run(u.id);
+  }
+  return { ok: true };
+});
 ruta('GET', '/api/admin/clientes', ({ req }) => {
   const quien = requiereStaff(req);
   return { clientes: db.prepare(`
